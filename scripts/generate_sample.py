@@ -80,48 +80,47 @@ def main() -> None:
         repo.assign_reporters(session, match.id, [reporter.id, reporter2.id], admin.id)
 
         ratings = {
-            "Wojciech Szczęsny": (6.5, "Anotar en base de datos", "Correcto bajo palos y seguro en las acciones sencillas, sin asumir riesgos innecesarios."),
-            "Jules Koundé": (7.5, "Seguimiento recomendado", "Muy fiable en el duelo y rápido para corregir a campo abierto. Sostuvo bien la amplitud sin perder equilibrio."),
-            "Pau Cubarsí": (8.0, "Jugador interesante", "Superó la primera presión con pase vertical y defendió hacia delante con una serenidad muy destacable."),
-            "Ronald Araújo": (7.0, "Anotar en base de datos", "Dominante en el contacto y bien protegido en área, aunque menos limpio en la primera salida."),
-            "Alejandro Balde": (6.5, "Anotar en base de datos", "Aportó profundidad y velocidad, pero su influencia fue irregular cuando tuvo que decidir cerca del área."),
-            "Frenkie de Jong": (7.0, "Seguimiento recomendado", "Facilitó la salida y dio continuidad al juego, especialmente cuando recibió a la espalda de la primera línea."),
-            "Pedri": (8.8, "Prioridad de seguimiento", "Fue el futbolista que mejor interpretó el partido: recibió entre líneas, aceleró con ventaja y dio pausa cuando el equipo la necesitó."),
-            "Dani Olmo": (7.6, "Jugador interesante", "Se movió con inteligencia entre mediocentro y central y fue una amenaza constante cuando pudo girarse."),
-            "Lamine Yamal": (8.3, "Prioridad de seguimiento", "Generó desequilibrio constante desde la derecha y obligó a activar ayudas en cada recepción."),
-            "Raphinha": (7.2, "Seguimiento recomendado", "Profundidad, repetición de esfuerzos y capacidad para aparecer en zonas de remate, aunque perdió precisión en varias asociaciones."),
-            "Robert Lewandowski": (6.7, "Anotar en base de datos", "Fijó centrales y ocupó bien el área, pero tuvo poca continuidad fuera de las acciones de finalización."),
-            "Ferran Torres": (6.8, "Anotar en base de datos", "Entró con energía, atacó el espacio y dio una amenaza distinta en el tramo final."),
-            "Fermín López": (7.1, "Seguimiento recomendado", "Aumentó el ritmo del centro del campo y atacó con decisión el espacio desde segunda línea."),
-            "Pau Víctor": (None, None, "Pocos minutos para una valoración concluyente."),
+            "Wojciech Szczęsny": (6.5, "Correcto bajo palos y seguro en las acciones sencillas."),
+            "Jules Koundé": (7.5, "Muy fiable en el duelo y rápido para corregir a campo abierto."),
+            "Pau Cubarsí": (8.0, "Superó la primera presión con pase vertical y defendió hacia delante con serenidad."),
+            "Ronald Araújo": (7.0, "Dominante en el contacto y bien protegido en área."),
+            "Alejandro Balde": (6.5, "Aportó profundidad y velocidad, aunque decidió de forma irregular."),
+            "Frenkie de Jong": (7.0, "Facilitó la salida y dio continuidad al juego."),
+            "Pedri": (8.8, "Fue quien mejor interpretó el partido: recibió entre líneas, aceleró y dio pausa."),
+            "Dani Olmo": (7.5, "Se movió con inteligencia entre mediocentro y central."),
+            "Lamine Yamal": (8.5, "Generó desequilibrio constante desde la derecha."),
+            "Raphinha": (7.0, "Aportó profundidad y repetición de esfuerzos."),
+            "Robert Lewandowski": (6.5, "Fijó centrales y ocupó bien el área."),
+            "Ferran Torres": (6.5, "Entró con energía y atacó el espacio."),
+            "Fermín López": (7.0, "Aumentó el ritmo y llegó desde segunda línea."),
+            "Pau Víctor": (0.0, "Pocos minutos para una valoración concluyente."),
         }
 
         def complete_report(user, adjustment: float):
             report = repo.get_or_create_report(session, match.id, user.id)
-            parts = {p.player.full_name: p for p in repo.get_participations(session, match.id, rival.id)}
-            for name, (rating, recommendation, note) in ratings.items():
-                p = parts[name]
-                if rating is None:
-                    repo.upsert_evaluation(session, report.id, p.player_id, rival.id, p.id, actor_id=user.id, observation_status="insufficient", short_note=note, pdf_include=False)
-                    continue
-                value = min(10, max(1, rating + adjustment))
-                advanced = name in {"Jules Koundé", "Pau Cubarsí", "Pedri", "Lamine Yamal", "Dani Olmo"}
+            rival_parts = {p.player.full_name: p for p in repo.get_participations(session, match.id, rival.id)}
+            for name, (rating, note) in ratings.items():
+                p = rival_parts[name]
+                value = max(0.0, min(10.0, rating + adjustment)) if rating else 0.0
                 repo.upsert_evaluation(
                     session, report.id, p.player_id, rival.id, p.id, actor_id=user.id,
-                    observation_status="evaluated", general_rating=value,
-                    technical_rating=(value + 0.3 if advanced else None), tactical_rating=(value if advanced else None), physical_rating=(value - 0.4 if advanced else None),
-                    recommendation=recommendation, confidence="Alta" if advanced else "Media", short_note=note,
-                    strengths=["Técnica", "Visión"] if name == "Pedri" else ["Desborde", "Velocidad"] if name == "Lamine Yamal" else ["Anticipación", "Salida de balón"] if name == "Pau Cubarsí" else [],
-                    standout=name in {"Pedri", "Lamine Yamal"}, pdf_include=name not in {"Wojciech Szczęsny", "Alejandro Balde", "Robert Lewandowski", "Ferran Torres", "Pau Víctor"},
-                    detailed_note=("Conviene repetir la observación ante un contexto de mayor exigencia defensiva para confirmar cómo responde cuando debe proteger más metros a su espalda y tomar decisiones bajo una presión más agresiva." if advanced else None),
+                    observation_status="evaluated" if value > 0 else "not_observed",
+                    general_rating=value if value > 0 else None,
+                    short_note=note, standout=value >= 8.0, pdf_include=True,
                 )
-            repo.save_report_summary(
-                session, report.id, rival_level="Alto",
-                opponent_overview="Rival con capacidad para controlar el partido en campo contrario y varios perfiles diferenciales. Sus interiores encontraron ventajas entre líneas y los extremos obligaron a defender con ayudas continuas. El equipo mantuvo una identidad reconocible incluso tras los cambios.",
-                own_team_note="Nuestro equipo compitió bien, pero sufrió cuando el rival consiguió fijar por dentro y liberar a los extremos.",
-                key_takeaways="Pedri y Lamine Yamal fueron los perfiles más influyentes. Cubarsí dejó una impresión muy positiva por su salida de balón y Koundé confirmó un nivel alto de fiabilidad y polivalencia.",
-                standout_player_id=parts["Pedri"].player_id, actor_id=user.id,
-            )
+            own_parts = {p.player.full_name: p for p in repo.get_participations(session, match.id, own.id)}
+            for name, value, note in [
+                ("Thibaut Courtois", 7.0, "Seguro en las intervenciones que tuvo."),
+                ("Federico Valverde", 7.5, "Sostuvo el ritmo del equipo durante todo el partido."),
+                ("Vinícius Júnior", 8.0, "Fue el jugador propio más desequilibrante."),
+            ]:
+                p = own_parts[name]
+                repo.upsert_evaluation(
+                    session, report.id, p.player_id, own.id, p.id, actor_id=user.id,
+                    observation_status="evaluated", general_rating=value, short_note=note,
+                    standout=value >= 8.0, pdf_include=True,
+                )
+            repo.sync_report_standout(session, report.id, user.id)
             submitted, version = repo.submit_report(session, report.id, user.id)
             repo.approve_report(session, report.id, director.id, "Informe validado para el archivo de dirección deportiva.")
             return report, version
@@ -130,9 +129,9 @@ def main() -> None:
         complete_report(reporter2, -0.2)
         sample_dir = ROOT / "sample"
         sample_dir.mkdir(exist_ok=True)
-        (sample_dir / "informe_demo_postmatch_scout_2_0_completo.pdf").write_bytes(generate_report_pdf(session, report.id, version=version.version, mode="full"))
-        (sample_dir / "informe_demo_postmatch_scout_2_0_ejecutivo.pdf").write_bytes(generate_report_pdf(session, report.id, version=version.version, mode="executive"))
-    print("PDF de muestra 2.0 generados.")
+        (sample_dir / "informe_demo_postmatch_scout_2_1_completo.pdf").write_bytes(generate_report_pdf(session, report.id, version=version.version, mode="full"))
+        (sample_dir / "informe_demo_postmatch_scout_2_1_ejecutivo.pdf").write_bytes(generate_report_pdf(session, report.id, version=version.version, mode="executive"))
+    print("PDF de muestra 2.1 generados.")
 
 
 if __name__ == "__main__":

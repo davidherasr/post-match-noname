@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "PostMatch Scout"
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 

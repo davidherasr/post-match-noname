@@ -423,10 +423,14 @@ def _kpi_table(payload: dict, styles: dict, primary: Color, dark: Color) -> Tabl
     if standout:
         player = standout["participation"].player
         standout_name = player.display_name or player.full_name
+    average_rating = (
+        sum(float(row["evaluation"].general_rating) for row in evaluated) / len(evaluated)
+        if evaluated else None
+    )
     values = [
-        ("NIVEL DEL RIVAL", report.rival_level or "No indicado"),
+        ("NOTA MEDIA", f"{average_rating:.1f}" if average_rating is not None else "Sin datos"),
         ("JUGADORES EVALUADOS", str(len(evaluated))),
-        ("PERFILES A CONSERVAR", str(len(noteworthy))),
+        ("DESTACADOS", str(len(noteworthy))),
         ("MÁS DESTACADO", standout_name),
     ]
     cells = []
@@ -461,7 +465,7 @@ def _kpi_table(payload: dict, styles: dict, primary: Color, dark: Color) -> Tabl
 
 
 def _watchlist_table(payload: dict, styles: dict, primary: Color, dark: Color) -> Table:
-    rows = payload["noteworthy_players"][:4] or payload["evaluated_players"][:3]
+    rows = payload["noteworthy_players"][:5] or payload["evaluated_players"][:3]
     if not rows:
         return Table([[Paragraph("Todavía no hay jugadores evaluados para destacar.", styles["body_muted"])]],
                      colWidths=[174 * mm])
@@ -469,22 +473,20 @@ def _watchlist_table(payload: dict, styles: dict, primary: Color, dark: Color) -
         Paragraph("JUGADOR", styles["table_header"]),
         Paragraph("POS.", styles["table_header_center"]),
         Paragraph("NOTA", styles["table_header_center"]),
-        Paragraph("DECISIÓN", styles["table_header"]),
-        Paragraph("LECTURA RÁPIDA", styles["table_header"]),
+        Paragraph("OBSERVACIÓN", styles["table_header"]),
     ]]
     for row in rows:
         part = row["participation"]
         ev = row["evaluation"]
         player_name = part.player.display_name or part.player.full_name
-        short_note = ev.short_note or "Sin observación breve."
+        short_note = ev.short_note or "Sin observación adicional."
         data.append([
             Paragraph(f"<b>{_safe(player_name)}</b>", styles["table_body"]),
             Paragraph(_safe(part.position or part.player.primary_position or "-"), styles["table_center"]),
             Paragraph(f"<b>{ev.general_rating:.1f}</b>", styles["table_score"]),
-            Paragraph(_safe(ev.recommendation or "Sin decisión"), styles["table_body_small"]),
             Paragraph(_rich_text(short_note, ""), styles["table_body_small"]),
         ])
-    table = Table(data, colWidths=[39 * mm, 14 * mm, 15 * mm, 42 * mm, 64 * mm], repeatRows=1)
+    table = Table(data, colWidths=[47 * mm, 16 * mm, 18 * mm, 93 * mm], repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), dark),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -574,8 +576,7 @@ def _player_overview_table(payload: dict, styles: dict, primary: Color, dark: Co
         Paragraph("POS.", styles["table_header_center"]),
         Paragraph("MIN.", styles["table_header_center"]),
         Paragraph("NOTA", styles["table_header_center"]),
-        Paragraph("DECISIÓN", styles["table_header"]),
-        Paragraph("CONFIANZA", styles["table_header_center"]),
+        Paragraph("OBSERVACIÓN", styles["table_header"]),
     ]]
     for row in rows:
         part = row["participation"]
@@ -588,12 +589,11 @@ def _player_overview_table(payload: dict, styles: dict, primary: Color, dark: Co
             Paragraph(_safe(part.position or part.player.primary_position or "-"), styles["table_center"]),
             Paragraph(_minutes(part), styles["table_center"]),
             Paragraph(f"<b>{ev.general_rating:.1f}</b>", styles["table_score"]),
-            Paragraph(_safe(ev.recommendation or "Sin decisión"), styles["table_body_small"]),
-            Paragraph(_safe(ev.confidence or "-"), styles["table_center"]),
+            Paragraph(_rich_text(ev.short_note, "Sin observación adicional."), styles["table_body_small"]),
         ])
     if len(data) == 1:
-        data.append(["-", Paragraph("Sin jugadores evaluados.", styles["table_body"]), "-", "-", "-", "-", "-"])
-    table = Table(data, colWidths=[10 * mm, 43 * mm, 14 * mm, 14 * mm, 15 * mm, 54 * mm, 24 * mm], repeatRows=1)
+        data.append(["-", Paragraph("Sin jugadores evaluados.", styles["table_body"]), "-", "-", "-", "-"])
+    table = Table(data, colWidths=[10 * mm, 45 * mm, 14 * mm, 14 * mm, 16 * mm, 75 * mm], repeatRows=1)
     commands = [
         ("BACKGROUND", (0, 0), (-1, 0), dark),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -607,7 +607,6 @@ def _player_overview_table(payload: dict, styles: dict, primary: Color, dark: Co
         ("RIGHTPADDING", (0, 0), (-1, -1), 2.6 * mm),
         ("ALIGN", (0, 1), (0, -1), "CENTER"),
         ("ALIGN", (2, 1), (4, -1), "CENTER"),
-        ("ALIGN", (6, 1), (6, -1), "CENTER"),
     ]
     for idx in range(1, len(data)):
         if idx % 2 == 0:
@@ -667,27 +666,28 @@ def _player_card(row: dict, styles: dict, primary: Color, dark: Color) -> list:
     if not metric_items:
         metric_items.append(Paragraph("Sin valoración numérica.", styles["body_muted"]))
 
-    decision_table = Table([
-        [Paragraph("DECISIÓN", styles["detail_label"]), Paragraph(_safe(ev.recommendation or "Sin decisión"), styles["detail_value_bold"])],
-        [Paragraph("CONFIANZA", styles["detail_label"]), Paragraph(_safe(ev.confidence or "No indicada"), styles["detail_value"])],
-    ], colWidths=[24 * mm, 84 * mm])
-    decision_table.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.3, HexColor("#E2E8F0")),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 1.8 * mm),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8 * mm),
-    ]))
-
-    note = Paragraph(_rich_text(ev.short_note, "Sin observación principal."), styles["observation"])
+    note = Paragraph(_rich_text(ev.short_note, "Sin observación adicional."), styles["observation"])
     strengths = _decode_strengths(ev.strengths)
     right_flowables: list = [
-        Paragraph("LECTURA DEL JUGADOR", styles["detail_label_accent"]),
+        Paragraph("OBSERVACIÓN", styles["detail_label_accent"]),
         note,
-        Spacer(1, 2.2 * mm),
-        decision_table,
     ]
+    optional_rows = []
+    if ev.recommendation:
+        optional_rows.append([Paragraph("DECISIÓN", styles["detail_label"]), Paragraph(_safe(ev.recommendation), styles["detail_value_bold"])])
+    if ev.confidence:
+        optional_rows.append([Paragraph("CONFIANZA", styles["detail_label"]), Paragraph(_safe(ev.confidence), styles["detail_value"])])
+    if optional_rows:
+        decision_table = Table(optional_rows, colWidths=[24 * mm, 84 * mm])
+        decision_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.3, HexColor("#E2E8F0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.8 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8 * mm),
+        ]))
+        right_flowables.extend([Spacer(1, 2.2 * mm), decision_table])
     if strengths:
         right_flowables.extend([
             Spacer(1, 2 * mm),
@@ -764,7 +764,13 @@ def _other_observations_table(payload: dict, styles: dict, dark: Color) -> Table
 
 
 def _own_team_table(payload: dict, styles: dict, dark: Color) -> Table | None:
-    own_evaluated = [row for row in payload["own_players"] if row["evaluation"] is not None]
+    own_evaluated = [
+        row for row in payload["own_players"]
+        if row["evaluation"] is not None
+        and row["evaluation"].observation_status == "evaluated"
+        and row["evaluation"].general_rating is not None
+        and row["evaluation"].pdf_include
+    ]
     if not own_evaluated:
         return None
     data = [[
@@ -947,7 +953,7 @@ def generate_report_pdf(session: Session, report_id: int) -> bytes:
         title=f"Informe postpartido · {match.home_team.name} - {match.away_team.name}",
         author=report.reporter.full_name,
         subject=f"Observación de {report.rival_team.name}",
-        creator=f"{club_name} · PostMatch Scout 2.0",
+        creator=f"{club_name} · PostMatch Scout 2.1",
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main", showBoundary=0)
 
@@ -1133,7 +1139,7 @@ def generate_report_pdf(session: Session, report_id: int) -> bytes:
     return buffer.getvalue()
 
 # ===========================================================================
-# PostMatch Scout 2.0 - immutable versions, executive/full modes and visual XI
+# PostMatch Scout 2.1 - immutable versions, executive/full modes and visual XI
 # ===========================================================================
 from datetime import date as _date
 from pathlib import Path as _Path
@@ -1366,7 +1372,7 @@ def generate_report_pdf(session: Session, report_id: int, *, version: int | None
     buffer = BytesIO()
     doc = BaseDocTemplate(buffer, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=18*mm, bottomMargin=18*mm,
                           title=f"Informe postpartido · {match.home_team.name} - {match.away_team.name}", author=report.reporter.full_name,
-                          subject=f"Observación de {report.rival_team.name}", creator=f"{club_name} · PostMatch Scout 2.0")
+                          subject=f"Observación de {report.rival_team.name}", creator=f"{club_name} · PostMatch Scout 2.1")
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
     def header_footer(canvas, current_doc):
         canvas.saveState(); page = current_doc.page
@@ -1384,13 +1390,16 @@ def generate_report_pdf(session: Session, report_id: int, *, version: int | None
                          score=score, competition=match.competition.name, round_name=match.round_name,
                          match_date=match.match_date.strftime("%d/%m/%Y") if hasattr(match.match_date, "strftime") else str(match.match_date), rival_name=report.rival_team.name,
                          primary=primary, dark=dark, club_logo=_image_reader(settings.get("logo_b64")), home_logo=_image_reader(getattr(match.home_team, "logo_b64", None)), away_logo=_image_reader(getattr(match.away_team, "logo_b64", None))),
-             Spacer(1, 5*mm), _kpi_table(payload, styles, primary, dark), Spacer(1, 5*mm),
-             _section_heading("Resumen ejecutivo", styles, primary, dark, "Lectura del informador"), Spacer(1, 3*mm)]
-    box = Table([[Paragraph("IMPRESIÓN GENERAL", styles["callout_label"]), Paragraph(_rich_text(report.opponent_overview, "Sin impresión general registrada."), styles["callout_text"])]], colWidths=[31*mm, 143*mm])
-    box.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), HexColor("#F8FAFC")), ("BOX", (0,0), (-1,-1), .6, HexColor("#CBD5E1")), ("LINEBEFORE", (0,0), (0,0), 3.2, primary), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 5*mm), ("RIGHTPADDING", (0,0), (-1,-1), 5*mm), ("TOPPADDING", (0,0), (-1,-1), 3.5*mm), ("BOTTOMPADDING", (0,0), (-1,-1), 3.5*mm)])); story.append(box)
-    if report.key_takeaways:
-        story += [Spacer(1, 3*mm), Paragraph(f"<b>IDEAS O NOMBRES A CONSERVAR</b><br/>{_rich_text(report.key_takeaways, '')}", styles["body"])]
-    story += [Spacer(1, 5*mm), _section_heading("Jugadores a conservar en el radar", styles, primary, dark, "Selección del informe"), Spacer(1, 3*mm), _watchlist_table(payload, styles, primary, dark)]
+             Spacer(1, 5*mm), _kpi_table(payload, styles, primary, dark)]
+    if report.opponent_overview or report.key_takeaways:
+        story += [Spacer(1, 5*mm), _section_heading("Notas generales", styles, primary, dark, "Bloque opcional"), Spacer(1, 3*mm)]
+        if report.opponent_overview:
+            box = Table([[Paragraph("IMPRESIÓN GENERAL", styles["callout_label"]), Paragraph(_rich_text(report.opponent_overview, ""), styles["callout_text"])]], colWidths=[31*mm, 143*mm])
+            box.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,-1), HexColor("#F8FAFC")), ("BOX", (0,0), (-1,-1), .6, HexColor("#CBD5E1")), ("LINEBEFORE", (0,0), (0,0), 3.2, primary), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 5*mm), ("RIGHTPADDING", (0,0), (-1,-1), 5*mm), ("TOPPADDING", (0,0), (-1,-1), 3.5*mm), ("BOTTOMPADDING", (0,0), (-1,-1), 3.5*mm)]))
+            story.append(box)
+        if report.key_takeaways:
+            story += [Spacer(1, 3*mm), Paragraph(f"<b>IDEAS O NOMBRES A CONSERVAR</b><br/>{_rich_text(report.key_takeaways, '')}", styles["body"])]
+    story += [Spacer(1, 5*mm), _section_heading("Jugadores destacados", styles, primary, dark, "Selección automática y manual"), Spacer(1, 3*mm), _watchlist_table(payload, styles, primary, dark)]
     consensus = _consensus_table(payload, styles, dark)
     if consensus:
         story += [Spacer(1, 5*mm), _section_heading("Consenso del cuerpo técnico", styles, primary, dark, "Informes aprobados"), Spacer(1, 3*mm), consensus]
@@ -1413,9 +1422,9 @@ def generate_report_pdf(session: Session, report_id: int, *, version: int | None
             if other: story += [_section_heading("Registro de observación", styles, primary, dark, "Sin nota completa"), Spacer(1,3*mm), other, Spacer(1,5*mm)]
             if own: story += [_section_heading(f"Notas internas · {report.own_team.name}", styles, primary, dark, "Bloque opcional"), Spacer(1,3*mm), own, Spacer(1,5*mm)]
             methodology = Table([
-                [Paragraph("NOTA GENERAL", styles["callout_label"]), Paragraph("Valoración contextual del rendimiento observado en este partido; no equivale a una conclusión definitiva de fichaje.", styles["table_body"])],
-                [Paragraph("CONFIANZA", styles["callout_label"]), Paragraph("Indica la solidez de la observación según minutos, acciones relevantes y claridad del rol desempeñado.", styles["table_body"])],
-                [Paragraph("DECISIÓN", styles["callout_label"]), Paragraph("Clasifica el siguiente paso: archivar, mantener en base de datos o programar nuevas observaciones.", styles["table_body"])],
+                [Paragraph("NOTA GENERAL", styles["callout_label"]), Paragraph("Valoración contextual de 0 a 10 del rendimiento observado en este partido. El valor 0 se considera sin evaluación.", styles["table_body"])],
+                [Paragraph("DESTACADO", styles["callout_label"]), Paragraph("Se propone automáticamente a partir de 8,0 y el informador puede modificarlo manualmente.", styles["table_body"])],
+                [Paragraph("INCLUSIÓN EN PDF", styles["callout_label"]), Paragraph("Está activada por defecto; solo aparecen jugadores con una valoración válida mayor que 0.", styles["table_body"])],
                 [Paragraph("TRAZABILIDAD", styles["callout_label"]), Paragraph(f"Informe {report.id} · versión V{current_version} · informador {_safe(report.reporter.full_name)} · documento generado desde un snapshot inmutable.", styles["table_body"])],
             ], colWidths=[34*mm, 140*mm])
             methodology.setStyle(TableStyle([("GRID", (0,0), (-1,-1), .35, HexColor("#D8E0E8")), ("BACKGROUND", (0,0), (0,-1), HexColor("#F8FAFC")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 3*mm), ("RIGHTPADDING", (0,0), (-1,-1), 3*mm), ("TOPPADDING", (0,0), (-1,-1), 2.6*mm), ("BOTTOMPADDING", (0,0), (-1,-1), 2.6*mm)]))

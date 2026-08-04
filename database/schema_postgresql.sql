@@ -1,4 +1,4 @@
--- PostMatch Scout 2.0
+-- PostMatch Scout 2.1
 -- Esquema de referencia. En producción usa Alembic.
 
 

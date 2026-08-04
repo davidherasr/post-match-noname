@@ -235,10 +235,10 @@ def render(user: dict) -> None:
         if st.button("Preparar Excel", type="primary"):
             with session_scope() as session: st.session_state["analytics_export"] = analytics_export_xlsx(session)
         if "analytics_export" in st.session_state:
-            st.download_button("Descargar Excel", st.session_state["analytics_export"], "postmatch_scout_2_0_analitica.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("Descargar Excel", st.session_state["analytics_export"], "postmatch_scout_2_1_analitica.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         st.subheader("Copia técnica restaurable")
         st.warning("Contiene datos sensibles y hashes de contraseña. Debe guardarse en una ubicación segura.")
         if st.button("Preparar backup técnico"):
             with session_scope() as session: st.session_state["technical_backup"] = technical_backup_zip(session)
         if "technical_backup" in st.session_state:
-            st.download_button("Descargar backup ZIP", st.session_state["technical_backup"], "postmatch_scout_2_0_backup.zip", "application/zip")
+            st.download_button("Descargar backup ZIP", st.session_state["technical_backup"], "postmatch_scout_2_1_backup.zip", "application/zip")

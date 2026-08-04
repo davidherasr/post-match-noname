@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-
 import streamlit as st
 
 from core.auth import current_user, login, logout
@@ -28,7 +26,10 @@ bootstrap_application()
 with session_scope() as session:
     app_settings = repo.get_all_settings(session)
 
-apply_global_styles(app_settings.get("primary_color") or "#B91C1C", app_settings.get("secondary_color") or "#111827")
+apply_global_styles(
+    app_settings.get("primary_color") or "#B91C1C",
+    app_settings.get("secondary_color") or "#111827",
+)
 
 
 def render_login() -> None:
@@ -46,7 +47,7 @@ def render_login() -> None:
             <div class="pm-card" style="padding:28px">
               <div class="pm-kicker">Aplicación interna</div>
               <div class="pm-page-title" style="font-size:2.25rem">{safe_html(app_settings.get('club_name') or APP_NAME)}</div>
-              <div class="pm-page-subtitle">Informes postpartido, consenso y seguimiento · Versión {APP_VERSION}</div>
+              <div class="pm-page-subtitle">Informes postpartido y seguimiento de jugadores · Versión {APP_VERSION}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -93,6 +94,37 @@ if user.get("must_change_password"):
                 st.error(str(exc))
     st.stop()
 
+ROLE_NAVIGATION: dict[str, list[tuple[str, str]]] = {
+    "reporter": [
+        ("Mi panel", "dashboard"),
+        ("Hacer informe", "report_work"),
+        ("Mis informes", "report_archive"),
+        ("Jugadores", "players"),
+    ],
+    "director": [
+        ("Panel de dirección", "dashboard"),
+        ("Revisar y analizar", "director"),
+        ("Informes", "report_archive"),
+        ("Jugadores", "players"),
+    ],
+    "admin": [
+        ("Panel de administración", "dashboard"),
+        ("Partidos", "matches"),
+        ("Base de datos", "catalog"),
+        ("Informes", "report_archive"),
+        ("Jugadores", "players"),
+        ("Dirección deportiva", "director"),
+        ("Administración", "admin"),
+    ],
+}
+
+navigation_items = ROLE_NAVIGATION.get(user["role"], ROLE_NAVIGATION["reporter"])
+labels = [label for label, _ in navigation_items]
+route_by_label = dict(navigation_items)
+nav_key = "main_navigation"
+if st.session_state.get(nav_key) not in labels:
+    st.session_state[nav_key] = labels[0]
+
 with st.sidebar:
     st.markdown(
         f"""
@@ -104,12 +136,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.caption(user["full_name"])
-    navigation = ["Inicio", "Informes", "Jugadores"]
-    if user["role"] in {"admin", "director"}:
-        navigation.append("Dirección deportiva")
-    if user["role"] == "admin":
-        navigation.extend(["Partidos", "Base de datos", "Administración"])
-    page = st.radio("Navegación", navigation, label_visibility="collapsed")
+    selected_label = st.radio("Navegación", labels, label_visibility="collapsed", key=nav_key)
     st.divider()
     if st.button("Cerrar sesión", use_container_width=True):
         logout()
@@ -117,21 +144,31 @@ with st.sidebar:
     if settings.demo_mode:
         st.warning("DEMO: base SQLite local")
 
-if page == "Inicio":
+route = route_by_label[selected_label]
+if route == "dashboard":
     from pages.dashboard import render
-elif page == "Informes":
+    render(user)
+elif route == "report_work":
     from pages.reports import render
-elif page == "Jugadores":
+    render(user, mode="work")
+elif route == "report_archive":
+    from pages.reports import render
+    render(user, mode="archive")
+elif route == "players":
     from pages.players import render
-elif page == "Dirección deportiva":
+    render(user)
+elif route == "director":
     from pages.director import render
-elif page == "Partidos":
+    render(user)
+elif route == "matches":
     from pages.matches import render
-elif page == "Base de datos":
+    render(user)
+elif route == "catalog":
     from pages.catalog import render
-elif page == "Administración":
+    render(user)
+elif route == "admin":
     from pages.admin import render
+    render(user)
 else:
     from pages.dashboard import render
-
-render(user)
+    render(user)

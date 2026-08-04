@@ -168,7 +168,7 @@ def import_lineup(session: Session, df: pd.DataFrame, actor_id: int) -> dict:
 
 
 def template_workbook() -> bytes:
-    polished_template = BASE_DIR / "templates" / "plantilla_importacion_postmatch_scout_2_0.xlsx"
+    polished_template = BASE_DIR / "templates" / "plantilla_importacion_postmatch_scout_2_1.xlsx"
     if polished_template.exists():
         return polished_template.read_bytes()
 

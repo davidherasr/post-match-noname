@@ -1,76 +1,128 @@
-# PostMatch Scout 2.0
+# PostMatch Scout 2.1
 
-Aplicación interna en **Python + Streamlit** para transformar cada partido en observaciones estructuradas de jugadores rivales, informes PDF inmutables y decisiones de seguimiento para dirección deportiva.
+Aplicación interna en **Python + Streamlit** para registrar valoraciones postpartido de jugadores, generar PDF y construir un histórico útil para dirección deportiva.
 
-La versión 2.0 no es una ampliación estética de la 1.1: corrige la fiabilidad analítica, endurece permisos y seguridad, incorpora asignaciones y aprobación, crea versiones históricas reales y añade un flujo operativo completo.
+La versión 2.1 cambia especialmente la experiencia del informador: cada rol dispone de su propio menú y panel, y la valoración de jugadores se realiza mediante fichas individuales muy simples, sin tablas editables ni campos generales obligatorios.
 
-## Qué incluye
+## Cambios principales de la versión 2.1
 
-### Operativa del cuerpo técnico
+### Menús y paneles por rol
 
-- Usuarios con roles de administrador, informador y dirección deportiva.
-- Bloqueo temporal tras intentos de acceso fallidos y revocación de sesiones al modificar una cuenta.
-- Asignación de partidos a informadores, fecha límite y seguimiento de entregas.
-- Informes en estados: borrador, entregado, devuelto y aprobado.
-- Autoguardado por bloques con detección de cambios concurrentes.
-- Evaluación rival simplificada: estado, nota general, decisión, observación y destacado.
-- Análisis avanzado opcional: técnica, táctica, física, confianza, fortalezas y nota ampliada.
-- Valoraciones del equipo propio almacenadas en un ámbito separado y excluidas del scouting rival.
-- MVP rival único y varios jugadores destacados, sin mezclar ambos conceptos.
+**Informador**
 
-### Dirección deportiva
+- Mi panel.
+- Hacer informe.
+- Mis informes.
+- Jugadores.
 
-- Ranking calculado exclusivamente con jugadores rivales de informes aprobados/finales.
-- Exclusión automática de borradores, evaluaciones propias y observaciones sin nota válida.
-- Filtros por temporada, competición, equipo, informador, posición, confianza, fecha y minutos.
-- Dispersión de notas y número de informadores para interpretar el grado de consenso.
-- Historial de jugador con posición y minutos observados; los datos ausentes aparecen como «Sin muestra», nunca como cero.
-- Revisión, devolución y aprobación de informes.
-- Consolidación de varios informadores por partido y decisión final de dirección deportiva.
-- Seguimientos con responsable, prioridad, próxima revisión, partido objetivo, cierre e historial.
+Su panel muestra únicamente asignaciones, informes en curso, entregados y aprobados.
 
-### Administración y calidad de datos
+**Dirección deportiva**
 
-- Alta, edición y archivo de temporadas, competiciones, equipos, jugadores y partidos.
-- Escudos de equipos y fotografías opcionales de jugadores.
-- Plantillas por temporada con altas, bajas y dorsales.
-- Alias, detección de posibles duplicados y fusión trazable de jugadores.
-- Alineaciones reconciliadas con las evaluaciones en borrador.
-- Importación CSV/XLSX con selector de hoja, detección de separador/codificación, vista previa, validaciones y transacciones parciales seguras.
-- Asignaciones de informes y progreso por partido.
-- Auditoría con valores anteriores y posteriores en operaciones relevantes.
+- Panel de dirección.
+- Revisar y analizar.
+- Informes.
+- Jugadores.
 
-### Documentos y datos
+El panel prioriza informes pendientes de revisión, jugadores mejor valorados y seguimientos activos.
 
-- PDF ejecutivo y PDF completo.
-- Portada editorial, onces sobre el campo, alineaciones, resumen validado y fichas individuales.
-- Versiones inmutables: cada entrega conserva un snapshot del informe, evaluaciones, participantes y configuración visual.
-- Archivo de documentos con checksum, tamaño, ruta local/remota y estado de almacenamiento visible.
-- Subida opcional a Supabase Storage y reintento de fallos.
-- Exportación analítica a Excel.
-- Backup técnico completo en ZIP y script de restauración.
-- Migraciones de esquema con Alembic.
+**Administrador**
 
-## Arquitectura
+- Panel de administración.
+- Partidos.
+- Base de datos.
+- Informes.
+- Jugadores.
+- Dirección deportiva.
+- Administración.
+
+El panel ofrece accesos directos a partidos, usuarios, datos y control general.
+
+### Informe simplificado
+
+Ya no es obligatorio completar:
+
+- impresión general del rival;
+- nivel mostrado por el rival;
+- conclusiones colectivas;
+- decisión de seguimiento;
+- confianza;
+- notas técnicas, tácticas o físicas.
+
+Para entregar un informe basta con valorar al menos a un jugador rival.
+
+Cada jugador aparece en una ficha individual con:
+
+- nombre y dorsal;
+- posición predeterminada y no editable;
+- minutos disputados predeterminados y no editables;
+- condición de titular o suplente;
+- barra de valoración de 0 a 10;
+- observación opcional;
+- check de destacado;
+- check de inclusión en PDF.
+
+Reglas automáticas:
+
+- `0` significa **sin valorar**;
+- cualquier nota mayor que `0` genera una evaluación válida;
+- el check **Incluir en PDF** aparece marcado por defecto;
+- una nota de `8,0` o superior marca automáticamente al jugador como destacado;
+- ambos checks pueden modificarse manualmente;
+- el MVP del informe se deriva automáticamente del destacado con mejor nota.
+
+El bloque de nuestro equipo utiliza exactamente el mismo funcionamiento y queda separado de las analíticas de jugadores rivales.
+
+## Funcionalidades existentes
+
+- PostgreSQL remoto mediante SQLAlchemy.
+- Compatibilidad con Supabase PostgreSQL y Supabase Storage.
+- Roles de administrador, informador y dirección deportiva.
+- Asignación de partidos y fechas límite.
+- Informes en borrador, entregados, devueltos y aprobados.
+- Autoguardado por ficha.
+- Versiones inmutables del informe.
+- PDF ejecutivo y completo.
+- Histórico de jugadores.
+- Rankings solo con informes aprobados y jugadores rivales.
+- Seguimientos y consolidaciones.
+- Importación CSV/XLSX.
+- Exportación analítica y backup técnico.
+- Auditoría y control de sesiones.
+- Migraciones mediante Alembic.
+
+## Estructura
 
 ```text
-Streamlit
-  ├── pages/                interfaz por área funcional
-  ├── repositories/         autorización, consultas y transacciones
-  ├── services/             PDF, importación, exportación y almacenamiento
-  ├── models/               modelo relacional SQLAlchemy
-  ├── alembic/              migraciones de base de datos
-  ├── tests/                pruebas automatizadas
-  └── scripts/              administración, muestra y restauración
+app.py
+pages/
+  dashboard.py
+  reports.py
+  matches.py
+  players.py
+  director.py
+  catalog.py
+  admin.py
+repositories/
+services/
+models/
+core/
+alembic/
+tests/
+```
 
-PostgreSQL / Supabase
-  ├── datos operativos
-  ├── versiones inmutables
-  ├── auditoría
-  └── metadatos de documentos
+## Main file path
 
-Supabase Storage (opcional)
-  └── PDF privados
+Si el repositorio contiene directamente `app.py`:
+
+```text
+app.py
+```
+
+Si has subido la carpeta completa al repositorio:
+
+```text
+postmatch_scout_2_1/app.py
 ```
 
 ## Instalación local
@@ -90,20 +142,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Sin `DATABASE_URL`, la aplicación arranca en modo demostración con SQLite y datos ficticios.
+Sin `DATABASE_URL`, la aplicación arranca en modo demostración con SQLite.
 
 ```text
 Administrador: admin@postmatch.local / DemoAdmin2026!
 Informador: informador@postmatch.local / DemoReporter2026!
 ```
 
-No utilices el modo demo con información real del club.
+No utilices el modo demostración con información real del club.
 
-## Producción con Supabase PostgreSQL
+## Producción con Supabase
 
-Copia `.streamlit/secrets.example.toml` como `.streamlit/secrets.toml` o pega sus variables en Streamlit Community Cloud.
-
-Variables mínimas:
+Variables mínimas en Streamlit Secrets:
 
 ```toml
 DATABASE_URL = "postgresql://..."
@@ -115,8 +165,6 @@ BOOTSTRAP_ADMIN_EMAIL = "admin@club.com"
 BOOTSTRAP_ADMIN_PASSWORD = "UNA-CONTRASENA-FUERTE-Y-UNICA"
 ```
 
-La aplicación no permite arrancar en producción con la contraseña de demostración. El administrador inicial deberá cambiar su contraseña en el primer acceso.
-
 Storage privado opcional:
 
 ```toml
@@ -125,82 +173,47 @@ SUPABASE_SERVICE_ROLE_KEY = "SERVICE_ROLE_KEY"
 SUPABASE_BUCKET = "postmatch-reports"
 ```
 
-La clave `service_role` solo debe existir en Secrets. La aplicación guarda `bucket` y `path`; las URL firmadas se generan bajo demanda y no se persisten.
-
-## Migraciones
-
-En el arranque, si `RUN_MIGRATIONS = true`, se ejecuta:
-
-```bash
-alembic upgrade head
-```
-
-Comandos manuales:
-
-```bash
-alembic current
-alembic upgrade head
-```
-
-Antes de aplicar una migración en producción, descarga un backup técnico desde **Administración > Backup**.
-
 ## Flujo recomendado
 
 ### Administrador
 
 1. Crea temporada, competición y equipos.
 2. Marca el equipo propio.
-3. Carga plantillas manualmente o mediante CSV/XLSX.
-4. Crea el partido y sus alineaciones.
-5. Asigna informadores y fecha límite.
+3. Carga plantillas.
+4. Crea el partido y las alineaciones.
+5. Asigna informadores.
 6. Publica el partido.
-7. Supervisa documentos, auditoría y copias técnicas.
 
 ### Informador
 
-1. Abre un partido asignado.
-2. Escribe una impresión general breve.
-3. Completa la tabla rápida rival.
-4. Abre el análisis avanzado solo para perfiles relevantes.
-5. Revisa el PDF ejecutivo o completo.
-6. Entrega una versión inmutable.
-7. Corrige una nueva versión si dirección deportiva devuelve el informe.
+1. Entra en **Mi panel**.
+2. Pulsa **Empezar** o **Continuar**.
+3. Mueve la barra de cada jugador que haya podido valorar.
+4. Añade observaciones solo cuando aporten información.
+5. Revisa los checks de destacado y PDF.
+6. Valora opcionalmente a jugadores propios.
+7. Genera una vista previa y entrega.
 
 ### Dirección deportiva
 
-1. Revisa y aprueba o devuelve informes.
-2. Consulta rankings validados y dispersión de criterio.
-3. Consolida las opiniones del mismo partido.
-4. Abre seguimientos con responsable y próxima acción.
-5. Exporta la información analítica cuando sea necesario.
+1. Revisa informes entregados.
+2. Aprueba o devuelve.
+3. Consulta rankings e históricos.
+4. Consolida opiniones.
+5. Gestiona seguimientos.
 
 ## Importación
 
-La plantilla contiene:
+La plantilla incluida contiene:
 
-- `plantillas`: equipo, temporada, dorsal, jugador, posición, fecha de nacimiento y nacionalidad.
-- `alineaciones`: partido, equipo, dorsal, jugador, posición, titular, minutos y capitán.
-- `instrucciones`: reglas y ejemplos.
+- `plantillas`;
+- `alineaciones`;
+- `instrucciones`.
 
-La interfaz permite elegir la hoja correcta. Los CSV admiten coma o punto y coma y varias codificaciones habituales. El formato `.xls` antiguo no se acepta: conviértelo a `.xlsx` o CSV.
+Archivo:
 
-## Backups y restauración
-
-La exportación analítica y el backup técnico son distintos:
-
-- **Excel analítico:** pensado para lectura y análisis.
-- **ZIP técnico:** incluye todas las tablas y relaciones, también hashes de contraseña; es confidencial.
-
-Restauración sobre una base vacía:
-
-```bash
-python scripts/restore_backup.py ruta/al/backup.zip
-```
-
-Para reemplazar una base existente, crea primero una copia y utiliza:
-
-```bash
-python scripts/restore_backup.py ruta/al/backup.zip --replace
+```text
+templates/plantilla_importacion_postmatch_scout_2_1.xlsx
 ```
 
 ## Comprobaciones
@@ -208,19 +221,23 @@ python scripts/restore_backup.py ruta/al/backup.zip --replace
 ```bash
 python -m compileall .
 pytest -q
-python scripts/generate_sample.py
+python scripts/smoke_test.py
 ```
 
 PDF de muestra:
 
 ```text
-sample/informe_demo_postmatch_scout_2_0_ejecutivo.pdf
-sample/informe_demo_postmatch_scout_2_0_completo.pdf
+sample/informe_demo_postmatch_scout_2_1_ejecutivo.pdf
+sample/informe_demo_postmatch_scout_2_1_completo.pdf
 ```
+
+## Actualización desde 2.0
+
+La versión 2.1 no añade tablas ni modifica el esquema de base de datos. Puede utilizar la misma base de datos de la versión 2.0. Antes de actualizar en producción, descarga un backup técnico.
 
 ## Limitaciones conocidas
 
-- Streamlit es idóneo para una herramienta interna de un cuerpo técnico, no para una plataforma pública masiva.
-- La autenticación es propia de la aplicación sobre PostgreSQL; no utiliza Supabase Auth.
-- El almacenamiento local en Streamlit Community Cloud es efímero: para archivo permanente configura Supabase Storage.
-- Las migraciones futuras deben probarse primero sobre una copia de la base de datos.
+- Streamlit está orientado a herramientas internas, no a una plataforma pública masiva.
+- La autenticación es propia de la aplicación y no utiliza Supabase Auth.
+- El almacenamiento local de Streamlit Community Cloud es efímero; configura Supabase Storage para conservar PDF.
+- La interfaz debe probarse finalmente en el navegador y dispositivos reales del cuerpo técnico.

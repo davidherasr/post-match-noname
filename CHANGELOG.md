@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.1.0 - Informes simples y navegación por rol
+
+### Experiencia por rol
+
+- Menú independiente para administrador, dirección deportiva e informador.
+- Dashboard específico para cada rol.
+- El informador dispone de accesos directos a sus tareas, informes en curso y archivo personal.
+- Dirección deportiva ve primero revisiones pendientes, rankings y seguimientos.
+- Administración dispone de accesos rápidos a partidos, datos, usuarios y dirección deportiva.
+
+### Nuevo editor de informes
+
+- Eliminada la tabla editable de jugadores rivales.
+- Fichas individuales para jugadores rivales y propios.
+- Nombre, dorsal, posición, minutos y condición de titular/suplente bloqueados y cargados desde el partido.
+- Slider de 0 a 10 con pasos de 0,5.
+- Observación opcional.
+- Checks de destacado e inclusión en PDF.
+- Inclusión en PDF marcada por defecto.
+- Nota de 8,0 o superior marcada automáticamente como destacado.
+- Nota mayor que 0 convertida automáticamente en evaluación válida.
+- Nota 0 interpretada como jugador sin valorar.
+- MVP rival sincronizado automáticamente con el destacado de mayor nota.
+
+### Simplificación
+
+- La impresión general del rival deja de ser obligatoria.
+- Eliminados del flujo principal el nivel del rival, las conclusiones colectivas, la decisión, la confianza y las dimensiones técnicas, tácticas y físicas.
+- Para entregar solo es obligatorio valorar al menos a un jugador rival.
+- El PDF omite bloques generales vacíos y adapta tablas y metodología al nuevo sistema.
+
+### Calidad
+
+- Nuevas reglas de evaluación aisladas y probadas.
+- Cuatro pruebas adicionales para nota cero, automatismos, anulaciones manuales y entrega sin resumen general.
+- 12 pruebas automatizadas superadas.
+
 ## 2.0.0 — Aplicación operativa y fiable
 
 ### Fiabilidad analítica

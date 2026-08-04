@@ -202,5 +202,5 @@ def render(user: dict) -> None:
         st.warning("El backup técnico contiene todos los datos estructurados, incluidos hashes de contraseña. Trátalo como un archivo confidencial y almacénalo cifrado.")
         with session_scope() as session:
             backup = technical_backup_zip(session)
-        st.download_button("Descargar backup técnico restaurable", backup, "postmatch_scout_2_0_backup.zip", "application/zip", type="primary")
+        st.download_button("Descargar backup técnico restaurable", backup, "postmatch_scout_2_1_backup.zip", "application/zip", type="primary")
         st.caption("Este backup es distinto de la exportación analítica Excel: conserva tablas y relaciones para recuperación técnica.")

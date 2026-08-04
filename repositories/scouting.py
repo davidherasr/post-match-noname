@@ -809,6 +809,35 @@ def upsert_evaluation(session: Session, report_id: int, player_id: int, team_id:
     return item
 
 
+def sync_report_standout(session: Session, report_id: int, actor_id: int) -> Report:
+    """Keep the report MVP aligned with the highest-rated standout rival.
+
+    The lightweight editor can mark several players as standout. The report-level
+    MVP is derived automatically from the highest score among those players.
+    """
+    report = session.get(Report, report_id)
+    if not report:
+        raise ValueError("Informe no encontrado.")
+    _assert_report_owner_or_privileged(session, report, actor_id)
+    best = session.scalar(
+        select(PlayerEvaluation)
+        .where(
+            and_(
+                PlayerEvaluation.report_id == report_id,
+                PlayerEvaluation.evaluation_scope == "rival",
+                PlayerEvaluation.team_id == report.rival_team_id,
+                PlayerEvaluation.observation_status == "evaluated",
+                PlayerEvaluation.general_rating.is_not(None),
+                PlayerEvaluation.standout.is_(True),
+            )
+        )
+        .order_by(desc(PlayerEvaluation.general_rating), PlayerEvaluation.id)
+        .limit(1)
+    )
+    report.standout_player_id = best.player_id if best else None
+    return report
+
+
 def bulk_upsert_evaluations(session: Session, report_id: int, rows: Sequence[dict], actor_id: int) -> int:
     report = session.get(Report, report_id)
     if not report:
@@ -834,8 +863,6 @@ def validate_report_for_finalization(session: Session, report_id: int) -> list[s
     if not report:
         return ["Informe no encontrado."]
     errors: list[str] = []
-    if not (report.opponent_overview or "").strip():
-        errors.append("Añade una impresión general breve del rival.")
     evaluated = int(session.scalar(select(func.count(PlayerEvaluation.id)).where(and_(PlayerEvaluation.report_id == report_id, PlayerEvaluation.evaluation_scope == "rival", PlayerEvaluation.team_id == report.rival_team_id, PlayerEvaluation.observation_status == "evaluated", PlayerEvaluation.general_rating.is_not(None)))) or 0)
     if evaluated < 1:
         errors.append("Evalúa al menos a un jugador rival con nota general.")

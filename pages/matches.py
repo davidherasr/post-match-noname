@@ -295,7 +295,7 @@ def render(user: dict) -> None:
                     st.error(str(exc))
 
     with tab_import:
-        st.download_button("Descargar plantilla Excel", template_workbook(), "plantilla_postmatch_scout_2_0.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button("Descargar plantilla Excel", template_workbook(), "plantilla_postmatch_scout_2_1.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         import_type_label = st.radio("Tipo de importación", ["Plantillas de equipos", "Alineaciones de un partido"], horizontal=True)
         import_type = "rosters" if import_type_label.startswith("Plantillas") else "lineups"
         uploaded = st.file_uploader("CSV o Excel (.xlsx)", type=["csv", "xlsx"])
