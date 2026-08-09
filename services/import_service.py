@@ -168,23 +168,18 @@ def import_lineup(session: Session, df: pd.DataFrame, actor_id: int) -> dict:
 
 
 def template_workbook() -> bytes:
-    polished_template = BASE_DIR / "templates" / "plantilla_importacion_postmatch_scout_2_1.xlsx"
+    """Return a header-only import template. The release ships with no sporting sample data."""
+    polished_template = BASE_DIR / "templates" / "plantilla_importacion_noname_postmatch_3_0.xlsx"
     if polished_template.exists():
         return polished_template.read_bytes()
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        pd.DataFrame([{
-            "equipo": "FC Barcelona", "temporada": "2026/27", "dorsal": 23,
-            "jugador": "Jules Koundé", "posicion": "LD", "fecha_nacimiento": "1998-11-12", "nacionalidad": "Francia",
-        }], columns=PLAYER_COLUMNS).to_excel(writer, sheet_name="plantillas", index=False)
-        pd.DataFrame([{
-            "partido_id": 1, "equipo": "FC Barcelona", "dorsal": 23, "jugador": "Jules Koundé",
-            "posicion": "LD", "titular": "Sí", "minuto_entrada": 0, "minuto_salida": 90, "capitan": "No",
-        }], columns=LINEUP_COLUMNS).to_excel(writer, sheet_name="alineaciones", index=False)
+        pd.DataFrame(columns=PLAYER_COLUMNS).to_excel(writer, sheet_name="plantillas", index=False)
+        pd.DataFrame(columns=LINEUP_COLUMNS).to_excel(writer, sheet_name="alineaciones", index=False)
         pd.DataFrame([
             {"campo": "titular / capitan", "valores_admitidos": "Sí, No, true, false, 1, 0, x"},
             {"campo": "posicion", "valores_admitidos": "POR, LD, DFC, LI, CAD, CAI, MCD, MC, MP, ED, EI, SD, DC, Otro"},
-            {"campo": "formato", "valores_admitidos": "Usa la hoja correspondiente o exporta como CSV UTF-8 con coma o punto y coma"},
+            {"campo": "formato", "valores_admitidos": "Usa la hoja correspondiente o CSV UTF-8 con coma o punto y coma"},
         ]).to_excel(writer, sheet_name="instrucciones", index=False)
     return output.getvalue()

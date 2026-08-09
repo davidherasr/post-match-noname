@@ -187,66 +187,23 @@ def _match_editor(matches, user: dict) -> None:
 
 
 def render(user: dict) -> None:
-    page_header("Partidos y alineaciones", "Gestiona el ciclo completo: partido, alineaciones, asignaciones, entrega e importación validada.")
-    tab_list, tab_create, tab_lineups, tab_assign, tab_import = st.tabs(["Partidos", "Crear partido", "Alineaciones", "Asignaciones", "Importar"])
+    page_header("Partidos · mantenimiento", "El alta normal se hace desde Nuevo postpartido. Aquí solo corriges, revisas o importas datos.")
+    tab_list, tab_lineups, tab_assign, tab_import = st.tabs(["Partidos", "Alineaciones", "Asignaciones", "Importar"])
 
     with tab_list:
         with session_scope() as session:
             matches = repo.list_matches(session)
         _match_editor(matches, user)
 
-    with tab_create:
-        with session_scope() as session:
-            seasons = repo.list_seasons(session, active_only=True)
-            competitions = repo.list_competitions(session, active_only=True)
-            teams = repo.list_teams(session, active_only=True)
-        if not seasons or not competitions or len(teams) < 2:
-            st.warning("Primero crea una temporada, una competición y al menos dos equipos.")
-        else:
-            with st.form("create_match_form"):
-                a, b = st.columns(2)
-                season_id = a.selectbox("Temporada", [s.id for s in seasons], format_func=lambda sid: next(s.name for s in seasons if s.id == sid))
-                competition_id = b.selectbox("Competición", [c.id for c in competitions], format_func=lambda cid: next(c.name for c in competitions if c.id == cid))
-                c, d = st.columns(2)
-                round_name = c.text_input("Jornada / eliminatoria", value="Jornada 1")
-                match_date = d.date_input("Fecha", value=date.today())
-                e, f = st.columns(2)
-                home_team_id = e.selectbox("Local", [t.id for t in teams], format_func=lambda tid: next(t.name for t in teams if t.id == tid))
-                away_team_id = f.selectbox("Visitante", [t.id for t in teams], index=min(1, len(teams)-1), format_func=lambda tid: next(t.name for t in teams if t.id == tid))
-                venue = st.text_input("Estadio / ubicación (opcional)")
-                ff1, ff2 = st.columns(2)
-                with ff1:
-                    home_formation = _formation_input("Formación local", "create_home")
-                with ff2:
-                    away_formation = _formation_input("Formación visitante", "create_away")
-                dd1, dd2 = st.columns(2)
-                due_date = dd1.date_input("Fecha límite", value=match_date)
-                due_time = dd2.time_input("Hora límite", value=time(23, 59))
-                publish = st.checkbox("Publicar inmediatamente")
-                submitted = st.form_submit_button("Crear partido", type="primary", use_container_width=True)
-            if submitted:
-                try:
-                    with session_scope() as session:
-                        match = repo.create_match(
-                            session, season_id=season_id, competition_id=competition_id, round_name=round_name.strip(),
-                            match_date=match_date, home_team_id=home_team_id, away_team_id=away_team_id,
-                            created_by=user["id"], venue=venue.strip() or None, home_formation=home_formation,
-                            away_formation=away_formation, status="published" if publish else "draft",
-                            report_due_at=datetime.combine(due_date, due_time),
-                        )
-                    st.success(f"Partido creado con ID {match.id}.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-
     with tab_lineups:
+        st.caption("Edición avanzada. En el uso normal las alineaciones se preparan dentro de Nuevo postpartido.")
         with session_scope() as session:
             matches = repo.list_matches(session)
         if not matches:
-            st.info("Crea un partido antes de cargar alineaciones.")
+            st.info("No hay partidos.")
         else:
             labels = {m.id: match_label(m) for m in matches}
-            selected_id = st.selectbox("Partido a configurar", [m.id for m in matches], format_func=lambda mid: labels[mid], key="lineup_match")
+            selected_id = st.selectbox("Partido a corregir", [m.id for m in matches], format_func=lambda mid: labels[mid], key="lineup_match")
             match = next(m for m in matches if m.id == selected_id)
             local_tab, away_tab = st.tabs([match.home_team.name, match.away_team.name])
             with local_tab:
@@ -271,31 +228,36 @@ def render(user: dict) -> None:
             c1.metric("Asignados", progress.get("total", 0))
             c2.metric("Entregados", progress.get("submitted", 0))
             c3.metric("Aprobados", progress.get("approved", 0))
-            if current:
-                st.dataframe(pd.DataFrame([{
-                    "Informador": a.user.full_name if getattr(a, "user", None) else next((u.full_name for u in reporters if u.id == a.user_id), str(a.user_id)),
-                    "Estado": ASSIGNMENT_STATUSES.get(a.status, a.status),
-                    "Obligatorio": a.required,
-                    "Límite": a.due_at,
-                } for a in current]), use_container_width=True, hide_index=True)
-            current_ids = [a.user_id for a in current]
+            current_ids = [a.user_id for a in current if a.status != "waived"]
             with st.form(f"assign_reporters_{selected_id}"):
-                selected_users = st.multiselect("Informadores asignados", [u.id for u in reporters], default=current_ids, format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in reporters if u.id == uid))
+                selected_users = st.multiselect(
+                    "Informadores asignados",
+                    [u.id for u in reporters],
+                    default=current_ids,
+                    format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in reporters if u.id == uid),
+                )
                 required = st.checkbox("Informes obligatorios", value=True)
-                due_d = st.date_input("Fecha límite", value=(match.report_due_at.date() if match.report_due_at else match.match_date))
-                due_t = st.time_input("Hora límite", value=(match.report_due_at.time() if match.report_due_at else time(23, 59)))
+                due_enabled = st.checkbox("Usar fecha límite", value=bool(match.report_due_at))
+                if due_enabled:
+                    d1, d2 = st.columns(2)
+                    due_d = d1.date_input("Fecha límite", value=(match.report_due_at.date() if match.report_due_at else match.match_date))
+                    due_t = d2.time_input("Hora límite", value=(match.report_due_at.time() if match.report_due_at else time(23, 59)))
+                    due_at = datetime.combine(due_d, due_t)
+                else:
+                    due_at = None
                 save_assignments = st.form_submit_button("Guardar asignaciones", type="primary")
             if save_assignments:
                 try:
                     with session_scope() as session:
-                        repo.assign_reporters(session, selected_id, selected_users, user["id"], datetime.combine(due_d, due_t), required)
+                        repo.assign_reporters(session, selected_id, selected_users, user["id"], due_at, required)
                     st.success("Asignaciones actualizadas.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
     with tab_import:
-        st.download_button("Descargar plantilla Excel", template_workbook(), "plantilla_postmatch_scout_2_1.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.caption("La importación es secundaria: el flujo Nuevo postpartido permite crear rivales y jugadores sin archivos.")
+        st.download_button("Descargar plantilla Excel", template_workbook(), "plantilla_noname_postmatch.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         import_type_label = st.radio("Tipo de importación", ["Plantillas de equipos", "Alineaciones de un partido"], horizontal=True)
         import_type = "rosters" if import_type_label.startswith("Plantillas") else "lineups"
         uploaded = st.file_uploader("CSV o Excel (.xlsx)", type=["csv", "xlsx"])

@@ -307,6 +307,8 @@ def create_team(session: Session, name: str, short_name: str | None = None, coun
     item = Team(name=name.strip(), short_name=short_name.strip() if short_name else None, country=country.strip() if country else None, is_own_team=is_own_team)
     session.add(item)
     session.flush()
+    if is_own_team:
+        set_setting(session, "own_team_id", str(item.id), actor_id)
     audit(session, actor_id, "create_team", "team", item.id, after=_snapshot(item, ["name", "short_name", "country", "is_own_team"]))
     return item
 
@@ -1240,3 +1242,307 @@ def list_audit_logs(session: Session, limit: int = 100, action: str | None = Non
     if action:
         stmt = stmt.where(AuditLog.action == action)
     return list(session.scalars(stmt.order_by(desc(AuditLog.created_at)).limit(limit)).all())
+
+# ---------------------------------------------------------------------------
+# No Name Edition 3.0 convenience workflows
+# ---------------------------------------------------------------------------
+
+def get_own_team(session: Session) -> Team | None:
+    """Return the configured own team without creating any catalogue data."""
+    configured = get_setting(session, "own_team_id")
+    if configured:
+        try:
+            item = session.get(Team, int(configured))
+            if item and item.active:
+                return item
+        except (TypeError, ValueError):
+            pass
+    return session.scalar(
+        select(Team).where(and_(Team.is_own_team.is_(True), Team.active.is_(True))).order_by(Team.id).limit(1)
+    )
+
+
+def get_active_season(session: Session) -> Season | None:
+    """Return the season explicitly selected as active, or the newest active season."""
+    configured = get_setting(session, "active_season_id")
+    if configured:
+        try:
+            item = session.get(Season, int(configured))
+            if item and item.active:
+                return item
+        except (TypeError, ValueError):
+            pass
+    return session.scalar(select(Season).where(Season.active.is_(True)).order_by(desc(Season.name)).limit(1))
+
+
+def set_active_season(session: Session, season_id: int, actor_id: int | None = None) -> Season:
+    season = session.get(Season, int(season_id))
+    if not season or not season.active:
+        raise ValueError("Temporada activa no válida.")
+    set_setting(session, "active_season_id", str(season.id), actor_id)
+    return season
+
+
+def previous_match_with_team(
+    session: Session,
+    team_id: int,
+    *,
+    before_date: date | None = None,
+    exclude_match_id: int | None = None,
+    opponent_id: int | None = None,
+) -> Match | None:
+    stmt = (
+        select(Match)
+        .options(joinedload(Match.home_team), joinedload(Match.away_team), joinedload(Match.season), joinedload(Match.competition))
+        .where(
+            Match.deleted_at.is_(None),
+            or_(Match.home_team_id == team_id, Match.away_team_id == team_id),
+        )
+    )
+    if before_date:
+        stmt = stmt.where(Match.match_date <= before_date)
+    if exclude_match_id:
+        stmt = stmt.where(Match.id != exclude_match_id)
+    if opponent_id:
+        stmt = stmt.where(
+            or_(
+                and_(Match.home_team_id == team_id, Match.away_team_id == opponent_id),
+                and_(Match.away_team_id == team_id, Match.home_team_id == opponent_id),
+            )
+        )
+    stmt = stmt.order_by(desc(Match.match_date), desc(Match.id)).limit(1)
+    return session.scalar(stmt)
+
+
+def copy_lineup_from_match(
+    session: Session,
+    *,
+    source_match_id: int,
+    target_match_id: int,
+    team_id: int,
+    actor_id: int,
+) -> list[Participation]:
+    """Copy a prior lineup into a draft match, preserving player, role and minutes."""
+    source_rows = get_participations(session, source_match_id, team_id)
+    if not source_rows:
+        raise ValueError("El partido anterior no tiene una alineación guardada para este equipo.")
+    target_match = get_match(session, target_match_id)
+    if not target_match:
+        raise ValueError("Partido destino no encontrado.")
+    data = []
+    for p in source_rows:
+        # Keep the season roster in sync when reusing players.
+        assign_player_to_roster(
+            session,
+            team_id,
+            target_match.season_id,
+            p.player_id,
+            p.shirt_number,
+            actor_id,
+        )
+        data.append({
+            "selected": True,
+            "player_id": p.player_id,
+            "shirt_number": p.shirt_number,
+            "starter": p.starter,
+            "position": p.position or p.player.primary_position or "Otro",
+            "minute_in": p.minute_in,
+            "minute_out": p.minute_out,
+            "captain": p.captain,
+        })
+    result = replace_participations(session, target_match_id, team_id, data, actor_id)
+    audit(
+        session,
+        actor_id,
+        "copy_lineup",
+        "match",
+        target_match_id,
+        detail=f"source={source_match_id}; team={team_id}; rows={len(result)}",
+    )
+    return result
+
+
+def save_named_lineup(
+    session: Session,
+    *,
+    match_id: int,
+    team_id: int,
+    season_id: int,
+    rows: Sequence[dict],
+    actor_id: int,
+    sync_roster: bool = True,
+) -> list[Participation]:
+    """Resolve/create players from a quick named lineup and save participations.
+
+    This removes the old requirement for a rival roster to exist before the match.
+    A rival player typed into the post-match wizard can become a catalogue player and
+    roster member as a natural consequence of the participation itself.
+    """
+    prepared: list[dict] = []
+    errors: list[str] = []
+    for index, raw in enumerate(rows, start=1):
+        name = str(raw.get("name") or raw.get("player") or raw.get("Jugador") or "").strip()
+        if not name:
+            continue
+        position = str(raw.get("position") or raw.get("Posición") or "Otro").strip() or "Otro"
+        try:
+            player = find_or_create_player(
+                session,
+                name,
+                primary_position=position,
+                actor_id=actor_id,
+            )
+            shirt_raw = raw.get("shirt_number", raw.get("Dorsal"))
+            shirt = int(shirt_raw) if shirt_raw not in (None, "") and not (isinstance(shirt_raw, float) and math.isnan(shirt_raw)) else None
+            if sync_roster:
+                assign_player_to_roster(session, team_id, season_id, player.id, shirt, actor_id)
+            starter = bool(raw.get("starter", raw.get("Titular", False)))
+            minute_in = int(raw.get("minute_in", raw.get("Entrada", 0)) or 0)
+            minute_out = int(raw.get("minute_out", raw.get("Salida", 90)) or 90)
+            if starter:
+                minute_in = 0
+            prepared.append({
+                "selected": True,
+                "player_id": player.id,
+                "shirt_number": shirt,
+                "starter": starter,
+                "position": position,
+                "minute_in": minute_in,
+                "minute_out": minute_out,
+                "captain": bool(raw.get("captain", raw.get("Capitán", False))),
+            })
+        except Exception as exc:
+            errors.append(f"Fila {index} · {name}: {exc}")
+    if errors:
+        raise ValueError("\n".join(errors))
+    if not prepared:
+        raise ValueError("Añade al menos un jugador antes de guardar la alineación.")
+    return replace_participations(session, match_id, team_id, prepared, actor_id)
+
+
+def own_player_rankings(
+    session: Session,
+    min_observations: int = 1,
+    *,
+    season_id: int | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Aggregate only approved/final internal evaluations of the own team."""
+    stmt = (
+        select(PlayerEvaluation, Report, Match, Player, Participation)
+        .join(Report, PlayerEvaluation.report_id == Report.id)
+        .join(Match, Report.match_id == Match.id)
+        .join(Player, PlayerEvaluation.player_id == Player.id)
+        .outerjoin(Participation, PlayerEvaluation.participation_id == Participation.id)
+        .where(
+            Report.status.in_(FINAL_REPORT_STATUSES),
+            PlayerEvaluation.evaluation_scope == "own",
+            PlayerEvaluation.team_id == Report.own_team_id,
+            PlayerEvaluation.observation_status == "evaluated",
+            PlayerEvaluation.general_rating.is_not(None),
+        )
+    )
+    if season_id:
+        stmt = stmt.where(Match.season_id == season_id)
+    rows = session.execute(stmt).all()
+    grouped: dict[int, dict] = {}
+    for ev, report, match, player, participation in rows:
+        row = grouped.setdefault(
+            player.id,
+            {
+                "player_id": player.id,
+                "full_name": player.full_name,
+                "primary_position": (participation.position if participation and participation.position else player.primary_position),
+                "ratings": [],
+                "standouts": 0,
+                "reporters": set(),
+                "last_observed": None,
+            },
+        )
+        row["ratings"].append(float(ev.general_rating))
+        row["standouts"] += int(bool(ev.standout))
+        row["reporters"].add(report.reporter_id)
+        if row["last_observed"] is None or match.match_date > row["last_observed"]:
+            row["last_observed"] = match.match_date
+    result: list[dict] = []
+    for row in grouped.values():
+        values = row.pop("ratings")
+        if len(values) < min_observations:
+            continue
+        avg = sum(values) / len(values)
+        dispersion = math.sqrt(sum((x - avg) ** 2 for x in values) / len(values)) if len(values) > 1 else 0.0
+        result.append({
+            **{k: v for k, v in row.items() if k != "reporters"},
+            "observations": len(values),
+            "avg_general": avg,
+            "rating_dispersion": dispersion,
+            "reporter_count": len(row["reporters"]),
+        })
+    result.sort(key=lambda x: (x["avg_general"], x["observations"]), reverse=True)
+    return result[:limit] if limit else result
+
+
+def player_history_by_scope(
+    session: Session,
+    player_id: int,
+    *,
+    scope: str = "rival",
+    include_non_final: bool = False,
+) -> list[dict]:
+    if scope not in {"rival", "own", "all"}:
+        raise ValueError("Ámbito de historial no válido.")
+    stmt = (
+        select(PlayerEvaluation, Report, Match, User, Team, Competition, Participation)
+        .join(Report, PlayerEvaluation.report_id == Report.id)
+        .join(Match, Report.match_id == Match.id)
+        .join(User, Report.reporter_id == User.id)
+        .join(Team, PlayerEvaluation.team_id == Team.id)
+        .join(Competition, Match.competition_id == Competition.id)
+        .outerjoin(Participation, PlayerEvaluation.participation_id == Participation.id)
+        .where(PlayerEvaluation.player_id == player_id)
+    )
+    if scope == "rival":
+        stmt = stmt.where(PlayerEvaluation.evaluation_scope == "rival", PlayerEvaluation.team_id == Report.rival_team_id)
+    elif scope == "own":
+        stmt = stmt.where(PlayerEvaluation.evaluation_scope == "own", PlayerEvaluation.team_id == Report.own_team_id)
+    if not include_non_final:
+        stmt = stmt.where(Report.status.in_(FINAL_REPORT_STATUSES))
+    stmt = stmt.options(joinedload(Match.home_team), joinedload(Match.away_team)).order_by(desc(Match.match_date), desc(Report.id))
+    result = []
+    for ev, report, match, user, team, competition, participation in session.execute(stmt).all():
+        result.append({
+            "evaluation": ev,
+            "report": report,
+            "match": match,
+            "reporter": user,
+            "team": team,
+            "competition": competition,
+            "participation": participation,
+        })
+    return result
+
+
+def recent_rival_highlights(session: Session, *, limit: int = 12, minimum_rating: float = 8.0) -> list[dict]:
+    stmt = (
+        select(PlayerEvaluation, Report, Match, Player, Participation)
+        .join(Report, PlayerEvaluation.report_id == Report.id)
+        .join(Match, Report.match_id == Match.id)
+        .join(Player, PlayerEvaluation.player_id == Player.id)
+        .outerjoin(Participation, PlayerEvaluation.participation_id == Participation.id)
+        .where(
+            *_valid_rival_evaluation_predicates(),
+            PlayerEvaluation.general_rating >= minimum_rating,
+        )
+        .order_by(desc(Match.match_date), desc(PlayerEvaluation.general_rating))
+        .limit(limit)
+    )
+    result = []
+    for ev, report, match, player, participation in session.execute(stmt).all():
+        result.append({
+            "evaluation": ev,
+            "report": report,
+            "match": match,
+            "player": player,
+            "participation": participation,
+        })
+    return result

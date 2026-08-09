@@ -18,7 +18,7 @@ def _safe_date(value, fallback: date) -> date:
 
 
 def render(user: dict) -> None:
-    page_header("Base de datos", "Mantén el catálogo vivo: edición, archivo, plantillas, alias y fusión segura de duplicados.")
+    page_header("Base de datos · mantenimiento", "Zona administrativa para revisar, corregir, archivar o fusionar datos. El trabajo normal se hace desde Nuevo postpartido.")
     tab_seasons, tab_comp, tab_teams, tab_players, tab_rosters, tab_duplicates = st.tabs([
         "Temporadas", "Competiciones", "Equipos", "Jugadores", "Plantillas", "Duplicados"
     ])

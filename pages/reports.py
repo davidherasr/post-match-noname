@@ -16,6 +16,9 @@ from ui.helpers import match_label
 from ui.styles import page_header
 
 
+REPORTS_PAGE_API_VERSION = "3.0.0"
+
+
 def _minutes_played(participation) -> int:
     minute_in = int(participation.minute_in or 0)
     minute_out = int(participation.minute_out or 90)
@@ -99,6 +102,12 @@ def _rating_changed(*args) -> None:
     _persist_player_card(*args)
 
 
+def _quick_rating(value: float, *args) -> None:
+    prefix = args[-1]
+    st.session_state[prefix + "rating"] = float(value)
+    _rating_changed(*args)
+
+
 def _note_changed(*args) -> None:
     _persist_player_card(*args)
 
@@ -136,7 +145,7 @@ def _render_player_card(report_id: int, participation, team_id: int, existing, u
                 "Valoración del partido",
                 min_value=0.0,
                 max_value=10.0,
-                step=0.5,
+                step=0.1,
                 key=prefix + "rating",
                 disabled=read_only,
                 on_change=_rating_changed,
@@ -144,6 +153,17 @@ def _render_player_card(report_id: int, participation, team_id: int, existing, u
                 help="0 significa que no has podido valorar al jugador.",
             )
             st.caption("0 = sin valorar · 8 o más se marca automáticamente como destacado")
+            quick = st.columns(5)
+            for col, value in zip(quick, (5.0, 6.0, 7.0, 8.0, 9.0)):
+                col.button(
+                    f"{int(value)}",
+                    use_container_width=True,
+                    disabled=read_only,
+                    key=f"{prefix}quick_{int(value)}",
+                    on_click=_quick_rating,
+                    args=(value, *callback_args),
+                    help=f"Poner {value:.0f} rápidamente y ajustar después con la barra si quieres.",
+                )
         with note_col:
             st.text_area(
                 "Observación opcional",
@@ -231,10 +251,10 @@ def _render_finish_tab(report, evaluation_list: list, report_id: int, user: dict
     metrics = st.columns(4)
     metrics[0].metric("Rivales valorados", len(valid_rival))
     metrics[1].metric("Propios valorados", len(valid_own))
-    metrics[2].metric("Incluidos en PDF", len([e for e in valid_rival if e.pdf_include]))
+    metrics[2].metric("Incluidos en PDF", len([e for e in (valid_rival + valid_own) if e.pdf_include]))
     metrics[3].metric("Versión", f"V{report.version}")
 
-    st.info("Para entregar solo es obligatorio valorar al menos a un jugador rival. Las observaciones y las notas de nuestro equipo son opcionales.")
+    st.info("No tienes que rellenarlo todo. Puedes entregar aunque queden jugadores sin valorar; 0 significa simplemente que no has tenido elementos suficientes.")
     if errors and not read_only:
         st.warning(" · ".join(errors))
     mode = st.radio("Vista previa", list(PDF_MODES), format_func=lambda m: PDF_MODES[m], horizontal=True)
@@ -343,18 +363,18 @@ def _render_report_editor(report_id: int, user: dict) -> None:
     progress = len(evaluated_rival) / len(rival_players) if rival_players else 0
     st.progress(progress, text=f"{len(evaluated_rival)} de {len(rival_players)} rivales valorados")
 
-    tab_rival, tab_own, tab_finish, tab_docs = st.tabs([
-        f"Rival · {report.rival_team.name}",
+    tab_own, tab_rival, tab_finish, tab_docs = st.tabs([
         f"Nuestro equipo · {report.own_team.name}",
+        f"Rival · {report.rival_team.name}",
         "Finalizar",
         "Documentos",
     ])
-    with tab_rival:
-        st.caption("Solo tienes que mover la barra. La posición y los minutos vienen del partido y no pueden modificarse aquí.")
-        _render_players_group(report_id, rival_players, report.rival_team_id, evaluations, user, read_only, False)
     with tab_own:
-        st.caption("Valoración interna opcional. El funcionamiento es exactamente el mismo.")
+        st.caption("Mismo sistema sencillo: posición y minutos están bloqueados; tú solo valoras el rendimiento.")
         _render_players_group(report_id, own_players, report.own_team_id, evaluations, user, read_only, True)
+    with tab_rival:
+        st.caption("Valora únicamente lo que hayas visto. La posición, dorsal, titularidad y minutos ya vienen preparados por administración.")
+        _render_players_group(report_id, rival_players, report.rival_team_id, evaluations, user, read_only, False)
     with tab_finish:
         _render_finish_tab(report, evaluation_list, report_id, user, read_only)
     with tab_docs:
@@ -375,7 +395,7 @@ def _available_work_matches(user: dict):
 
 
 def _render_work(user: dict) -> None:
-    page_header("Hacer informe", "Selecciona el partido y valora a los jugadores sin rellenar campos innecesarios.")
+    page_header("Valorar partido", "Solo jugadores: nota, observación opcional y dos checks. El resto ya viene del partido.")
     matches, assignments, reports = _available_work_matches(user)
     if not matches:
         st.info("No tienes partidos asignados.")
@@ -388,7 +408,7 @@ def _render_work(user: dict) -> None:
         if m.id not in existing_by_match or existing_by_match[m.id].status in {"draft", "returned"}
     ]
     if not active_matches:
-        st.success("No tienes informes pendientes. Puedes consultarlos desde Mis informes.")
+        st.success("No tienes valoraciones pendientes. Puedes consultar lo ya entregado desde Mis informes.")
         return
 
     labels = {}
@@ -404,8 +424,8 @@ def _render_work(user: dict) -> None:
     selected_match_id = st.selectbox("Partido que vas a informar", valid_ids, index=default_index, format_func=lambda mid: labels[mid])
     selected_report = existing_by_match.get(selected_match_id)
     if not selected_report:
-        st.info("El informe todavía no se ha iniciado. La alineación y los minutos ya vienen cargados por administración.")
-        if st.button("Empezar valoración", type="primary", use_container_width=True):
+        st.info("Todo está preparado por administración: alineaciones, posiciones y minutos. Solo tienes que valorar jugadores.")
+        if st.button("Empezar a valorar", type="primary", use_container_width=True):
             try:
                 with session_scope() as session:
                     report = repo.get_or_create_report(session, selected_match_id, user["id"], actor_role=user["role"])
@@ -451,8 +471,19 @@ def _render_archive(user: dict) -> None:
     _render_report_editor(selected_report_id, user)
 
 
+def render_work(user: dict) -> None:
+    """Stable entrypoint for the report creation workflow."""
+    _render_work(user)
+
+
+def render_archive(user: dict) -> None:
+    """Stable entrypoint for the report archive workflow."""
+    _render_archive(user)
+
+
 def render(user: dict, mode: str = "work") -> None:
+    """Backward-compatible dispatcher kept for older internal calls."""
     if mode == "archive":
-        _render_archive(user)
+        render_archive(user)
     else:
-        _render_work(user)
+        render_work(user)

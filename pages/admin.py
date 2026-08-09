@@ -89,7 +89,7 @@ def render(user: dict) -> None:
             except Exception:
                 st.warning("El logotipo guardado no se ha podido previsualizar.")
         with st.form("brand_form"):
-            club_name = st.text_input("Nombre de la aplicación / club", value=app_settings.get("club_name") or "PostMatch Scout")
+            club_name = st.text_input("Nombre de la aplicación / club", value=app_settings.get("club_name") or "NO NAME")
             report_subtitle = st.text_input("Subtítulo del informe PDF", value=app_settings.get("report_subtitle") or "Dirección deportiva · Observación de rivales")
             confidentiality = st.text_input("Leyenda de confidencialidad", value=app_settings.get("report_confidentiality") or "Documento interno y confidencial")
             c1, c2 = st.columns(2)
@@ -102,7 +102,7 @@ def render(user: dict) -> None:
             save = st.form_submit_button("Guardar identidad", type="primary")
         if save:
             with session_scope() as session:
-                repo.set_setting(session, "club_name", club_name.strip() or "PostMatch Scout", user["id"])
+                repo.set_setting(session, "club_name", club_name.strip() or "NO NAME", user["id"])
                 repo.set_setting(session, "report_subtitle", report_subtitle.strip() or None, user["id"])
                 repo.set_setting(session, "report_confidentiality", confidentiality.strip() or None, user["id"])
                 repo.set_setting(session, "primary_color", primary, user["id"])
@@ -202,5 +202,5 @@ def render(user: dict) -> None:
         st.warning("El backup técnico contiene todos los datos estructurados, incluidos hashes de contraseña. Trátalo como un archivo confidencial y almacénalo cifrado.")
         with session_scope() as session:
             backup = technical_backup_zip(session)
-        st.download_button("Descargar backup técnico restaurable", backup, "postmatch_scout_2_1_backup.zip", "application/zip", type="primary")
+        st.download_button("Descargar backup técnico restaurable", backup, "noname_postmatch_3_0_backup.zip", "application/zip", type="primary")
         st.caption("Este backup es distinto de la exportación analítica Excel: conserva tablas y relaciones para recuperación técnica.")

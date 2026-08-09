@@ -14,7 +14,7 @@ from repositories import scouting as repo
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Crear administrador de PostMatch Scout")
+    parser = argparse.ArgumentParser(description="Crear administrador de No Name PostMatch")
     parser.add_argument("--name", required=True)
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)

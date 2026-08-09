@@ -465,7 +465,9 @@ def _kpi_table(payload: dict, styles: dict, primary: Color, dark: Color) -> Tabl
 
 
 def _watchlist_table(payload: dict, styles: dict, primary: Color, dark: Color) -> Table:
-    rows = payload["noteworthy_players"][:5] or payload["evaluated_players"][:3]
+    eligible = [row for row in payload["evaluated_players"] if getattr(row["evaluation"], "pdf_include", True)]
+    highlighted = [row for row in payload["noteworthy_players"] if getattr(row["evaluation"], "pdf_include", True)]
+    rows = highlighted[:5] or eligible[:3]
     if not rows:
         return Table([[Paragraph("Todavía no hay jugadores evaluados para destacar.", styles["body_muted"])]],
                      colWidths=[174 * mm])
@@ -569,7 +571,7 @@ def _lineup_card(team_name: str, formation: str | None, rows: list[dict], styles
 
 
 def _player_overview_table(payload: dict, styles: dict, primary: Color, dark: Color) -> Table:
-    rows = payload["evaluated_players"]
+    rows = [row for row in payload["evaluated_players"] if getattr(row["evaluation"], "pdf_include", True)]
     data = [[
         Paragraph("#", styles["table_header_center"]),
         Paragraph("JUGADOR", styles["table_header"]),
@@ -731,7 +733,7 @@ def _other_observations_table(payload: dict, styles: dict, dark: Color) -> Table
     rows = []
     for row in payload["rival_players"]:
         ev = row["evaluation"]
-        if not ev or ev.observation_status == "evaluated":
+        if not ev or ev.observation_status == "evaluated" or not getattr(ev, "pdf_include", True):
             continue
         part = row["participation"]
         rows.append((part, ev))
@@ -932,8 +934,8 @@ def generate_report_pdf(session: Session, report_id: int) -> bytes:
 
     primary = _hex_to_color(settings.get("primary_color"), "#B91C1C")
     dark = _hex_to_color(settings.get("secondary_color"), "#111827")
-    club_name = settings.get("club_name") or "PostMatch Scout"
-    report_subtitle = settings.get("report_subtitle") or "Dirección deportiva · Observación de rivales"
+    club_name = settings.get("club_name") or "NO NAME"
+    report_subtitle = settings.get("report_subtitle") or "No Name · Informe postpartido"
     confidentiality = settings.get("report_confidentiality") or "Documento interno y confidencial"
     logo = _image_reader(settings.get("logo_b64"))
     styles = _styles(primary, dark)
@@ -953,7 +955,7 @@ def generate_report_pdf(session: Session, report_id: int) -> bytes:
         title=f"Informe postpartido · {match.home_team.name} - {match.away_team.name}",
         author=report.reporter.full_name,
         subject=f"Observación de {report.rival_team.name}",
-        creator=f"{club_name} · PostMatch Scout 2.1",
+        creator=f"{club_name} · No Name PostMatch 3.0",
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main", showBoundary=0)
 
@@ -1139,7 +1141,7 @@ def generate_report_pdf(session: Session, report_id: int) -> bytes:
     return buffer.getvalue()
 
 # ===========================================================================
-# PostMatch Scout 2.1 - immutable versions, executive/full modes and visual XI
+# No Name PostMatch 3.0 - immutable versions, executive/full modes and visual XI
 # ===========================================================================
 from datetime import date as _date
 from pathlib import Path as _Path
@@ -1256,7 +1258,7 @@ def report_filename(session: Session, report_id: int, version: int | None = None
     payload = build_report_payload(session, report_id, version=version)
     match, report = payload["match"], payload["report"]
     date_str = match.match_date.strftime("%Y-%m-%d") if hasattr(match.match_date, "strftime") else str(match.match_date)[:10]
-    return f"PostMatch_{date_str}_{_slug(match.home_team.name)}_vs_{_slug(match.away_team.name)}_V{version or report.version}_{mode}.pdf"
+    return f"NoName_PostMatch_{date_str}_{_slug(match.home_team.name)}_vs_{_slug(match.away_team.name)}_V{version or report.version}_{mode}.pdf"
 
 
 class MatchHeroV2(Flowable):
@@ -1357,8 +1359,8 @@ def generate_report_pdf(session: Session, report_id: int, *, version: int | None
     payload = build_report_payload(session, report_id, version=version)
     report, match, settings = payload["report"], payload["match"], payload["settings"]
     primary = _hex_to_color(settings.get("primary_color"), "#B91C1C"); dark = _hex_to_color(settings.get("secondary_color"), "#111827")
-    club_name = settings.get("club_name") or "PostMatch Scout"
-    report_subtitle = settings.get("report_subtitle") or "Dirección deportiva · Observación de rivales"
+    club_name = settings.get("club_name") or "NO NAME"
+    report_subtitle = settings.get("report_subtitle") or "No Name · Informe postpartido"
     confidentiality = settings.get("report_confidentiality") or "Documento interno y confidencial"
     styles = _styles_v2(primary, dark)
     score = "-" if match.home_score is None or match.away_score is None else f"{match.home_score}  -  {match.away_score}"
@@ -1367,12 +1369,12 @@ def generate_report_pdf(session: Session, report_id: int, *, version: int | None
     if mode == "executive":
         cards = [r for r in cards if r in payload["noteworthy_players"] or r["participation"].player_id == report.standout_player_id][:5]
         if not cards:
-            cards = payload["evaluated_players"][:3]
+            cards = [r for r in payload["evaluated_players"] if getattr(r["evaluation"], "pdf_include", True)][:3]
 
     buffer = BytesIO()
     doc = BaseDocTemplate(buffer, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=18*mm, bottomMargin=18*mm,
                           title=f"Informe postpartido · {match.home_team.name} - {match.away_team.name}", author=report.reporter.full_name,
-                          subject=f"Observación de {report.rival_team.name}", creator=f"{club_name} · PostMatch Scout 2.1")
+                          subject=f"Postpartido · {report.rival_team.name}", creator=f"{club_name} · No Name PostMatch 3.0")
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
     def header_footer(canvas, current_doc):
         canvas.saveState(); page = current_doc.page
@@ -1409,26 +1411,21 @@ def generate_report_pdf(session: Session, report_id: int, *, version: int | None
     pitches.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 0), ("RIGHTPADDING", (0,0), (-1,-1), 3*mm)])); story.append(pitches)
     story += [Spacer(1, 4*mm), Table([[_lineup_card(report.own_team.name, "Suplentes y minutos", payload["own_players"], styles, primary, dark), _lineup_card(report.rival_team.name, "Suplentes y minutos", payload["rival_players"], styles, primary, dark)]], colWidths=[86*mm,86*mm], style=[("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 0), ("RIGHTPADDING", (0,0), (-1,-1), 2*mm)])]
 
-    story += [PageBreak(), _section_heading(f"Resumen de {report.rival_team.name}", styles, primary, dark, "Solo datos validados"), Spacer(1, 3*mm), _player_overview_table(payload, styles, primary, dark)]
+    story += [PageBreak()]
+    own = _own_team_table(payload, styles, dark)
+    if own:
+        story += [_section_heading(f"Valoraciones · {report.own_team.name}", styles, primary, dark, "Solo jugadores seleccionados para PDF"), Spacer(1,3*mm), own, Spacer(1,5*mm)]
+    story += [_section_heading(f"Valoraciones · {report.rival_team.name}", styles, primary, dark, "Solo jugadores seleccionados para PDF"), Spacer(1, 3*mm), _player_overview_table(payload, styles, primary, dark)]
     if cards:
         story += [Spacer(1, 6*mm), _section_heading("Fichas individuales", styles, primary, dark, f"{len(cards)} perfiles seleccionados"), Spacer(1, 4*mm)]
         for row in cards:
             story.append(CondPageBreak(65*mm)); parts = _player_card(row, styles, primary, dark)
             story.append(KeepTogether(parts[:2])); story.extend(parts[2:])
     if mode == "full":
-        other = _other_observations_table(payload, styles, dark); own = _own_team_table(payload, styles, dark)
-        if other or own:
+        other = _other_observations_table(payload, styles, dark)
+        if other:
             story.append(CondPageBreak(52*mm))
-            if other: story += [_section_heading("Registro de observación", styles, primary, dark, "Sin nota completa"), Spacer(1,3*mm), other, Spacer(1,5*mm)]
-            if own: story += [_section_heading(f"Notas internas · {report.own_team.name}", styles, primary, dark, "Bloque opcional"), Spacer(1,3*mm), own, Spacer(1,5*mm)]
-            methodology = Table([
-                [Paragraph("NOTA GENERAL", styles["callout_label"]), Paragraph("Valoración contextual de 0 a 10 del rendimiento observado en este partido. El valor 0 se considera sin evaluación.", styles["table_body"])],
-                [Paragraph("DESTACADO", styles["callout_label"]), Paragraph("Se propone automáticamente a partir de 8,0 y el informador puede modificarlo manualmente.", styles["table_body"])],
-                [Paragraph("INCLUSIÓN EN PDF", styles["callout_label"]), Paragraph("Está activada por defecto; solo aparecen jugadores con una valoración válida mayor que 0.", styles["table_body"])],
-                [Paragraph("TRAZABILIDAD", styles["callout_label"]), Paragraph(f"Informe {report.id} · versión V{current_version} · informador {_safe(report.reporter.full_name)} · documento generado desde un snapshot inmutable.", styles["table_body"])],
-            ], colWidths=[34*mm, 140*mm])
-            methodology.setStyle(TableStyle([("GRID", (0,0), (-1,-1), .35, HexColor("#D8E0E8")), ("BACKGROUND", (0,0), (0,-1), HexColor("#F8FAFC")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 3*mm), ("RIGHTPADDING", (0,0), (-1,-1), 3*mm), ("TOPPADDING", (0,0), (-1,-1), 2.6*mm), ("BOTTOMPADDING", (0,0), (-1,-1), 2.6*mm)]))
-            story += [_section_heading("Criterios de lectura", styles, primary, dark, "Metodología interna"), Spacer(1,3*mm), methodology]
+            story += [_section_heading("Registro de observación", styles, primary, dark, "Solo jugadores incluidos en PDF"), Spacer(1,3*mm), other, Spacer(1,5*mm)]
     story += [Spacer(1, 6*mm), Paragraph(f"Generado por <b>{_safe(report.reporter.full_name)}</b> · versión inmutable V{current_version} · modo {mode}", styles["small_note"])]
     doc.build(story)
     return buffer.getvalue()

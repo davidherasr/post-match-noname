@@ -1,61 +1,39 @@
-# Validación técnica - PostMatch Scout 2.1
+# Validación técnica · No Name PostMatch 3.0.0
 
-Fecha de validación: 4 de agosto de 2026.
+## Comprobaciones ejecutadas
 
-## Alcance comprobado
+- Compilación de todos los módulos Python.
+- Suite de pruebas automatizadas completa.
+- Generación PDF dentro de tests de repositorio.
+- Flujo de alineación rival sin plantilla previa.
+- Creación automática de jugadores y roster rival desde el partido.
+- Copia de alineación propia entre partidos.
+- Separación estricta entre histórico propio y scouting rival.
+- Rankings rivales únicamente a partir de informes aprobados/finales.
+- Migración Alembic desde base vacía hasta `head`.
+- Migración Alembic desde `0001_initial_2_0` hasta `0002_noname_3_0`.
+- Contrato interno de versión 3.0.0.
 
-- 43 módulos Python y aproximadamente 6.702 líneas de código.
-- Compilación completa mediante `python -m compileall -q .`.
-- 12 pruebas automatizadas superadas con `pytest -q`.
-- Flujo de muestra con dos informadores, valoraciones simplificadas, entrega, aprobación y snapshot inmutable.
-- Entrega válida sin impresión general del rival.
-- Automatismo de destacado a partir de 8,0.
-- Inclusión en PDF predeterminada y anulable manualmente.
-- Sincronización automática del MVP rival.
-- PDF completo y ejecutivo generados y abiertos correctamente.
-- Preflight PDF correcto: documentos no cifrados, no escaneados y sin XFA.
-- Renderizado visual de 7 páginas del PDF completo y 4 páginas del ejecutivo.
-- Tablas PDF adaptadas al nuevo modelo, sin columnas vacías de decisión o confianza.
-
-## Resultado de pruebas
+## Resultado de la suite
 
 ```text
-12 passed
+16 passed
 ```
 
-Las pruebas cubren:
-
-- seguridad y bloqueo de accesos;
-- normalización de nombres;
-- importaciones;
-- duplicados y fusión;
-- exclusión de borradores y valoraciones propias de las analíticas;
-- snapshots inmutables;
-- generación PDF;
-- control de concurrencia;
-- reconciliación de alineaciones;
-- nota cero como no observado;
-- destacado automático;
-- anulación manual de checks;
-- entrega sin resumen general.
-
-## PDF
+## Migraciones
 
 ```text
-Completo:   7 páginas - 67.809 bytes
-Ejecutivo:  4 páginas - 59.282 bytes
+0001_initial_2_0
+        ↓
+0002_noname_3_0  (head)
 ```
 
-Se revisaron visualmente la portada, el resumen rival, las alineaciones y las fichas individuales. No se detectaron textos cortados, solapamientos ni glifos rotos.
+`0002_noname_3_0` es deliberadamente no destructiva: marca la frontera de la edición No Name y conserva la base 2.x existente.
 
-## Base de datos
+## Datos incluidos
 
-La versión 2.1 utiliza el mismo esquema que la versión 2.0. No requiere una migración adicional y conserva la revisión Alembic:
+La release no contiene base SQLite pre-poblada ni muestras deportivas. No se incluyen jugadores, equipos, partidos o informes de demostración. Los tests crean sus datos solo en bases SQLite en memoria durante la ejecución.
 
-```text
-0001_initial_2_0 (head)
-```
+## Limitación de validación
 
-## Limitación de esta validación
-
-El entorno de construcción no dispone del paquete `streamlit`, por lo que no se ejecutó una prueba end-to-end de navegador. La instalación del paquete tampoco fue posible desde el índice disponible en este entorno. La sintaxis, lógica de datos, reglas automáticas, pruebas, PDF, importaciones y persistencia han sido comprobadas. Queda pendiente la prueba visual final después del despliegue en Streamlit Community Cloud.
+El entorno de construcción no tiene instalado Streamlit, por lo que no se ha podido hacer una prueba de aceptación visual en navegador. Esa validación debe hacerse tras el despliegue en Streamlit Community Cloud. La lógica Python, repositorios, migraciones y pruebas sí se han ejecutado.

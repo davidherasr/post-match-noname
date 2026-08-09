@@ -32,6 +32,34 @@ apply_global_styles(
 )
 
 
+def _render_reports_route(user: dict, mode: str) -> None:
+    """Render the reports page and fail clearly when deployment files are mixed."""
+    from pages import reports as reports_page
+
+    expected_api = "3.0.0"
+    deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
+    if deployed_api != expected_api:
+        st.error("La aplicación tiene archivos mezclados de versiones distintas.")
+        st.markdown(
+            "`app.py` es de No Name PostMatch 3.0, pero `pages/reports.py` no corresponde a esta versión. "
+            "Sustituye **todo el contenido del repositorio** por el paquete 3.0 y reinicia la aplicación."
+        )
+        st.code(
+            f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
+            "Archivo que debes comprobar: pages/reports.py",
+            language="text",
+        )
+        st.stop()
+
+    renderer_name = "render_archive" if mode == "archive" else "render_work"
+    renderer = getattr(reports_page, renderer_name, None)
+    if not callable(renderer):
+        st.error(f"No se encuentra la función requerida: pages.reports.{renderer_name}().")
+        st.info("Vuelve a subir el paquete completo No Name PostMatch 3.0 y reinicia la aplicación.")
+        st.stop()
+    renderer(user)
+
+
 def render_login() -> None:
     _, center, _ = st.columns([1, 1.15, 1])
     with center:
@@ -62,10 +90,7 @@ def render_login() -> None:
             else:
                 st.error("Acceso no válido. Tras varios intentos la cuenta se bloquea temporalmente.")
         if settings.demo_mode:
-            st.info(
-                f"Modo demostración. Administrador: {settings.bootstrap_admin_email} / {settings.bootstrap_admin_password}. "
-                "Informador: informador@postmatch.local / DemoReporter2026!"
-            )
+            st.info(f"Modo local. Administrador inicial: {settings.bootstrap_admin_email}. No se cargan datos deportivos de ejemplo.")
 
 
 user = current_user()
@@ -96,24 +121,25 @@ if user.get("must_change_password"):
 
 ROLE_NAVIGATION: dict[str, list[tuple[str, str]]] = {
     "reporter": [
-        ("Mi panel", "dashboard"),
-        ("Hacer informe", "report_work"),
+        ("Inicio", "dashboard"),
+        ("Valorar partido", "report_work"),
         ("Mis informes", "report_archive"),
         ("Jugadores", "players"),
     ],
     "director": [
-        ("Panel de dirección", "dashboard"),
-        ("Revisar y analizar", "director"),
+        ("Inicio", "dashboard"),
+        ("Revisar y decidir", "director"),
         ("Informes", "report_archive"),
         ("Jugadores", "players"),
     ],
     "admin": [
-        ("Panel de administración", "dashboard"),
+        ("Inicio", "dashboard"),
+        ("Nuevo postpartido", "postmatch"),
         ("Partidos", "matches"),
-        ("Base de datos", "catalog"),
         ("Informes", "report_archive"),
         ("Jugadores", "players"),
         ("Dirección deportiva", "director"),
+        ("Base de datos", "catalog"),
         ("Administración", "admin"),
     ],
 }
@@ -149,16 +175,17 @@ if route == "dashboard":
     from pages.dashboard import render
     render(user)
 elif route == "report_work":
-    from pages.reports import render
-    render(user, mode="work")
+    _render_reports_route(user, mode="work")
 elif route == "report_archive":
-    from pages.reports import render
-    render(user, mode="archive")
+    _render_reports_route(user, mode="archive")
 elif route == "players":
     from pages.players import render
     render(user)
 elif route == "director":
     from pages.director import render
+    render(user)
+elif route == "postmatch":
+    from pages.postmatch import render
     render(user)
 elif route == "matches":
     from pages.matches import render

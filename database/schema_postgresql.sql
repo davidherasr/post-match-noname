@@ -1,4 +1,4 @@
--- PostMatch Scout 2.1
+-- No Name PostMatch 3.0
 -- Esquema de referencia. En producción usa Alembic.
 
 

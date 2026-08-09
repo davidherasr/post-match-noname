@@ -1,95 +1,154 @@
-# PostMatch Scout 2.1
+# No Name PostMatch 3.0
 
-Aplicación interna en **Python + Streamlit** para registrar valoraciones postpartido de jugadores, generar PDF y construir un histórico útil para dirección deportiva.
+Aplicación interna de No Name para convertir cada partido terminado en dos cosas a la vez: memoria de rendimiento del propio equipo y base acumulada de scouting de rivales. La edición 3.0 mantiene la arquitectura robusta de PostMatch Scout 2.x, pero cambia por completo el flujo visible para reducir pasos y carga administrativa.
 
-La versión 2.1 cambia especialmente la experiencia del informador: cada rol dispone de su propio menú y panel, y la valoración de jugadores se realiza mediante fichas individuales muy simples, sin tablas editables ni campos generales obligatorios.
+## Idea de producto
 
-## Cambios principales de la versión 2.1
+El flujo normal ya no es `temporada → competición → equipo → plantilla → partido → alineaciones → informe`. Para el usuario es simplemente:
 
-### Menús y paneles por rol
+**Nuevo postpartido → partido → No Name → rival → publicar → valorar jugadores.**
 
-**Informador**
+La base de datos, plantillas y relaciones siguen existiendo, pero trabajan por detrás. La sección **Base de datos** queda como mantenimiento y corrección, no como paso previo obligatorio.
 
-- Mi panel.
-- Hacer informe.
+## Qué cambia en 3.0
+
+### Administración
+
+- Dashboard propio para administrador, distinto al del informador y dirección deportiva.
+- Acción principal **Nuevo postpartido**.
+- Flujo continuo en una sola página.
+- Configuración inicial de No Name desde el propio flujo si aún no existe equipo propio.
+- Creación rápida de temporada activa desde el flujo.
+- Competición nueva sin abandonar el postpartido.
+- Rival nuevo sin abandonar el postpartido.
+- Plantilla de No Name reutilizable durante toda la temporada.
+- Alta de jugadores propios desde la propia alineación.
+- Pegado masivo de jugadores propios con `Nombre;POS;Dorsal`.
+- Copia de la última alineación de No Name.
+- El rival no necesita tener una plantilla creada previamente.
+- Al escribir un rival, sus jugadores se crean/resuelven y se vinculan a su plantilla como consecuencia natural del partido.
+- Recuperación de la última alineación conocida del rival.
+- Pegado rápido de alineación rival.
+- Importación CSV/XLSX opcional.
+- Publicación y asignación de informadores al final del mismo flujo.
+
+### Informador
+
+Cada rol tiene su propio menú. El informador ve únicamente:
+
+- Inicio.
+- Valorar partido.
 - Mis informes.
 - Jugadores.
 
-Su panel muestra únicamente asignaciones, informes en curso, entregados y aprobados.
+La valoración de jugadores propios y rivales usa exactamente la misma interfaz simple:
 
-**Dirección deportiva**
-
-- Panel de dirección.
-- Revisar y analizar.
-- Informes.
-- Jugadores.
-
-El panel prioriza informes pendientes de revisión, jugadores mejor valorados y seguimientos activos.
-
-**Administrador**
-
-- Panel de administración.
-- Partidos.
-- Base de datos.
-- Informes.
-- Jugadores.
-- Dirección deportiva.
-- Administración.
-
-El panel ofrece accesos directos a partidos, usuarios, datos y control general.
-
-### Informe simplificado
-
-Ya no es obligatorio completar:
-
-- impresión general del rival;
-- nivel mostrado por el rival;
-- conclusiones colectivas;
-- decisión de seguimiento;
-- confianza;
-- notas técnicas, tácticas o físicas.
-
-Para entregar un informe basta con valorar al menos a un jugador rival.
-
-Cada jugador aparece en una ficha individual con:
-
-- nombre y dorsal;
-- posición predeterminada y no editable;
-- minutos disputados predeterminados y no editables;
-- condición de titular o suplente;
-- barra de valoración de 0 a 10;
+- jugador, dorsal, posición, minutos y titularidad: **solo lectura**;
+- slider 0–10 con precisión de 0,1;
+- botones rápidos 5 / 6 / 7 / 8 / 9;
 - observación opcional;
-- check de destacado;
-- check de inclusión en PDF.
+- check **Destacado**;
+- check **Incluir en PDF**.
 
-Reglas automáticas:
+Automatismos:
 
-- `0` significa **sin valorar**;
-- cualquier nota mayor que `0` genera una evaluación válida;
-- el check **Incluir en PDF** aparece marcado por defecto;
-- una nota de `8,0` o superior marca automáticamente al jugador como destacado;
-- ambos checks pueden modificarse manualmente;
-- el MVP del informe se deriva automáticamente del destacado con mejor nota.
+- 0 = sin valorar;
+- nota > 0 activa PDF por defecto;
+- nota ≥ 8 marca destacado por defecto;
+- ambos checks pueden cambiarse manualmente;
+- no es obligatorio valorar a todos los participantes;
+- para entregar basta con al menos una valoración rival válida.
 
-El bloque de nuestro equipo utiliza exactamente el mismo funcionamiento y queda separado de las analíticas de jugadores rivales.
+### Jugadores
 
-## Funcionalidades existentes
+La pantalla separa dos usos:
 
-- PostgreSQL remoto mediante SQLAlchemy.
-- Compatibilidad con Supabase PostgreSQL y Supabase Storage.
-- Roles de administrador, informador y dirección deportiva.
-- Asignación de partidos y fechas límite.
-- Informes en borrador, entregados, devueltos y aprobados.
-- Autoguardado por ficha.
-- Versiones inmutables del informe.
-- PDF ejecutivo y completo.
-- Histórico de jugadores.
-- Rankings solo con informes aprobados y jugadores rivales.
-- Seguimientos y consolidaciones.
-- Importación CSV/XLSX.
-- Exportación analítica y backup técnico.
-- Auditoría y control de sesiones.
-- Migraciones mediante Alembic.
+- **No Name**: histórico interno de rendimiento, últimas notas, evolución y comentarios.
+- **Rivales**: historial de scouting creado automáticamente a partir de los postpartidos aprobados.
+
+Las valoraciones propias nunca contaminan el ranking rival y las valoraciones rivales nunca contaminan el histórico interno.
+
+### Dirección deportiva
+
+La pantalla se orienta primero a decisiones y después a análisis:
+
+- informes pendientes de revisar;
+- últimas notas rivales ≥ 8;
+- jugadores observados varias veces;
+- seguimientos activos;
+- aprobación/devolución de informes;
+- historial y rankings con filtros avanzados;
+- consenso entre informadores;
+- comparación y exportaciones.
+
+### PDF
+
+El PDF se acorta y prioriza lo seleccionado por el informador:
+
+- contexto del partido;
+- sistemas sobre campo cuando existen;
+- resumen de nuestro equipo;
+- resumen rival;
+- solo jugadores con **Incluir en PDF** y nota válida;
+- fichas individuales para perfiles seleccionados/destacados;
+- versión ejecutiva y completa;
+- snapshots y versiones históricas inmutables.
+
+## Persistencia y Supabase
+
+No Name PostMatch 3.0 mantiene PostgreSQL/Supabase como fuente de verdad. El ZIP **no contiene equipos, jugadores, temporadas, competiciones, partidos, evaluaciones ni informes de muestra**. Solo se crea el administrador inicial definido en Secrets cuando la tabla de usuarios está vacía.
+
+La actualización desde 2.0/2.1/2.1.1 usa Alembic. La revisión `0002_noname_3_0` es no destructiva y no elimina ni transforma datos deportivos existentes.
+
+## Despliegue Streamlit Community Cloud
+
+Si subes el contenido del ZIP directamente a la raíz de GitHub:
+
+```text
+Main file path: app.py
+```
+
+Secrets mínimos:
+
+```toml
+DATABASE_URL = "postgresql://..."
+DEMO_MODE = false
+RUN_MIGRATIONS = true
+REQUIRE_REPORT_APPROVAL = true
+
+BOOTSTRAP_ADMIN_NAME = "Administrador"
+BOOTSTRAP_ADMIN_EMAIL = "tu-correo@dominio.com"
+BOOTSTRAP_ADMIN_PASSWORD = "CONTRASEÑA-FUERTE"
+
+LOGIN_MAX_ATTEMPTS = 10
+LOGIN_LOCK_MINUTES = 15
+```
+
+Storage PDF opcional:
+
+```toml
+SUPABASE_URL = "https://PROJECT_REF.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY = "CLAVE-BACKEND"
+SUPABASE_BUCKET = "postmatch-reports"
+```
+
+## Primera utilización con una base vacía
+
+1. Entra con el administrador de Secrets.
+2. Cambia la contraseña inicial si la aplicación lo solicita.
+3. Pulsa **Nuevo postpartido**.
+4. Configura No Name una sola vez.
+5. Crea la temporada activa si aún no existe.
+6. Crea el partido, las dos alineaciones y publícalo sin salir de esa pantalla.
+7. Crea los usuarios informadores desde Administración cuando los necesites.
+
+## Actualización desde 2.1.1
+
+1. Haz backup técnico desde la versión actual.
+2. Sustituye **todo** el contenido del repositorio por esta versión, no solo `app.py`.
+3. Conserva los mismos Secrets y el mismo `DATABASE_URL` de Supabase.
+4. Haz Reboot en Streamlit Cloud.
+5. Con `RUN_MIGRATIONS = true`, Alembic avanza hasta `0002_noname_3_0` sin borrar datos.
 
 ## Estructura
 
@@ -97,10 +156,11 @@ El bloque de nuestro equipo utiliza exactamente el mismo funcionamiento y queda 
 app.py
 pages/
   dashboard.py
+  postmatch.py
   reports.py
-  matches.py
   players.py
   director.py
+  matches.py
   catalog.py
   admin.py
 repositories/
@@ -109,135 +169,17 @@ models/
 core/
 alembic/
 tests/
+scripts/
 ```
 
-## Main file path
+## Validación
 
-Si el repositorio contiene directamente `app.py`:
-
-```text
-app.py
-```
-
-Si has subido la carpeta completa al repositorio:
-
-```text
-postmatch_scout_2_1/app.py
-```
-
-## Instalación local
-
-Recomendado: Python 3.11 o 3.12.
+La release se valida con:
 
 ```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-Sin `DATABASE_URL`, la aplicación arranca en modo demostración con SQLite.
-
-```text
-Administrador: admin@postmatch.local / DemoAdmin2026!
-Informador: informador@postmatch.local / DemoReporter2026!
-```
-
-No utilices el modo demostración con información real del club.
-
-## Producción con Supabase
-
-Variables mínimas en Streamlit Secrets:
-
-```toml
-DATABASE_URL = "postgresql://..."
-DEMO_MODE = false
-RUN_MIGRATIONS = true
-
-BOOTSTRAP_ADMIN_NAME = "Administrador"
-BOOTSTRAP_ADMIN_EMAIL = "admin@club.com"
-BOOTSTRAP_ADMIN_PASSWORD = "UNA-CONTRASENA-FUERTE-Y-UNICA"
-```
-
-Storage privado opcional:
-
-```toml
-SUPABASE_URL = "https://PROJECT_REF.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = "SERVICE_ROLE_KEY"
-SUPABASE_BUCKET = "postmatch-reports"
-```
-
-## Flujo recomendado
-
-### Administrador
-
-1. Crea temporada, competición y equipos.
-2. Marca el equipo propio.
-3. Carga plantillas.
-4. Crea el partido y las alineaciones.
-5. Asigna informadores.
-6. Publica el partido.
-
-### Informador
-
-1. Entra en **Mi panel**.
-2. Pulsa **Empezar** o **Continuar**.
-3. Mueve la barra de cada jugador que haya podido valorar.
-4. Añade observaciones solo cuando aporten información.
-5. Revisa los checks de destacado y PDF.
-6. Valora opcionalmente a jugadores propios.
-7. Genera una vista previa y entrega.
-
-### Dirección deportiva
-
-1. Revisa informes entregados.
-2. Aprueba o devuelve.
-3. Consulta rankings e históricos.
-4. Consolida opiniones.
-5. Gestiona seguimientos.
-
-## Importación
-
-La plantilla incluida contiene:
-
-- `plantillas`;
-- `alineaciones`;
-- `instrucciones`.
-
-Archivo:
-
-```text
-templates/plantilla_importacion_postmatch_scout_2_1.xlsx
-```
-
-## Comprobaciones
-
-```bash
-python -m compileall .
+python scripts/check_release_consistency.py
 pytest -q
-python scripts/smoke_test.py
+alembic upgrade head
 ```
 
-PDF de muestra:
-
-```text
-sample/informe_demo_postmatch_scout_2_1_ejecutivo.pdf
-sample/informe_demo_postmatch_scout_2_1_completo.pdf
-```
-
-## Actualización desde 2.0
-
-La versión 2.1 no añade tablas ni modifica el esquema de base de datos. Puede utilizar la misma base de datos de la versión 2.0. Antes de actualizar en producción, descarga un backup técnico.
-
-## Limitaciones conocidas
-
-- Streamlit está orientado a herramientas internas, no a una plataforma pública masiva.
-- La autenticación es propia de la aplicación y no utiliza Supabase Auth.
-- El almacenamiento local de Streamlit Community Cloud es efímero; configura Supabase Storage para conservar PDF.
-- La interfaz debe probarse finalmente en el navegador y dispositivos reales del cuerpo técnico.
+El entorno en el que se construyó esta release no incluye el paquete Streamlit para levantar el navegador, por lo que la aceptación visual final debe hacerse en Streamlit Cloud. La lógica de repositorio, flujos, PDF, migraciones y tests sí se ejecuta fuera de la interfaz.
