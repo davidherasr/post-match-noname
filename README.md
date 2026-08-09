@@ -15,6 +15,7 @@ La base de datos, plantillas y relaciones siguen existiendo, pero trabajan por d
 ### Administración
 
 - Dashboard propio para administrador, distinto al del informador y dirección deportiva.
+
 - Acción principal **Nuevo postpartido**.
 - Flujo continuo en una sola página.
 - Configuración inicial de No Name desde el propio flujo si aún no existe equipo propio.
