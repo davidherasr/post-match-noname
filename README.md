@@ -1,4 +1,4 @@
-# No Name PostMatch 3.0
+# No Name PostMatch 3.0.1
 
 Aplicación interna de No Name para convertir cada partido terminado en dos cosas a la vez: memoria de rendimiento del propio equipo y base acumulada de scouting de rivales. La edición 3.0 mantiene la arquitectura robusta de PostMatch Scout 2.x, pero cambia por completo el flujo visible para reducir pasos y carga administrativa.
 
@@ -10,12 +10,13 @@ El flujo normal ya no es `temporada → competición → equipo → plantilla �
 
 La base de datos, plantillas y relaciones siguen existiendo, pero trabajan por detrás. La sección **Base de datos** queda como mantenimiento y corrección, no como paso previo obligatorio.
 
+> **3.0.1:** la navegación automática de Streamlit queda desactivada. En login no aparece el sidebar y, tras autenticarse, cada rol ve únicamente el menú propio de No Name. No cambia la base de datos.
+
 ## Qué cambia en 3.0
 
 ### Administración
 
 - Dashboard propio para administrador, distinto al del informador y dirección deportiva.
-
 - Acción principal **Nuevo postpartido**.
 - Flujo continuo en una sola página.
 - Configuración inicial de No Name desde el propio flujo si aún no existe equipo propio.

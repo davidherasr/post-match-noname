@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.1 · Navegación limpia
+
+- Ocultada la navegación automática que Streamlit genera al detectar la carpeta `pages/`.
+- Añadido `[client] showSidebarNavigation = false` en `.streamlit/config.toml`.
+- Añadida defensa en tiempo de ejecución con `st.set_option("client.showSidebarNavigation", False)`.
+- El login ya no muestra un sidebar vacío: queda centrado y limpio.
+- Tras iniciar sesión solo se muestra el menú propio de No Name según el rol del usuario.
+- `toolbarMode = "minimal"` reduce controles de desarrollo innecesarios en la interfaz publicada.
+- Sin cambios de esquema: no requiere migración y no modifica datos de Supabase.
+
 ## 3.0.0 · No Name Edition
 
 ### Cambio de producto

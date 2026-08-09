@@ -16,7 +16,7 @@ from ui.helpers import match_label
 from ui.styles import page_header
 
 
-REPORTS_PAGE_API_VERSION = "3.0.0"
+REPORTS_PAGE_API_VERSION = "3.0.1"
 
 
 def _minutes_played(participation) -> int:

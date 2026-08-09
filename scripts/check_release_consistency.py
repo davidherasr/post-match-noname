@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "3.0.0"
+EXPECTED = "3.0.1"
 
 
 def read_version() -> str:
@@ -42,6 +42,13 @@ def main() -> None:
         errors.append(f"VERSION no coincide: {read_version()}")
     if read_config_version() != EXPECTED:
         errors.append(f"APP_VERSION no coincide: {read_config_version()}")
+    config_text = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+    if "showSidebarNavigation = false" not in config_text:
+        errors.append("Falta client.showSidebarNavigation = false en .streamlit/config.toml")
+    app_text = (ROOT / "app.py").read_text(encoding="utf-8")
+    if 'st.set_option("client.showSidebarNavigation", False)' not in app_text:
+        errors.append("Falta la defensa runtime para ocultar la navegación automática")
+
     api, functions = reports_contract()
     if api != EXPECTED:
         errors.append(f"REPORTS_PAGE_API_VERSION no coincide: {api}")
@@ -50,7 +57,7 @@ def main() -> None:
             errors.append(f"Falta pages.reports.{name}()")
     if errors:
         raise SystemExit("Release inconsistente:\n- " + "\n- ".join(errors))
-    print("OK · No Name PostMatch 3.0 es internamente consistente")
+    print("OK · No Name PostMatch 3.0.1 es internamente consistente")
 
 
 if __name__ == "__main__":

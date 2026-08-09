@@ -13,6 +13,8 @@ from ui.styles import apply_global_styles
 
 validate_production_settings()
 
+st.set_option("client.showSidebarNavigation", False)
+
 st.set_page_config(
     page_title=f"{APP_NAME} {APP_VERSION}",
     page_icon="⚽",
@@ -36,7 +38,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from pages import reports as reports_page
 
-    expected_api = "3.0.0"
+    expected_api = "3.0.1"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
@@ -95,6 +97,16 @@ def render_login() -> None:
 
 user = current_user()
 if not user:
+    # En login no mostramos ni la navegación automática de Streamlit ni un sidebar vacío.
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     render_login()
     st.stop()
 

@@ -1,4 +1,4 @@
-# Validación técnica · No Name PostMatch 3.0.0
+# Validación técnica · No Name PostMatch 3.0.1
 
 ## Comprobaciones ejecutadas
 
@@ -12,7 +12,7 @@
 - Rankings rivales únicamente a partir de informes aprobados/finales.
 - Migración Alembic desde base vacía hasta `head`.
 - Migración Alembic desde `0001_initial_2_0` hasta `0002_noname_3_0`.
-- Contrato interno de versión 3.0.0.
+- Contrato interno de versión 3.0.1.
 
 ## Resultado de la suite
 
