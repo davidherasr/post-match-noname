@@ -23,6 +23,8 @@ def get_engine():
         future=True,
         connect_args=connect_args,
     )
+    from core.performance import register_engine_performance
+    register_engine_performance(engine)
     if settings.database_url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, _):

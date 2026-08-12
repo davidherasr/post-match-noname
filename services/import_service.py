@@ -169,7 +169,7 @@ def import_lineup(session: Session, df: pd.DataFrame, actor_id: int) -> dict:
 
 def template_workbook() -> bytes:
     """Return a header-only import template. The release ships with no sporting sample data."""
-    polished_template = BASE_DIR / "templates" / "plantilla_importacion_noname_postmatch_3_0.xlsx"
+    polished_template = BASE_DIR / "templates" / "plantilla_importacion_noname_postmatch_3_1.xlsx"
     if polished_template.exists():
         return polished_template.read_bytes()
 

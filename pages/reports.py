@@ -7,7 +7,8 @@ import streamlit as st
 
 from core.constants import ASSIGNMENT_STATUSES, PDF_MODES, REPORT_STATUSES
 from core.database import session_scope
-from core.evaluation_rules import AUTO_STANDOUT_THRESHOLD, derive_simple_evaluation_state
+from core.evaluation_rules import AUTO_STANDOUT_THRESHOLD
+from core.performance import measure
 from core.utils import safe_html
 from repositories import scouting as repo
 from services.report_service import generate_report_pdf, report_filename
@@ -15,475 +16,435 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-
-REPORTS_PAGE_API_VERSION = "3.0.1"
+REPORTS_PAGE_API_VERSION = "3.4.0"
 
 
 def _minutes_played(participation) -> int:
-    minute_in = int(participation.minute_in or 0)
-    minute_out = int(participation.minute_out or 90)
-    return max(0, minute_out - minute_in)
+    return max(0, int(participation.minute_out or 90) - int(participation.minute_in or 0))
 
 
 def _participation_meta(participation) -> str:
-    role = "Titular" if participation.starter else f"Entró en el {participation.minute_in}'"
+    role = "Titular" if participation.starter else f"Entró {participation.minute_in}'"
     if participation.minute_out and participation.minute_out < 90:
-        role += f" · salió en el {participation.minute_out}'"
+        role += f" · salió {participation.minute_out}'"
     position = participation.position or participation.player.primary_position or "Sin posición"
-    return f"{position} · {_minutes_played(participation)} minutos · {role}"
+    return f"{position} · {_minutes_played(participation)} min · {role}"
 
 
-def _init_card_state(prefix: str, existing, own_team: bool) -> None:
-    defaults = {
-        prefix + "rating": float(existing.general_rating) if existing and existing.general_rating is not None else 0.0,
-        prefix + "note": existing.short_note if existing and existing.short_note else "",
-        prefix + "standout": bool(existing and existing.standout),
-        prefix + "pdf": bool(existing.pdf_include) if existing else True,
-        prefix + "revision": existing.revision if existing else None,
-        prefix + "standout_touched": False,
-        prefix + "pdf_touched": False,
+def _evaluation_defaults(existing) -> tuple[float, str, bool, bool]:
+    rating = float(existing.general_rating) if existing and existing.general_rating is not None else 0.0
+    note = existing.short_note if existing and existing.short_note else ""
+    standout = bool(existing and existing.standout) or rating >= AUTO_STANDOUT_THRESHOLD
+    pdf_include = bool(existing.pdf_include) if existing else True
+    return rating, note, standout, pdf_include
+
+
+def _ensure_eval_state(report_id: int, part, existing) -> str:
+    prefix = f"eval33_{report_id}_{part.player_id}_"
+    rating, note, standout, pdf_include = _evaluation_defaults(existing)
+    defaults = {"rating": rating, "note": note, "standout": standout, "pdf": pdf_include}
+    for suffix, value in defaults.items():
+        st.session_state.setdefault(prefix + suffix, value)
+    return prefix
+
+
+def _build_bulk_row(participation, team_id: int, existing, prefix: str) -> dict:
+    rating = float(st.session_state.get(prefix + "rating", 0.0) or 0.0)
+    note = str(st.session_state.get(prefix + "note", "") or "").strip() or None
+    submitted_standout = bool(st.session_state.get(prefix + "standout", False))
+    pdf_include = bool(st.session_state.get(prefix + "pdf", True))
+    old_rating, _, old_auto_standout, _ = _evaluation_defaults(existing)
+    if submitted_standout != old_auto_standout:
+        standout = submitted_standout
+    elif rating >= AUTO_STANDOUT_THRESHOLD and old_rating < AUTO_STANDOUT_THRESHOLD:
+        standout = True
+    else:
+        standout = submitted_standout
+    return {
+        "player_id": int(participation.player_id), "team_id": int(team_id),
+        "participation_id": int(participation.id), "expected_revision": existing.revision if existing else None,
+        "observation_status": "evaluated" if rating > 0 else "not_observed",
+        "general_rating": rating if rating > 0 else None, "short_note": note,
+        "standout": standout if rating > 0 else False, "pdf_include": pdf_include,
+        "recommendation": None, "confidence": None,
     }
-    for key, value in defaults.items():
-        st.session_state.setdefault(key, value)
-    if own_team:
-        st.session_state.setdefault(prefix + "pdf", True)
 
 
-def _persist_player_card(
-    report_id: int,
-    user_id: int,
-    player_id: int,
-    team_id: int,
-    participation_id: int,
-    own_team: bool,
-    prefix: str,
-) -> None:
-    rating = float(st.session_state.get(prefix + "rating", 0.0) or 0.0)
-    state = derive_simple_evaluation_state(
-        rating,
-        pdf_include=bool(st.session_state.get(prefix + "pdf", True)),
-        standout=bool(st.session_state.get(prefix + "standout", False)),
-        pdf_manually_changed=bool(st.session_state.get(prefix + "pdf_touched", False)),
-        standout_manually_changed=bool(st.session_state.get(prefix + "standout_touched", False)),
-    )
-    try:
-        with session_scope() as session:
-            item = repo.upsert_evaluation(
-                session,
-                report_id,
-                player_id,
-                team_id,
-                participation_id,
-                actor_id=user_id,
-                expected_revision=st.session_state.get(prefix + "revision"),
-                observation_status=state.observation_status,
-                general_rating=state.general_rating,
-                short_note=(st.session_state.get(prefix + "note") or "").strip() or None,
-                standout=state.standout,
-                pdf_include=state.pdf_include,
-                recommendation=None,
-                confidence=None,
-            )
-            if not own_team:
-                repo.sync_report_standout(session, report_id, user_id)
-            st.session_state[prefix + "revision"] = item.revision
-        st.session_state[f"save_status_{report_id}"] = f"Guardado automáticamente · {datetime.now().strftime('%H:%M:%S')}"
-    except Exception as exc:
-        st.session_state[f"save_status_{report_id}"] = f"Cambios sin guardar: {exc}"
+def _workspace_key(report_id: int) -> str:
+    return f"report_workspace_33_{report_id}"
 
 
-def _rating_changed(*args) -> None:
-    report_id, user_id, player_id, team_id, participation_id, own_team, prefix = args
-    rating = float(st.session_state.get(prefix + "rating", 0.0) or 0.0)
-    if not st.session_state.get(prefix + "pdf_touched", False) and rating > 0:
-        st.session_state[prefix + "pdf"] = True
-    if not st.session_state.get(prefix + "standout_touched", False):
-        st.session_state[prefix + "standout"] = rating >= AUTO_STANDOUT_THRESHOLD
-    _persist_player_card(*args)
+def _invalidate_workspace(report_id: int) -> None:
+    st.session_state.pop(_workspace_key(report_id), None)
 
 
-def _quick_rating(value: float, *args) -> None:
-    prefix = args[-1]
-    st.session_state[prefix + "rating"] = float(value)
-    _rating_changed(*args)
+def _load_report_editor(report_id: int):
+    key = _workspace_key(report_id)
+    payload = st.session_state.get(key)
+    if payload is None:
+        with measure("Abrir informe · workspace", "report"):
+            with session_scope() as session:
+                payload = repo.load_report_workspace(session, report_id)
+        st.session_state[key] = payload
+    if not payload:
+        return None, [], []
+    return payload["report"], payload["participations"], payload["evaluations"]
 
 
-def _note_changed(*args) -> None:
-    _persist_player_card(*args)
+def _saved_snapshot_key(report_id: int, team_id: int) -> str:
+    return f"eval_saved_snapshot_34_{report_id}_{team_id}"
 
 
-def _standout_changed(*args) -> None:
-    prefix = args[-1]
-    st.session_state[prefix + "standout_touched"] = True
-    _persist_player_card(*args)
+def _dirty_key(report_id: int, team_id: int) -> str:
+    return f"eval_dirty_34_{report_id}_{team_id}"
 
 
-def _pdf_changed(*args) -> None:
-    prefix = args[-1]
-    st.session_state[prefix + "pdf_touched"] = True
-    _persist_player_card(*args)
+def _snapshot_from_evaluations(report_id: int, players: list, evaluations: dict) -> dict[int, tuple]:
+    snapshot: dict[int, tuple] = {}
+    for part in players:
+        existing = evaluations.get(part.player_id)
+        rating, note, standout, pdf_include = _evaluation_defaults(existing)
+        snapshot[int(part.player_id)] = (round(float(rating), 1), str(note or "").strip(), bool(standout), bool(pdf_include))
+        _ensure_eval_state(report_id, part, existing)
+    return snapshot
 
 
-def _render_player_card(report_id: int, participation, team_id: int, existing, user: dict, read_only: bool, own_team: bool) -> None:
-    player = participation.player
-    prefix = f"simple_eval_{report_id}_{player.id}_"
-    _init_card_state(prefix, existing, own_team)
-    callback_args = (report_id, user["id"], player.id, team_id, participation.id, own_team, prefix)
-
-    with st.container(border=True):
-        title_col, score_col = st.columns([4.5, 1])
-        display_name = player.display_name or player.full_name
-        shirt = f"#{participation.shirt_number}" if participation.shirt_number is not None else "Sin dorsal"
-        title_col.markdown(f"### {safe_html(display_name)}", unsafe_allow_html=True)
-        title_col.caption(f"{shirt} · {_participation_meta(participation)}")
-        current_rating = float(st.session_state.get(prefix + "rating", 0.0) or 0.0)
-        score_col.metric("Nota", "Sin valorar" if current_rating <= 0 else f"{current_rating:.1f}")
-
-        slider_col, note_col = st.columns([1.15, 1])
-        with slider_col:
-            st.slider(
-                "Valoración del partido",
-                min_value=0.0,
-                max_value=10.0,
-                step=0.1,
-                key=prefix + "rating",
-                disabled=read_only,
-                on_change=_rating_changed,
-                args=callback_args,
-                help="0 significa que no has podido valorar al jugador.",
-            )
-            st.caption("0 = sin valorar · 8 o más se marca automáticamente como destacado")
-            quick = st.columns(5)
-            for col, value in zip(quick, (5.0, 6.0, 7.0, 8.0, 9.0)):
-                col.button(
-                    f"{int(value)}",
-                    use_container_width=True,
-                    disabled=read_only,
-                    key=f"{prefix}quick_{int(value)}",
-                    on_click=_quick_rating,
-                    args=(value, *callback_args),
-                    help=f"Poner {value:.0f} rápidamente y ajustar después con la barra si quieres.",
-                )
-        with note_col:
-            st.text_area(
-                "Observación opcional",
-                key=prefix + "note",
-                height=92,
-                disabled=read_only,
-                on_change=_note_changed,
-                args=callback_args,
-                placeholder="Ej.: rápido al espacio, buen pie izquierdo, sufrió en duelos...",
-            )
-
-        check_a, check_b, status_col = st.columns([1, 1, 2.2])
-        check_a.checkbox(
-            "Destacado",
-            key=prefix + "standout",
-            disabled=read_only,
-            on_change=_standout_changed,
-            args=callback_args,
-            help="Se activa automáticamente con una nota de 8 o superior, pero puedes cambiarlo.",
+def _snapshot_from_widgets(report_id: int, players: list) -> dict[int, tuple]:
+    snapshot: dict[int, tuple] = {}
+    for part in players:
+        prefix = f"eval33_{report_id}_{part.player_id}_"
+        snapshot[int(part.player_id)] = (
+            round(float(st.session_state.get(prefix + "rating", 0.0) or 0.0), 1),
+            str(st.session_state.get(prefix + "note", "") or "").strip(),
+            bool(st.session_state.get(prefix + "standout", False)),
+            bool(st.session_state.get(prefix + "pdf", True)),
         )
-        check_b.checkbox(
-            "Incluir en PDF",
-            key=prefix + "pdf",
-            disabled=read_only,
-            on_change=_pdf_changed,
-            args=callback_args,
-            help="Viene marcado por defecto. Solo se incluirá si el jugador tiene una nota mayor que 0.",
-        )
-        if current_rating > 0:
-            status_col.success("Valoración guardada")
-        else:
-            status_col.info("Pendiente de valorar")
+    return snapshot
 
 
-def _render_players_group(report_id: int, players: list, team_id: int, evaluations: dict, user: dict, read_only: bool, own_team: bool) -> None:
+def _restore_widget_snapshot(report_id: int, snapshot: dict[int, tuple]) -> None:
+    for player_id, values in snapshot.items():
+        prefix = f"eval33_{report_id}_{player_id}_"
+        rating, note, standout, pdf_include = values
+        st.session_state[prefix + "rating"] = rating
+        st.session_state[prefix + "note"] = note
+        st.session_state[prefix + "standout"] = standout
+        st.session_state[prefix + "pdf"] = pdf_include
+
+
+@st.fragment
+def _render_team_form(report, players: list, evaluations: dict, user: dict, *, own_team: bool, read_only: bool, next_stage: str | None = None) -> None:
+    """Compact evaluation fragment.
+
+    Widget interaction only reruns this fragment. The already-loaded workspace stays in
+    memory, no reads/writes are sent to Supabase until the explicit save button.
+    """
     if not players:
         st.warning("No hay jugadores cargados para este equipo.")
         return
-    starters = [p for p in players if p.starter]
-    substitutes = [p for p in players if not p.starter]
-    if starters:
-        st.markdown("#### Titulares")
-        for part in starters:
-            _render_player_card(report_id, part, team_id, evaluations.get(part.player_id), user, read_only, own_team)
-    if substitutes:
-        st.markdown("#### Suplentes utilizados")
-        for part in substitutes:
-            _render_player_card(report_id, part, team_id, evaluations.get(part.player_id), user, read_only, own_team)
+    team_id = report.own_team_id if own_team else report.rival_team_id
+    team_name = report.own_team.name if own_team else report.rival_team.name
+    saved_key = _saved_snapshot_key(report.id, team_id)
+    dirty_key = _dirty_key(report.id, team_id)
+    if saved_key not in st.session_state:
+        st.session_state[saved_key] = _snapshot_from_evaluations(report.id, players, evaluations)
+    else:
+        # Ensure widget state exists after a browser/session refresh.
+        for part in players:
+            _ensure_eval_state(report.id, part, evaluations.get(part.player_id))
+
+    st.caption("Modo rápido · tocar notas/comentarios no consulta ni escribe en Supabase.")
+    show_options = st.toggle(
+        "Más opciones (Destacado / PDF)", value=False, key=f"show_eval_options_34_{report.id}_{team_id}",
+        help="En el uso diario puedes dejarlo cerrado. Las notas altas y el PDF se resuelven automáticamente.",
+        disabled=read_only,
+    )
+
+    for heading, group in [("Titulares", [p for p in players if p.starter]), ("Suplentes utilizados", [p for p in players if not p.starter])]:
+        if not group:
+            continue
+        st.markdown(f"#### {heading}")
+        for part in group:
+            existing = evaluations.get(part.player_id)
+            prefix = _ensure_eval_state(report.id, part, existing)
+            display_name = part.player.display_name or part.player.full_name
+            shirt = f"#{part.shirt_number}" if part.shirt_number is not None else "—"
+            st.markdown(
+                f'<div class="pm-eval-name"><strong>{safe_html(display_name)}</strong> <span>{safe_html(shirt)} · {safe_html(_participation_meta(part))}</span></div>',
+                unsafe_allow_html=True,
+            )
+            rating_col, note_col = st.columns([1.15, 1.5], gap="small")
+            rating_col.slider(
+                f"Nota · {display_name}", 0.0, 10.0, step=0.1, key=prefix + "rating", disabled=read_only,
+                help="0 = sin valorar. Flechas del teclado: ±0,1.", label_visibility="collapsed",
+            )
+            note_col.text_input(
+                f"Observación · {display_name} (opcional)", key=prefix + "note", disabled=read_only,
+                placeholder="Comentario opcional…", label_visibility="collapsed",
+            )
+            if show_options:
+                c1, c2 = st.columns(2)
+                c1.checkbox("Destacado", key=prefix + "standout", disabled=read_only)
+                c2.checkbox("Incluir en PDF", key=prefix + "pdf", disabled=read_only)
+            st.markdown('<div class="pm-eval-separator"></div>', unsafe_allow_html=True)
+
+    current_snapshot = _snapshot_from_widgets(report.id, players)
+    saved_snapshot = st.session_state.get(saved_key, {})
+    dirty = current_snapshot != saved_snapshot
+    st.session_state[dirty_key] = dirty
+    if dirty and not read_only:
+        st.warning(f"Tienes cambios sin guardar en {team_name}.")
+    elif not read_only:
+        st.caption(f"✓ {team_name} está sincronizado con la base de datos.")
+
+    if read_only:
+        return
+    a, b = st.columns([3, 1])
+    submit_label = "Guardar y continuar" if next_stage else f"Guardar notas · {team_name}"
+    submitted = a.button(submit_label, type="primary", use_container_width=True, disabled=not dirty, key=f"save_eval_34_{report.id}_{team_id}")
+    discard = b.button("Deshacer", use_container_width=True, disabled=not dirty, key=f"discard_eval_34_{report.id}_{team_id}")
+
+    if discard:
+        _restore_widget_snapshot(report.id, saved_snapshot)
+        st.session_state[dirty_key] = False
+        st.rerun(scope="fragment")
+
+    if submitted:
+        rows = [_build_bulk_row(part, team_id, evaluations.get(part.player_id), f"eval33_{report.id}_{part.player_id}_") for part in players]
+        try:
+            with st.spinner(f"Guardando {team_name} en un único UPSERT..."):
+                with measure(f"Guardar bloque · {team_name}", "report"):
+                    with session_scope() as session:
+                        saved = repo.bulk_upsert_evaluations_fast(session, report.id, rows, actor_id=user["id"])
+            st.session_state[saved_key] = current_snapshot
+            st.session_state[dirty_key] = False
+            st.session_state[f"save_status_{report.id}_{team_id}"] = f"{team_name}: {saved} jugadores · {datetime.now().strftime('%H:%M:%S')}"
+            _invalidate_workspace(report.id)
+            if next_stage:
+                st.session_state[f"report_stage_{report.id}"] = next_stage
+                st.rerun()
+            st.success(st.session_state[f"save_status_{report.id}_{team_id}"])
+        except Exception as exc:
+            st.error(f"No se ha guardado el bloque. Nada se confirma parcialmente. Detalle: {exc}")
 
 
-def _store_version_documents(session, report_id: int, version_obj) -> list[str]:
-    messages = []
-    for mode in ("executive", "full"):
-        pdf = generate_report_pdf(session, report_id, version=version_obj.version, mode=mode)
-        stored = save_pdf(report_id, version_obj.version, pdf, document_type=mode)
-        repo.save_document(
-            session,
-            report_id,
-            version_obj.version,
-            report_version_id=version_obj.id,
-            document_type=mode,
-            storage_bucket=stored.get("storage_bucket"),
-            storage_path=stored.get("storage_path"),
-            local_path=stored.get("local_path"),
-            checksum=stored.get("checksum"),
-            size_bytes=stored.get("size_bytes"),
-            storage_status=str(stored.get("storage_status")),
-            error_message=stored.get("error_message"),
-        )
-        messages.append(f"{PDF_MODES[mode]}: {stored.get('storage_status')}")
-    return messages
+def _store_one_document(session, report_id: int, version_obj, mode: str) -> str:
+    pdf = generate_report_pdf(session, report_id, version=version_obj.version, mode=mode)
+    stored = save_pdf(report_id, version_obj.version, pdf, document_type=mode)
+    repo.save_document(
+        session, report_id, version_obj.version, report_version_id=version_obj.id, document_type=mode,
+        storage_bucket=stored.get("storage_bucket"), storage_path=stored.get("storage_path"), local_path=stored.get("local_path"),
+        checksum=stored.get("checksum"), size_bytes=stored.get("size_bytes"), storage_status=str(stored.get("storage_status")),
+        error_message=stored.get("error_message"),
+    )
+    return str(stored.get("storage_status"))
 
 
-def _render_finish_tab(report, evaluation_list: list, report_id: int, user: dict, read_only: bool) -> None:
-    with session_scope() as session:
-        errors = repo.validate_report_for_finalization(session, report_id)
-    valid_rival = [
-        e for e in evaluation_list
-        if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None
-    ]
-    valid_own = [
-        e for e in evaluation_list
-        if e.evaluation_scope == "own" and e.observation_status == "evaluated" and e.general_rating is not None
-    ]
+def _render_finish(report, evaluation_list: list, report_id: int, user: dict, read_only: bool) -> None:
+    valid_rival = [e for e in evaluation_list if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None]
+    valid_own = [e for e in evaluation_list if e.evaluation_scope == "own" and e.observation_status == "evaluated" and e.general_rating is not None]
+    errors = [] if valid_rival else ["Evalúa al menos a un jugador rival."]
     metrics = st.columns(4)
-    metrics[0].metric("Rivales valorados", len(valid_rival))
-    metrics[1].metric("Propios valorados", len(valid_own))
-    metrics[2].metric("Incluidos en PDF", len([e for e in (valid_rival + valid_own) if e.pdf_include]))
-    metrics[3].metric("Versión", f"V{report.version}")
-
-    st.info("No tienes que rellenarlo todo. Puedes entregar aunque queden jugadores sin valorar; 0 significa simplemente que no has tenido elementos suficientes.")
+    metrics[0].metric("Rivales", len(valid_rival)); metrics[1].metric("Propios", len(valid_own))
+    metrics[2].metric("Destacados", len([e for e in valid_rival + valid_own if e.standout])); metrics[3].metric("Versión", f"V{report.version}")
     if errors and not read_only:
         st.warning(" · ".join(errors))
-    mode = st.radio("Vista previa", list(PDF_MODES), format_func=lambda m: PDF_MODES[m], horizontal=True)
     if not read_only:
-        if st.button("Generar vista previa", use_container_width=True):
-            with session_scope() as session:
-                st.session_state[f"preview_{report_id}_{mode}"] = generate_report_pdf(session, report_id, mode=mode)
-                name = report_filename(session, report_id, mode=mode).replace(".pdf", "_BORRADOR.pdf")
-            st.session_state[f"preview_name_{report_id}_{mode}"] = name
-        if f"preview_{report_id}_{mode}" in st.session_state:
-            st.download_button(
-                "Descargar borrador",
-                st.session_state[f"preview_{report_id}_{mode}"],
-                file_name=st.session_state[f"preview_name_{report_id}_{mode}"],
-                mime="application/pdf",
-                use_container_width=True,
-            )
+        st.success("No hay cambios de edición pendientes: has llegado aquí después de guardar el bloque Rival.")
+        c1, c2 = st.columns(2)
+        if c1.button("← Revisar No Name", use_container_width=True):
+            st.session_state[f"report_stage_{report_id}"] = "own"; st.rerun()
+        if c2.button("← Revisar Rival", use_container_width=True):
+            st.session_state[f"report_stage_{report_id}"] = "rival"; st.rerun()
+        with st.expander("Vista previa PDF · opcional", expanded=False):
+            mode = st.radio("Documento", list(PDF_MODES), format_func=lambda m: PDF_MODES[m], horizontal=True)
+            if st.button(f"Generar vista previa · {PDF_MODES[mode]}", use_container_width=True):
+                with measure(f"PDF borrador · {mode}", "pdf"):
+                    with session_scope() as session:
+                        st.session_state[f"preview_{report_id}_{mode}"] = generate_report_pdf(session, report_id, mode=mode)
+                        st.session_state[f"preview_name_{report_id}_{mode}"] = report_filename(session, report_id, mode=mode).replace(".pdf", "_BORRADOR.pdf")
+            if f"preview_{report_id}_{mode}" in st.session_state:
+                st.download_button(f"Descargar borrador · {PDF_MODES[mode]}", st.session_state[f"preview_{report_id}_{mode}"], st.session_state[f"preview_name_{report_id}_{mode}"], "application/pdf", use_container_width=True)
         confirm = st.checkbox("He revisado las notas y quiero entregar el informe.")
         if st.button("Entregar informe", type="primary", disabled=not confirm or bool(errors), use_container_width=True):
             try:
-                with session_scope() as session:
-                    _, version_obj = repo.submit_report(session, report_id, user["id"])
-                    messages = _store_version_documents(session, report_id, version_obj)
-                st.success("Informe entregado. " + " · ".join(messages))
+                with st.spinner("Entregando y generando el PDF Resumen..."):
+                    with measure("Entregar informe + PDF resumen", "report"):
+                        with session_scope() as session:
+                            _, version_obj = repo.submit_report(session, report_id, user["id"])
+                            status = _store_one_document(session, report_id, version_obj, "executive")
+                _invalidate_workspace(report_id)
+                st.success(f"Informe entregado · PDF Resumen: {status}.")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
     else:
         st.success(f"Informe bloqueado: {REPORT_STATUSES.get(report.status, report.status)}.")
         if report.status == "submitted":
-            st.info("Está pendiente de revisión por dirección deportiva.")
+            st.info("Pendiente de revisión por Dirección Deportiva.")
 
 
-def _render_documents(report_id: int, versions: list, documents: list) -> None:
+def _render_documents(report_id: int) -> None:
+    with measure("Cargar documentos", "documents"):
+        with session_scope() as session:
+            versions = repo.list_report_versions(session, report_id)
+            documents = repo.list_documents(session, report_id)
     if not versions:
         st.info("Todavía no existe ninguna versión entregada.")
         return
     for version_obj in versions:
-        st.markdown(
-            f"**V{version_obj.version} · {REPORT_STATUSES.get(version_obj.status, version_obj.status)} · "
-            f"{version_obj.created_at.strftime('%d/%m/%Y %H:%M')}**"
-        )
-        docs = [d for d in documents if d.version == version_obj.version]
-        if not docs:
-            st.caption("No hay documentos almacenados para esta versión.")
-            continue
-        cols = st.columns(len(docs))
-        for col, doc in zip(cols, docs):
-            col.caption(f"{PDF_MODES.get(doc.document_type, doc.document_type)} · {doc.storage_status}")
-            if doc.error_message:
-                col.error(doc.error_message)
+        st.markdown(f"**V{version_obj.version} · {REPORT_STATUSES.get(version_obj.status, version_obj.status)} · {version_obj.created_at.strftime('%d/%m/%Y %H:%M')}**")
+        docs_by_type = {d.document_type: d for d in documents if d.version == version_obj.version}
+        if "full" not in docs_by_type and st.button(f"Generar PDF Completo · V{version_obj.version}", key=f"generate_full_{report_id}_{version_obj.version}", use_container_width=True):
             try:
-                content = load_document_bytes(
-                    bucket=doc.storage_bucket,
-                    storage_path=doc.storage_path,
-                    local_path=doc.local_path,
-                )
-                with session_scope() as session:
-                    filename = report_filename(session, report_id, version=doc.version, mode=doc.document_type)
-                col.download_button(
-                    f"Descargar {PDF_MODES.get(doc.document_type, doc.document_type)}",
-                    content,
-                    filename,
-                    "application/pdf",
-                    key=f"doc_{doc.id}",
-                )
+                with measure("Generar PDF completo", "pdf"):
+                    with session_scope() as session:
+                        fresh_version = repo.get_report_version(session, report_id, version_obj.version)
+                        status = _store_one_document(session, report_id, fresh_version, "full")
+                st.success(f"PDF Completo: {status}"); st.rerun()
             except Exception as exc:
-                col.warning(str(exc))
+                st.error(str(exc))
+        for mode in ("executive", "full"):
+            doc = docs_by_type.get(mode)
+            if not doc:
+                continue
+            with st.container(border=True):
+                st.markdown(f"**{PDF_MODES.get(mode, mode)}** · {doc.storage_status}")
+                if doc.error_message:
+                    st.error(doc.error_message); continue
+                try:
+                    content = load_document_bytes(bucket=doc.storage_bucket, storage_path=doc.storage_path, local_path=doc.local_path)
+                    with session_scope() as session:
+                        filename = report_filename(session, report_id, version=doc.version, mode=doc.document_type)
+                    st.download_button(f"Descargar {PDF_MODES.get(mode, mode)}", content, filename, "application/pdf", key=f"doc_{doc.id}", use_container_width=True)
+                except Exception as exc:
+                    st.warning(str(exc))
 
 
 def _render_report_editor(report_id: int, user: dict) -> None:
-    with session_scope() as session:
-        report = repo.get_report(session, report_id)
-        if not report:
-            st.error("Informe no encontrado.")
-            return
-        participations = repo.get_participations(session, report.match_id)
-        evaluation_list = repo.list_evaluations(session, report_id)
-        versions = repo.list_report_versions(session, report_id)
-        documents = repo.list_documents(session, report_id)
-
+    report, participations, evaluation_list = _load_report_editor(report_id)
+    if not report:
+        st.error("Informe no encontrado."); return
     if report.reporter_id != user["id"] and user["role"] not in {"admin", "director"}:
-        st.error("No tienes acceso a este informe.")
-        return
-
+        st.error("No tienes acceso a este informe."); return
     rival_players = [p for p in participations if p.team_id == report.rival_team_id]
     own_players = [p for p in participations if p.team_id == report.own_team_id]
     evaluations = {e.player_id: e for e in evaluation_list}
     read_only = report.status not in {"draft", "returned"} or report.reporter_id != user["id"]
-
     st.markdown(f"## {safe_html(report.match.home_team.name)} - {safe_html(report.match.away_team.name)}", unsafe_allow_html=True)
-    st.caption(
-        f"{report.match.competition.name} · {report.match.round_name} · "
-        f"{report.match.match_date.strftime('%d/%m/%Y')} · "
-        f"{REPORT_STATUSES.get(report.status, report.status)} · V{report.version}"
-    )
+    st.caption(f"{report.match.competition.name} · {report.match.round_name} · {report.match.match_date.strftime('%d/%m/%Y')} · {REPORT_STATUSES.get(report.status, report.status)} · V{report.version}")
     if report.review_note:
         st.warning(f"Revisión: {report.review_note}")
-    if st.session_state.get(f"save_status_{report_id}"):
-        st.caption(st.session_state[f"save_status_{report_id}"])
+    evaluated_rival = [e for e in evaluation_list if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None]
+    st.progress(len(evaluated_rival) / len(rival_players) if rival_players else 0, text=f"{len(evaluated_rival)} de {len(rival_players)} rivales valorados")
 
-    evaluated_rival = [
-        e for e in evaluation_list
-        if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None
-    ]
-    progress = len(evaluated_rival) / len(rival_players) if rival_players else 0
-    st.progress(progress, text=f"{len(evaluated_rival)} de {len(rival_players)} rivales valorados")
+    if read_only:
+        section = st.radio("Sección", ["No Name", "Rival", "Finalizar", "Documentos"], horizontal=True, key=f"readonly_report_section_{report_id}")
+        if section == "No Name": _render_team_form(report, own_players, evaluations, user, own_team=True, read_only=True)
+        elif section == "Rival": _render_team_form(report, rival_players, evaluations, user, own_team=False, read_only=True)
+        elif section == "Finalizar": _render_finish(report, evaluation_list, report_id, user, True)
+        else: _render_documents(report_id)
+        return
 
-    tab_own, tab_rival, tab_finish, tab_docs = st.tabs([
-        f"Nuestro equipo · {report.own_team.name}",
-        f"Rival · {report.rival_team.name}",
-        "Finalizar",
-        "Documentos",
-    ])
-    with tab_own:
-        st.caption("Mismo sistema sencillo: posición y minutos están bloqueados; tú solo valoras el rendimiento.")
-        _render_players_group(report_id, own_players, report.own_team_id, evaluations, user, read_only, True)
-    with tab_rival:
-        st.caption("Valora únicamente lo que hayas visto. La posición, dorsal, titularidad y minutos ya vienen preparados por administración.")
-        _render_players_group(report_id, rival_players, report.rival_team_id, evaluations, user, read_only, False)
-    with tab_finish:
-        _render_finish_tab(report, evaluation_list, report_id, user, read_only)
-    with tab_docs:
-        _render_documents(report_id, versions, documents)
+    stage_key = f"report_stage_{report_id}"
+    stage = st.session_state.get(stage_key, "own")
+    step_labels = {"own": "1 · No Name", "rival": "2 · Rival", "finish": "3 · Entregar"}
+    st.caption(" → ".join((f"**{label}**" if key == stage else label) for key, label in step_labels.items()))
+    if stage == "own":
+        st.markdown("### 1 · No Name")
+        _render_team_form(report, own_players, evaluations, user, own_team=True, read_only=False, next_stage="rival")
+    elif stage == "rival":
+        c1, c2 = st.columns([1,4])
+        rival_dirty = bool(st.session_state.get(_dirty_key(report.id, report.rival_team_id), False))
+        if c1.button("← No Name", use_container_width=True, disabled=rival_dirty, help="Guarda o deshaz los cambios del rival antes de salir." if rival_dirty else None):
+            st.session_state[stage_key] = "own"; st.rerun()
+        c2.markdown("### 2 · Rival")
+        if rival_dirty:
+            c2.caption("Hay cambios sin guardar: guarda o deshaz antes de cambiar de paso.")
+        _render_team_form(report, rival_players, evaluations, user, own_team=False, read_only=False, next_stage="finish")
+    else:
+        st.markdown("### 3 · Entregar")
+        _render_finish(report, evaluation_list, report_id, user, False)
 
 
 def _available_work_matches(user: dict):
-    with session_scope() as session:
-        all_matches = [m for m in repo.list_matches(session) if m.status in {"published", "closed"}]
-        assignments = repo.list_assignments(session, user_id=user["id"])
-        reports = repo.list_reports(session, reporter_id=user["id"])
+    with measure("Cargar trabajo pendiente", "report"):
+        with session_scope() as session:
+            all_matches = [m for m in repo.list_matches(session) if m.status in {"published", "closed"}]
+            assignments = repo.list_assignments(session, user_id=user["id"])
+            reports = repo.list_reports(session, reporter_id=user["id"])
     assigned_ids = {a.match_id for a in assignments if a.status != "waived"}
-    matches = [
-        m for m in all_matches
-        if user["role"] in {"admin", "director"} or not assignments or m.id in assigned_ids
-    ]
+    matches = [m for m in all_matches if user["role"] in {"admin", "director"} or not assignments or m.id in assigned_ids]
     return matches, assignments, reports
 
 
 def _render_work(user: dict) -> None:
-    page_header("Valorar partido", "Solo jugadores: nota, observación opcional y dos checks. El resto ya viene del partido.")
+    page_header("Valorar partido", "Carga una vez, puntúa sin consultas y guarda cada plantilla en un único lote.")
     matches, assignments, reports = _available_work_matches(user)
     if not matches:
-        st.info("No tienes partidos asignados.")
-        return
-
-    existing_by_match = {r.match_id: r for r in reports}
-    assignment_by_match = {a.match_id: a for a in assignments}
-    active_matches = [
-        m for m in matches
-        if m.id not in existing_by_match or existing_by_match[m.id].status in {"draft", "returned"}
-    ]
+        st.info("No tienes partidos asignados."); return
+    existing_by_match = {r.match_id: r for r in reports}; assignment_by_match = {a.match_id: a for a in assignments}
+    active_matches = [m for m in matches if m.id not in existing_by_match or existing_by_match[m.id].status in {"draft", "returned"}]
     if not active_matches:
-        st.success("No tienes valoraciones pendientes. Puedes consultar lo ya entregado desde Mis informes.")
-        return
-
+        st.success("No tienes valoraciones pendientes. Consulta lo entregado desde Mis informes."); return
     labels = {}
     for match in active_matches:
-        report = existing_by_match.get(match.id)
-        assignment = assignment_by_match.get(match.id)
+        report = existing_by_match.get(match.id); assignment = assignment_by_match.get(match.id)
         state = REPORT_STATUSES.get(report.status, report.status) if report else ASSIGNMENT_STATUSES.get(assignment.status, assignment.status) if assignment else "Pendiente"
         labels[match.id] = f"{match_label(match)} · {state}"
-
     valid_ids = [m.id for m in active_matches]
     preferred = st.session_state.pop("report_selected_match_id", None)
-    default_index = valid_ids.index(preferred) if preferred in valid_ids else 0
-    selected_match_id = st.selectbox("Partido que vas a informar", valid_ids, index=default_index, format_func=lambda mid: labels[mid])
+    selected_match_id = st.selectbox("Partido", valid_ids, index=valid_ids.index(preferred) if preferred in valid_ids else 0, format_func=lambda mid: labels[mid])
     selected_report = existing_by_match.get(selected_match_id)
     if not selected_report:
-        st.info("Todo está preparado por administración: alineaciones, posiciones y minutos. Solo tienes que valorar jugadores.")
         if st.button("Empezar a valorar", type="primary", use_container_width=True):
             try:
                 with session_scope() as session:
-                    report = repo.get_or_create_report(session, selected_match_id, user["id"], actor_role=user["role"])
+                    repo.get_or_create_report(session, selected_match_id, user["id"], actor_role=user["role"])
                 st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            except Exception as exc: st.error(str(exc))
         return
     _render_report_editor(selected_report.id, user)
 
 
 def _render_archive(user: dict) -> None:
     title = "Mis informes" if user["role"] == "reporter" else "Informes"
-    page_header(title, "Consulta borradores, entregas y documentos generados.")
+    page_header(title, "Filtra primero y abre solo el informe que necesites. El editor no se carga hasta pulsar Abrir.")
     with session_scope() as session:
-        reports = repo.list_reports(session, reporter_id=user["id"] if user["role"] == "reporter" else None)
+        seasons = repo.list_seasons(session)
+        teams = repo.list_teams(session, active_only=True)
+        users = repo.list_users(session, active_only=True) if user["role"] != "reporter" else []
+    c1, c2, c3, c4 = st.columns(4)
+    season_opts = [None] + [s.id for s in seasons]
+    season_id = c1.selectbox("Temporada", season_opts, format_func=lambda x: "Todas" if x is None else next(s.name for s in seasons if s.id == x))
+    status_keys = [None] + list(REPORT_STATUSES)
+    status = c2.selectbox("Estado", status_keys, format_func=lambda x: "Todos" if x is None else REPORT_STATUSES[x])
+    rival_opts = [None] + [t.id for t in teams if not t.is_own_team]
+    rival_id = c3.selectbox("Rival", rival_opts, format_func=lambda x: "Todos" if x is None else next(t.name for t in teams if t.id == x))
+    round_query = c4.text_input("Jornada", placeholder="Ej. Jornada 8")
+    reporter_id = user["id"] if user["role"] == "reporter" else None
+    if users:
+        reporter_opts = [None] + [u.id for u in users]
+        reporter_id = st.selectbox("Informador", reporter_opts, format_func=lambda x: "Todos" if x is None else next(u.full_name for u in users if u.id == x))
+    with measure("Filtrar archivo de informes", "archive"):
+        with session_scope() as session:
+            reports = repo.list_reports(session, reporter_id=reporter_id, status=status, season_id=season_id, rival_team_id=rival_id, limit=80)
+    if round_query.strip():
+        needle = round_query.strip().casefold()
+        reports = [r for r in reports if needle in (r.match.round_name or "").casefold()]
     if not reports:
-        st.info("Todavía no hay informes.")
-        return
-
-    status_options = ["Todos"] + sorted({REPORT_STATUSES.get(r.status, r.status) for r in reports})
-    selected_status = st.selectbox("Estado", status_options)
-    visible = [r for r in reports if selected_status == "Todos" or REPORT_STATUSES.get(r.status, r.status) == selected_status]
-    if not visible:
-        st.info("No hay informes con ese estado.")
-        return
-
-    frame = pd.DataFrame([{
-        "ID": r.id,
-        "Partido": f"{r.match.home_team.name} - {r.match.away_team.name}",
-        "Fecha": r.match.match_date,
-        "Informador": r.reporter.full_name,
-        "Estado": REPORT_STATUSES.get(r.status, r.status),
-        "Versión": f"V{r.version}",
-        "Actualizado": r.updated_at,
-    } for r in visible])
-    st.dataframe(frame, use_container_width=True, hide_index=True)
-    labels = {
-        r.id: f"{r.match.match_date.strftime('%d/%m/%Y')} · {r.match.home_team.name} - {r.match.away_team.name} · "
-              f"{REPORT_STATUSES.get(r.status, r.status)} · {r.reporter.full_name}"
-        for r in visible
-    }
-    selected_report_id = st.selectbox("Abrir informe", list(labels), format_func=lambda rid: labels[rid])
-    _render_report_editor(selected_report_id, user)
+        st.info("No hay informes con esos filtros."); return
+    st.dataframe(pd.DataFrame([{"Partido": f"{r.match.home_team.name} - {r.match.away_team.name}", "Fecha": r.match.match_date, "Informador": r.reporter.full_name, "Estado": REPORT_STATUSES.get(r.status,r.status), "V": r.version} for r in reports]), hide_index=True, use_container_width=True)
+    labels = {r.id: f"{r.match.match_date.strftime('%d/%m/%Y')} · {r.match.home_team.name} - {r.match.away_team.name} · {r.reporter.full_name}" for r in reports}
+    selected = st.selectbox("Informe", list(labels), format_func=lambda rid: labels[rid])
+    if st.button("Abrir informe", type="primary", use_container_width=True):
+        st.session_state["archive_open_report_33"] = selected
+    opened = st.session_state.get("archive_open_report_33")
+    if opened in labels:
+        st.divider(); _render_report_editor(opened, user)
 
 
-def render_work(user: dict) -> None:
-    """Stable entrypoint for the report creation workflow."""
-    _render_work(user)
-
-
-def render_archive(user: dict) -> None:
-    """Stable entrypoint for the report archive workflow."""
-    _render_archive(user)
-
-
+def render_work(user: dict) -> None: _render_work(user)
+def render_archive(user: dict) -> None: _render_archive(user)
 def render(user: dict, mode: str = "work") -> None:
-    """Backward-compatible dispatcher kept for older internal calls."""
-    if mode == "archive":
-        render_archive(user)
-    else:
-        render_work(user)
+    render_archive(user) if mode == "archive" else render_work(user)

@@ -1,4 +1,73 @@
+## 3.4.0 · Audit Closure & Live Performance
+
+- Informe compacto con `st.fragment` y estado real de cambios sin guardar.
+- Desambiguación de homónimos rivales con contexto y decisión humana.
+- Confianza 0–100 desglosada y tendencias por ventanas.
+- DD: alertas vencidas, dossiers de rivales y XI con filtros de confianza/seguimiento.
+- Backup bajo demanda, filtro de jornada y telemetría SQL real por sesión.
+- Aceptación live con SAVEPOINT + rollback contra la DATABASE_URL configurada.
+- Repositorios y motor PDF divididos en módulos.
+- Sin nueva migración; misma base Supabase.
+
 # Changelog
+
+## 3.3.0 · Advanced Scout & Production Polish
+
+- Nuevo flujo **Jugadores ojeados**: Observado → Candidato → Solicitado → En revisión → Ojeado/Archivado.
+- Dirección Deportiva ubica al jugador en una posición y rol del modelo de No Name antes/después de solicitar una ficha scout.
+- Ficha scout avanzada asignable a informadores con bloque técnico, táctico, físico, mental y atributos opcionales específicos por posición.
+- Conclusión final de DD con encaje, nivel actual, proyección, decisión y resumen propio.
+- Informe semanal sigue compacto: opciones Destacado/PDF ocultas por defecto y flujo No Name → Rival → Entregar que impide saltarse el guardado.
+- Evaluaciones guardadas con UPSERT SQL real `ON CONFLICT DO UPDATE`.
+- Identidad rival más segura por equipo/temporada/alias y tratamiento prudente de homónimos.
+- Rankings, XI y expediente 360 basados en **posición observada**.
+- XI de la liga con criterios de media, confianza, forma reciente o selección DD y sustitución manual.
+- Tendencias robustas por medias de ventanas inicial/reciente y dispersión.
+- Confianza 0–100 explicable por muestra, informadores, consenso y recencia.
+- Bandeja DD con razones accionables y dossier reforzado de equipos rivales.
+- Base de datos simplificada: datos internacionales/secundarios pasan a paneles avanzados.
+- Archivo de informes lazy y backup bajo demanda.
+- Migración `0004_scout_workflow_3_3` con tablas scout e índices compuestos de rendimiento.
+- Instrumentación de tiempos en sesión para detectar operaciones lentas sin incrementar escrituras.
+- Limpieza técnica del generador PDF, repositorios especializados y validación pura de postpartido.
+- Accesibilidad móvil reforzada y navegación más compacta en áreas densas.
+
+## 3.2.0 · League Intelligence & Fast Workflow
+
+- Postpartido preparado principalmente en memoria y publicación transaccional.
+- Borradores remotos opcionales para continuar otro día sin guardar cada interacción.
+- Cache de contexto, plantilla propia, último XI, rival previo y lista de borradores durante el flujo.
+- Formaciones automáticas con sugerencia de XI y cambios `minuto · sale · entra`.
+- Rival sin plantilla previa obligatoria, pegado rápido y guardado masivo de alineación/roster.
+- Workspace de informes y guardado masivo por equipo; sin escritura por jugador.
+- Rankings de scouting agregados en SQL en lugar de agrupar todas las evaluaciones en Python.
+- Bandeja de revisión cargada en bloque para eliminar N+1.
+- Búsqueda global de catálogo y edición masiva de plantilla.
+- Dirección Deportiva enfocada exclusivamente a nuestra liga: Panorama, Jugadores 360, Por posiciones, Equipos, Seguimiento, Comparador, XI de la liga, Consenso, Informes y Listas.
+- Índice de confianza basado en muestra, informadores y dispersión.
+- Tendencias de evolución, destacados recientes y bandeja de decisión.
+- Nueva migración Alembic `0003_league_intelligence_3_2`, aditiva y no destructiva.
+- Backup/restore y exportación analítica actualizados con perfiles DD, borradores y listas.
+- 24 pruebas automatizadas.
+
+## 3.1.0 · Performance & Accessibility
+
+- Evaluaciones propias y rivales agrupadas en formularios: no hay escrituras por slider ni por jugador.
+- Guardado masivo de cada plantilla en una sola transacción y con una única precarga de evaluaciones existentes.
+- Eliminación de `st.tabs` para evitar ejecutar secciones ocultas.
+- Carga perezosa de documentos, históricos y herramientas de dirección deportiva.
+- Revalidación de sesión con TTL y bootstrap memorizado para reducir consultas repetitivas.
+- Cache selectiva de ajustes de aplicación.
+- Dashboard de administración sin consulta N+1 del progreso de asignaciones.
+- Filtros de jugadores y consenso agrupados en formularios.
+- Generador de once automático por formación; 4-4-2 y otras once estructuras crean sus posiciones predeterminadas.
+- Once rápido de No Name: el administrador asigna nombres a posiciones ya creadas.
+- Estructura rival automática por formación, reutilización de última alineación e importación opcional.
+- PDF Ejecutivo renombrado a **Resumen** y rediseñado a 1–2 páginas de uso diario.
+- PDF Completo se conserva y solo se genera bajo demanda.
+- Mejora general de contraste, foco, tamaño táctil, etiquetas, responsive y `prefers-reduced-motion`.
+- Sin cambios de esquema: compatible con la misma base Supabase 3.0/3.0.1.
+- Sin datos deportivos de demostración en la release.
 
 ## 3.0.1 · Navegación limpia
 

@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 
 from models.entities import (
     AppSetting, AuditLog, Competition, ConsolidatedPlayerEvaluation, ConsolidatedReport,
-    Document, FollowUp, FollowUpHistory, LoginAttempt, Match, Participation, Player,
-    PlayerAlias, PlayerEvaluation, PlayerMergeLog, Report, ReportAssignment, ReportVersion,
-    Season, Team, TeamRoster, User,
+    Document, FollowUp, FollowUpHistory, LeaguePlayerProfile, LoginAttempt, Match, Participation, Player,
+    PlayerAlias, PlayerEvaluation, PlayerMergeLog, PostMatchDraft, Report, ReportAssignment, ReportVersion,
+    ScoutingList, ScoutingListItem, Season, Team, TeamRoster, User,
 )
 from repositories import scouting as repo
 
@@ -41,6 +41,9 @@ def analytics_export_xlsx(session: Session) -> bytes:
     assignments = _model_rows(session, ReportAssignment)
     consolidations = _model_rows(session, ConsolidatedReport)
     consolidated_players = _model_rows(session, ConsolidatedPlayerEvaluation)
+    league_profiles = _model_rows(session, LeaguePlayerProfile)
+    scouting_lists = _model_rows(session, ScoutingList)
+    scouting_list_items = _model_rows(session, ScoutingListItem)
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         pd.DataFrame(rankings).to_excel(writer, sheet_name="ranking_validado", index=False)
@@ -65,6 +68,9 @@ def analytics_export_xlsx(session: Session) -> bytes:
         pd.DataFrame(followups).to_excel(writer, sheet_name="seguimientos", index=False)
         pd.DataFrame(consolidations).to_excel(writer, sheet_name="consolidados", index=False)
         pd.DataFrame(consolidated_players).to_excel(writer, sheet_name="consenso_jugadores", index=False)
+        pd.DataFrame(league_profiles).to_excel(writer, sheet_name="direccion_jugadores", index=False)
+        pd.DataFrame(scouting_lists).to_excel(writer, sheet_name="listas", index=False)
+        pd.DataFrame(scouting_list_items).to_excel(writer, sheet_name="listas_jugadores", index=False)
     return output.getvalue()
 
 
@@ -77,7 +83,7 @@ def technical_backup_zip(session: Session) -> bytes:
         User, LoginAttempt, Season, Competition, Team, Player, PlayerAlias, PlayerMergeLog,
         TeamRoster, Match, Participation, ReportAssignment, Report, PlayerEvaluation,
         ReportVersion, Document, FollowUp, FollowUpHistory, ConsolidatedReport,
-        ConsolidatedPlayerEvaluation, AppSetting, AuditLog,
+        ConsolidatedPlayerEvaluation, PostMatchDraft, LeaguePlayerProfile, ScoutingList, ScoutingListItem, AppSetting, AuditLog,
     ]
     payload = {
         "format": "postmatch-scout-backup-v2",
@@ -87,5 +93,5 @@ def technical_backup_zip(session: Session) -> bytes:
     output = BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("backup.json", json.dumps(payload, ensure_ascii=False, default=str, indent=2))
-        archive.writestr("README.txt", "Copia técnica completa de No Name PostMatch 3.0. Contiene datos sensibles y hashes de contraseña. Guárdala de forma segura.\n")
+        archive.writestr("README.txt", "Copia técnica completa de No Name PostMatch 3.4. Contiene datos sensibles y hashes de contraseña. Guárdala de forma segura.\n")
     return output.getvalue()

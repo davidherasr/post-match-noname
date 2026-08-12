@@ -418,6 +418,131 @@ class ConsolidatedPlayerEvaluation(Base):
     )
 
 
+class PostMatchDraft(Base):
+    __tablename__ = "postmatch_drafts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id", ondelete="SET NULL"))
+    title: Mapped[str | None] = mapped_column(String(180))
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    creator: Mapped[User] = relationship()
+    season: Mapped[Season | None] = relationship()
+
+
+class LeaguePlayerProfile(Base):
+    __tablename__ = "league_player_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    decision_status: Mapped[str] = mapped_column(String(40), default="Base", nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    director_note: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    player: Mapped[Player] = relationship()
+    updater: Mapped[User] = relationship()
+    __table_args__ = (UniqueConstraint("player_id", name="uq_league_player_profile"),)
+
+
+class ScoutingList(Base):
+    __tablename__ = "scouting_lists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    list_type: Mapped[str] = mapped_column(String(30), default="custom", nullable=False)
+    formation: Mapped[str | None] = mapped_column(String(40))
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id", ondelete="SET NULL"))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    season: Mapped[Season | None] = relationship()
+    creator: Mapped[User] = relationship()
+
+
+class ScoutingListItem(Base):
+    __tablename__ = "scouting_list_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    list_id: Mapped[int] = mapped_column(ForeignKey("scouting_lists.id", ondelete="CASCADE"), nullable=False)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[str | None] = mapped_column(String(20))
+    order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    scouting_list: Mapped[ScoutingList] = relationship()
+    player: Mapped[Player] = relationship()
+    __table_args__ = (UniqueConstraint("list_id", "player_id", name="uq_scouting_list_player"),)
+
+
+class ScoutedPlayerProfile(Base):
+    __tablename__ = "scouted_player_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="candidate", nullable=False)
+    model_position: Mapped[str | None] = mapped_column(String(20))
+    model_role: Mapped[str | None] = mapped_column(String(80))
+    fit_score: Mapped[float | None] = mapped_column(Float)
+    current_level: Mapped[float | None] = mapped_column(Float)
+    potential_score: Mapped[float | None] = mapped_column(Float)
+    final_decision: Mapped[str | None] = mapped_column(String(50))
+    director_summary: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    assigned_to: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    player: Mapped[Player] = relationship()
+    requester: Mapped[User] = relationship(foreign_keys=[requested_by])
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assigned_to])
+    approver: Mapped[User | None] = relationship(foreign_keys=[approved_by])
+    __table_args__ = (UniqueConstraint("player_id", name="uq_scouted_player_profile"),)
+
+
+class ScoutReview(Base):
+    __tablename__ = "scout_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("scouted_player_profiles.id", ondelete="CASCADE"), nullable=False)
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
+    observed_position: Mapped[str | None] = mapped_column(String(20))
+    technical_rating: Mapped[float | None] = mapped_column(Float)
+    tactical_rating: Mapped[float | None] = mapped_column(Float)
+    physical_rating: Mapped[float | None] = mapped_column(Float)
+    mental_rating: Mapped[float | None] = mapped_column(Float)
+    current_level: Mapped[float | None] = mapped_column(Float)
+    potential_score: Mapped[float | None] = mapped_column(Float)
+    model_fit_score: Mapped[float | None] = mapped_column(Float)
+    attributes_json: Mapped[str | None] = mapped_column(Text)
+    strengths: Mapped[str | None] = mapped_column(Text)
+    weaknesses: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    recommendation: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    profile: Mapped[ScoutedPlayerProfile] = relationship()
+    reviewer: Mapped[User] = relationship()
+    __table_args__ = (UniqueConstraint("profile_id", "reviewer_id", name="uq_scout_review_reviewer"),)
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 

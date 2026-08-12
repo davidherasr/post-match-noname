@@ -75,6 +75,6 @@ STRENGTH_TAGS = [
 ]
 
 PDF_MODES = {
-    "executive": "Ejecutivo",
+    "executive": "Resumen",
     "full": "Completo",
 }

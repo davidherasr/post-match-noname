@@ -187,109 +187,113 @@ def _match_editor(matches, user: dict) -> None:
 
 
 def render(user: dict) -> None:
-    page_header("Partidos · mantenimiento", "El alta normal se hace desde Nuevo postpartido. Aquí solo corriges, revisas o importas datos.")
-    tab_list, tab_lineups, tab_assign, tab_import = st.tabs(["Partidos", "Alineaciones", "Asignaciones", "Importar"])
+    page_header("Partidos · mantenimiento", "El alta normal se hace desde Nuevo postpartido. Abre solo la herramienta que necesites.")
+    section = st.radio(
+        "Sección",
+        ["Partidos", "Alineaciones", "Asignaciones", "Importar"],
+        horizontal=True,
+        key="matches_section",
+        help="Las demás secciones no realizan consultas mientras no las abras.",
+    )
 
-    with tab_list:
+    if section == "Partidos":
         with session_scope() as session:
             matches = repo.list_matches(session)
         _match_editor(matches, user)
+        return
 
-    with tab_lineups:
+    if section == "Alineaciones":
         st.caption("Edición avanzada. En el uso normal las alineaciones se preparan dentro de Nuevo postpartido.")
         with session_scope() as session:
             matches = repo.list_matches(session)
         if not matches:
             st.info("No hay partidos.")
+            return
+        labels = {m.id: match_label(m) for m in matches}
+        selected_id = st.selectbox("Partido a corregir", [m.id for m in matches], format_func=lambda mid: labels[mid], key="lineup_match")
+        match = next(m for m in matches if m.id == selected_id)
+        side = st.radio("Equipo", [match.home_team.name, match.away_team.name], horizontal=True, key=f"lineup_side_{selected_id}")
+        if side == match.home_team.name:
+            _lineup_editor(match.id, match.home_team_id, match.season_id, user["id"], f"{match.id}_home")
         else:
-            labels = {m.id: match_label(m) for m in matches}
-            selected_id = st.selectbox("Partido a corregir", [m.id for m in matches], format_func=lambda mid: labels[mid], key="lineup_match")
-            match = next(m for m in matches if m.id == selected_id)
-            local_tab, away_tab = st.tabs([match.home_team.name, match.away_team.name])
-            with local_tab:
-                _lineup_editor(match.id, match.home_team_id, match.season_id, user["id"], f"{match.id}_home")
-            with away_tab:
-                _lineup_editor(match.id, match.away_team_id, match.season_id, user["id"], f"{match.id}_away")
+            _lineup_editor(match.id, match.away_team_id, match.season_id, user["id"], f"{match.id}_away")
+        return
 
-    with tab_assign:
+    if section == "Asignaciones":
         with session_scope() as session:
             matches = repo.list_matches(session)
             reporters = [u for u in repo.list_users(session, active_only=True) if u.role in {"reporter", "admin", "director"}]
         if not matches or not reporters:
             st.info("Necesitas al menos un partido y un usuario activo.")
-        else:
-            labels = {m.id: match_label(m) for m in matches}
-            selected_id = st.selectbox("Partido", [m.id for m in matches], format_func=lambda mid: labels[mid], key="assignment_match")
-            match = next(m for m in matches if m.id == selected_id)
-            with session_scope() as session:
-                current = repo.list_assignments(session, match_id=selected_id)
-                progress = repo.assignment_progress(session, selected_id)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Asignados", progress.get("total", 0))
-            c2.metric("Entregados", progress.get("submitted", 0))
-            c3.metric("Aprobados", progress.get("approved", 0))
-            current_ids = [a.user_id for a in current if a.status != "waived"]
-            with st.form(f"assign_reporters_{selected_id}"):
-                selected_users = st.multiselect(
-                    "Informadores asignados",
-                    [u.id for u in reporters],
-                    default=current_ids,
-                    format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in reporters if u.id == uid),
-                )
-                required = st.checkbox("Informes obligatorios", value=True)
-                due_enabled = st.checkbox("Usar fecha límite", value=bool(match.report_due_at))
-                if due_enabled:
-                    d1, d2 = st.columns(2)
-                    due_d = d1.date_input("Fecha límite", value=(match.report_due_at.date() if match.report_due_at else match.match_date))
-                    due_t = d2.time_input("Hora límite", value=(match.report_due_at.time() if match.report_due_at else time(23, 59)))
-                    due_at = datetime.combine(due_d, due_t)
-                else:
-                    due_at = None
-                save_assignments = st.form_submit_button("Guardar asignaciones", type="primary")
-            if save_assignments:
-                try:
-                    with session_scope() as session:
-                        repo.assign_reporters(session, selected_id, selected_users, user["id"], due_at, required)
-                    st.success("Asignaciones actualizadas.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-
-    with tab_import:
-        st.caption("La importación es secundaria: el flujo Nuevo postpartido permite crear rivales y jugadores sin archivos.")
-        st.download_button("Descargar plantilla Excel", template_workbook(), "plantilla_noname_postmatch.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        import_type_label = st.radio("Tipo de importación", ["Plantillas de equipos", "Alineaciones de un partido"], horizontal=True)
-        import_type = "rosters" if import_type_label.startswith("Plantillas") else "lineups"
-        uploaded = st.file_uploader("CSV o Excel (.xlsx)", type=["csv", "xlsx"])
-        if uploaded:
+            return
+        labels = {m.id: match_label(m) for m in matches}
+        selected_id = st.selectbox("Partido", [m.id for m in matches], format_func=lambda mid: labels[mid], key="assignment_match")
+        match = next(m for m in matches if m.id == selected_id)
+        with session_scope() as session:
+            current = repo.list_assignments(session, match_id=selected_id)
+            progress = repo.assignment_progress(session, selected_id)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Asignados", progress.get("total", 0))
+        c2.metric("Entregados", progress.get("submitted", 0))
+        c3.metric("Aprobados", progress.get("approved", 0))
+        current_ids = [a.user_id for a in current if a.status != "waived"]
+        with st.form(f"assign_reporters_{selected_id}"):
+            selected_users = st.multiselect(
+                "Informadores asignados",
+                [u.id for u in reporters],
+                default=current_ids,
+                format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in reporters if u.id == uid),
+            )
+            required = st.checkbox("Informes obligatorios", value=True)
+            due_enabled = st.checkbox("Usar fecha límite", value=bool(match.report_due_at))
+            d1, d2 = st.columns(2)
+            due_d = d1.date_input("Fecha límite", value=(match.report_due_at.date() if match.report_due_at else match.match_date), disabled=not due_enabled)
+            due_t = d2.time_input("Hora límite", value=(match.report_due_at.time() if match.report_due_at else time(23, 59)), disabled=not due_enabled)
+            save_assignments = st.form_submit_button("Guardar asignaciones", type="primary")
+        if save_assignments:
             try:
-                sheets = available_sheets(uploaded)
-                sheet = None
-                if sheets:
-                    preferred = "plantillas" if import_type == "rosters" else "alineaciones"
-                    default_idx = next((i for i, name in enumerate(sheets) if preferred in name.lower()), 0)
-                    sheet = st.selectbox("Hoja del Excel", sheets, index=default_idx)
-                df = read_table(uploaded, sheet_name=sheet)
-                preview = preview_import(df, import_type)
-                st.dataframe(preview["data"].head(100), use_container_width=True, hide_index=True)
-                if preview["errors"]:
-                    st.error("La importación contiene errores y no puede confirmarse.")
-                    for error in preview["errors"][:30]:
-                        st.write(f"- {error}")
-                if preview["warnings"]:
-                    st.warning("Advertencias de calidad de datos")
-                    for warning in preview["warnings"][:30]:
-                        st.write(f"- {warning}")
-                confirm = st.button("Confirmar importación", type="primary", disabled=bool(preview["errors"]))
-                if confirm:
-                    with session_scope() as session:
-                        result = import_rosters(session, df, user["id"]) if import_type == "rosters" else import_lineup(session, df, user["id"])
-                    if result.get("errors"):
-                        st.warning(f"Importación finalizada con incidencias: {len(result['errors'])}.")
-                        for error in result["errors"][:30]:
-                            st.write(f"- {error}")
-                    else:
-                        st.success(f"Importación completada. Filas: {result.get('roster_links', result.get('imported', result.get('rows', 0)))} · Jugadores creados: {result.get('created_players', 0)}")
-                    st.rerun()
+                with session_scope() as session:
+                    repo.assign_reporters(session, selected_id, selected_users, user["id"], datetime.combine(due_d, due_t) if due_enabled else None, required)
+                st.success("Asignaciones actualizadas.")
+                st.rerun()
             except Exception as exc:
                 st.error(str(exc))
+        return
+
+    st.caption("La importación es secundaria: Nuevo postpartido permite crear rivales y jugadores sin archivos.")
+    st.download_button("Descargar plantilla Excel", template_workbook(), "plantilla_noname_postmatch.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    import_type_label = st.radio("Tipo de importación", ["Plantillas de equipos", "Alineaciones de un partido"], horizontal=True)
+    import_type = "rosters" if import_type_label.startswith("Plantillas") else "lineups"
+    uploaded = st.file_uploader("CSV o Excel (.xlsx)", type=["csv", "xlsx"])
+    if uploaded:
+        try:
+            sheets = available_sheets(uploaded)
+            sheet = None
+            if sheets:
+                preferred = "plantillas" if import_type == "rosters" else "alineaciones"
+                default_idx = next((i for i, name in enumerate(sheets) if preferred in name.lower()), 0)
+                sheet = st.selectbox("Hoja del Excel", sheets, index=default_idx)
+            df = read_table(uploaded, sheet_name=sheet)
+            preview = preview_import(df, import_type)
+            st.dataframe(preview["data"].head(100), use_container_width=True, hide_index=True)
+            if preview["errors"]:
+                st.error("La importación contiene errores y no puede confirmarse.")
+                for error in preview["errors"][:30]:
+                    st.write(f"- {error}")
+            if preview["warnings"]:
+                st.warning("Advertencias de calidad de datos")
+                for warning in preview["warnings"][:30]:
+                    st.write(f"- {warning}")
+            confirm = st.button("Confirmar importación", type="primary", disabled=bool(preview["errors"]))
+            if confirm:
+                with session_scope() as session:
+                    result = import_rosters(session, df, user["id"]) if import_type == "rosters" else import_lineup(session, df, user["id"])
+                if result.get("errors"):
+                    st.warning(f"Importación finalizada con incidencias: {len(result['errors'])}.")
+                    for error in result["errors"][:30]:
+                        st.write(f"- {error}")
+                else:
+                    st.success(f"Importación completada. Filas: {result.get('roster_links', result.get('imported', result.get('rows', 0)))} · Jugadores creados: {result.get('created_players', 0)}")
+                st.rerun()
+        except Exception as exc:
+            st.error(str(exc))

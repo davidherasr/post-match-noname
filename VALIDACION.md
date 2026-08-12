@@ -1,39 +1,28 @@
-# Validación técnica · No Name PostMatch 3.0.1
+# Validación técnica · No Name PostMatch 3.4.0
 
-## Comprobaciones ejecutadas
+## Estado local de release
 
-- Compilación de todos los módulos Python.
-- Suite de pruebas automatizadas completa.
-- Generación PDF dentro de tests de repositorio.
-- Flujo de alineación rival sin plantilla previa.
-- Creación automática de jugadores y roster rival desde el partido.
-- Copia de alineación propia entre partidos.
-- Separación estricta entre histórico propio y scouting rival.
-- Rankings rivales únicamente a partir de informes aprobados/finales.
-- Migración Alembic desde base vacía hasta `head`.
-- Migración Alembic desde `0001_initial_2_0` hasta `0002_noname_3_0`.
-- Contrato interno de versión 3.0.1.
+- Compilación Python completa: correcta.
+- Suite automatizada: **33 pruebas superadas**.
+- Contrato de versión: **3.4.0**.
+- Revisión Alembic actual: **`0004_scout_workflow_3_3`** (sin migración nueva en 3.4).
+- `scripts/check_release_consistency.py`: correcto.
+- No se incluyen bases `.db`, `.sqlite` o `.sqlite3`.
+- No se incluyen equipos, jugadores, partidos, informes o PDFs deportivos de demostración.
 
-## Resultado de la suite
+## Cobertura nueva 3.4
 
-```text
-16 passed
-```
+- confianza explicable y recencia;
+- detección de homónimos rivales;
+- prioridad del contexto equipo+temporada;
+- aceptación transaccional con rollback;
+- además de las 29 pruebas heredadas de seguridad, importación, fusión, postpartido, bulk upsert, PDFs, liga y scouting avanzado.
 
-## Migraciones
+## Prueba de aceptación live
 
-```text
-0001_initial_2_0
-        ↓
-0002_noname_3_0  (head)
-```
+La release incorpora dos vías para ejecutar la prueba **después del despliegue**, contra la DATABASE_URL real:
 
-`0002_noname_3_0` es deliberadamente no destructiva: marca la frontera de la edición No Name y conserva la base 2.x existente.
+- Administración → Rendimiento → `Ejecutar aceptación real (rollback)`;
+- `python scripts/live_acceptance.py --admin-email <correo-admin>`.
 
-## Datos incluidos
-
-La release no contiene base SQLite pre-poblada ni muestras deportivas. No se incluyen jugadores, equipos, partidos o informes de demostración. Los tests crean sus datos solo en bases SQLite en memoria durante la ejecución.
-
-## Limitación de validación
-
-El entorno de construcción no tiene instalado Streamlit, por lo que no se ha podido hacer una prueba de aceptación visual en navegador. Esa validación debe hacerse tras el despliegue en Streamlit Community Cloud. La lógica Python, repositorios, migraciones y pruebas sí se han ejecutado.
+No puede certificarse desde la build local la latencia concreta de Streamlit Community Cloud + el proyecto Supabase del usuario porque esas credenciales/conexión no están presentes aquí. La prueba queda integrada para ejecutarse en el entorno real y revierte todos sus datos temporales.

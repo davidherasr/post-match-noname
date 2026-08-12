@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import select
 
 from core.constants import POSITIONS
 from core.database import session_scope
@@ -71,12 +72,10 @@ def _render_own_team() -> None:
     ranking_by_id = {int(r["player_id"]): r for r in rankings}
     roster_players = [item.player for item in roster]
     known_ids = {p.id for p in roster_players}
-    for row in rankings:
-        if int(row["player_id"]) not in known_ids:
-            with session_scope() as session:
-                p = session.get(Player, int(row["player_id"]))
-            if p:
-                roster_players.append(p)
+    missing_ids = [int(row["player_id"]) for row in rankings if int(row["player_id"]) not in known_ids]
+    if missing_ids:
+        with session_scope() as session:
+            roster_players.extend(list(session.scalars(select(Player).where(Player.id.in_(missing_ids))).all()))
 
     if rankings:
         st.dataframe(pd.DataFrame([{
@@ -106,14 +105,21 @@ def _render_own_team() -> None:
 
 
 def _render_rivals() -> None:
-    c1, c2, c3 = st.columns([2, 1, 1])
-    search = c1.text_input("Buscar rival por nombre", key="rival_player_search")
-    position = c2.selectbox("Posición", ["Todas"] + POSITIONS, key="rival_player_position")
-    min_reports = c3.number_input("Mínimo observaciones", min_value=1, value=1, step=1, key="rival_player_min")
+    filters = st.session_state.setdefault("rival_query_filters", {"search": "", "position": "Todas", "min_reports": 1})
+    with st.form("rival_query_form", border=True):
+        c1, c2, c3 = st.columns([2, 1, 1])
+        search = c1.text_input("Buscar rival por nombre", value=filters["search"])
+        position = c2.selectbox("Posición", ["Todas"] + POSITIONS, index=(["Todas"] + POSITIONS).index(filters["position"]))
+        min_reports = c3.number_input("Mínimo observaciones", min_value=1, value=int(filters["min_reports"]), step=1)
+        apply = st.form_submit_button("Consultar", type="primary", use_container_width=True)
+    if apply:
+        st.session_state["rival_query_filters"] = {"search": search, "position": position, "min_reports": int(min_reports)}
+        filters = st.session_state["rival_query_filters"]
+
     with session_scope() as session:
-        rankings = repo.player_rankings(session, min_observations=int(min_reports), position=position, limit=300)
-    if search:
-        rankings = [r for r in rankings if search.casefold() in r["full_name"].casefold()]
+        rankings = repo.player_rankings(session, min_observations=int(filters["min_reports"]), position=filters["position"], limit=200)
+    if filters["search"]:
+        rankings = [r for r in rankings if filters["search"].casefold() in r["full_name"].casefold()]
     if not rankings:
         st.info("No hay rivales observados que coincidan con los filtros.")
         return
@@ -131,17 +137,21 @@ def _render_rivals() -> None:
     ids = [int(r["player_id"]) for r in rankings]
     labels = {int(r["player_id"]): f"{r['full_name']} · {r['primary_position'] or '-'}" for r in rankings}
     selected = st.selectbox("Abrir ficha rival", ids, format_func=lambda pid: labels[pid])
-    with session_scope() as session:
-        player = session.get(Player, selected)
-        history = repo.player_history_by_scope(session, selected, scope="rival")
-    if player:
-        _history_block(player, history, "Scouting acumulado")
+    if st.button("Cargar historial del jugador", use_container_width=True):
+        st.session_state["rival_history_player"] = selected
+    history_id = st.session_state.get("rival_history_player")
+    if history_id in ids:
+        with session_scope() as session:
+            player = session.get(Player, history_id)
+            history = repo.player_history_by_scope(session, history_id, scope="rival")
+        if player:
+            _history_block(player, history, "Scouting acumulado")
 
 
 def render(user: dict) -> None:
-    page_header("Jugadores", "Una sola base: rendimiento interno de No Name y scouting rival generado por los postpartidos.")
-    own_tab, rival_tab = st.tabs(["No Name", "Rivales"])
-    with own_tab:
+    page_header("Jugadores", "Consulta rápida: abre solo No Name o Rivales; la sección no visible no hace consultas.")
+    section = st.radio("Tipo de jugador", ["No Name", "Rivales"], horizontal=True, key="players_section")
+    if section == "No Name":
         _render_own_team()
-    with rival_tab:
+    else:
         _render_rivals()

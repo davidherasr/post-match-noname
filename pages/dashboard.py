@@ -92,52 +92,54 @@ def _reporter_dashboard(user: dict) -> None:
 
 
 def _director_dashboard(user: dict) -> None:
-    page_header("Inicio · Dirección deportiva", "Primero las decisiones: qué revisar y qué jugadores han llamado la atención.")
+    page_header("Inicio · Dirección deportiva", "Nuestra liga, resumida en decisiones: qué revisar, quién destaca y a quién volver a ver.")
     with session_scope() as session:
-        submitted = repo.list_reports(session, status="submitted", limit=20)
-        highlights = repo.recent_rival_highlights(session, limit=10, minimum_rating=8.0)
-        repeated = repo.player_rankings(session, min_observations=2, limit=8)
-        follow_ups = repo.list_follow_ups(session)
+        active = repo.get_active_season(session)
+        season_id = active.id if active else None
+        metrics = repo.league_panorama(session, season_id=season_id)
+        queue = repo.league_decision_queue(session, season_id=season_id, limit=5)
+        highlights = repo.recent_rival_highlights(session, limit=6, minimum_rating=8.0)
+        trends = repo.league_trends(session, season_id=season_id, min_observations=2, limit=5)
 
-    active_followups = [f for f in follow_ups if f.status not in {"Descartado", "Cerrado"}]
-    cols = st.columns(3)
-    cols[0].metric("Informes por revisar", len(submitted))
-    cols[1].metric("Seguimientos activos", len(active_followups))
-    cols[2].metric("Perfiles repetidos", len(repeated))
+    st.caption(f"{active.name if active else 'Todas las temporadas'} · solo información generada en nuestra competición")
+    cols = st.columns(5)
+    cols[0].metric("Jugadores vistos", metrics["players_observed"])
+    cols[1].metric("2+ observaciones", metrics["players_repeated"])
+    cols[2].metric("Seguimiento", metrics["followups_active"])
+    cols[3].metric("Prioritarios", metrics["priority_players"])
+    cols[4].metric("Por revisar", metrics["reports_pending_review"])
 
-    if submitted:
-        st.subheader("Necesita tu decisión")
-        for report in submitted[:5]:
-            with st.container(border=True):
-                left, right = st.columns([4, 1])
-                left.markdown(f"**{safe_html(report.match.home_team.name)} - {safe_html(report.match.away_team.name)}**", unsafe_allow_html=True)
-                left.caption(f"{report.reporter.full_name} · {report.match.match_date.strftime('%d/%m/%Y')} · V{report.version}")
-                right.button("Revisar", type="primary", use_container_width=True, key=f"review_{report.id}", on_click=_navigate, args=("Revisar y decidir",))
-    else:
-        st.success("No hay informes pendientes de revisión.")
-
-    left, right = st.columns(2)
+    left, right = st.columns([1.15, 1])
     with left:
-        st.subheader("Últimas notas ≥ 8")
-        if not highlights:
-            st.info("Aparecerán cuando existan informes aprobados.")
-        else:
-            for item in highlights[:6]:
-                ev, player, match = item["evaluation"], item["player"], item["match"]
-                st.markdown(f"**{safe_html(player.full_name)} · {ev.general_rating:.1f}**", unsafe_allow_html=True)
-                st.caption(f"{match.match_date.strftime('%d/%m/%Y')} · {match.home_team.name} - {match.away_team.name}")
+        st.subheader("Necesitan una decisión")
+        if not queue:
+            st.success("No hay perfiles con muestra suficiente esperando decisión.")
+        for row in queue:
+            with st.container(border=True):
+                a, b = st.columns([4, 1])
+                a.markdown(f"**{safe_html(row['full_name'])}** · {safe_html(row.get('team_name') or '-')}", unsafe_allow_html=True)
+                a.caption(f"{row.get('primary_position') or '-'} · {row['observations']} obs. · confianza {row['confidence']}")
+                b.metric("Media", f"{row['avg_general']:.2f}")
+        st.button("Abrir bandeja de decisión", type="primary", use_container_width=True, on_click=_navigate, args=("Revisar y decidir",))
     with right:
-        st.subheader("Observados varias veces")
-        if not repeated:
-            st.info("Todavía no hay jugadores con varias observaciones aprobadas.")
+        st.subheader("Destacados recientes")
+        if not highlights:
+            st.info("Aparecerán cuando existan informes aprobados con notas ≥ 8.")
         else:
             st.dataframe(pd.DataFrame([{
-                "Jugador": r["full_name"],
-                "Obs.": r["observations"],
-                "Media": round(r["avg_general"], 2),
-                "Última": r["last_observed"],
-            } for r in repeated[:6]]), use_container_width=True, hide_index=True)
-    st.button("Abrir dirección deportiva", type="primary", use_container_width=True, on_click=_navigate, args=("Revisar y decidir",))
+                "Jugador": x["player"].full_name,
+                "Nota": x["evaluation"].general_rating,
+                "Partido": f"{x['match'].home_team.name} - {x['match'].away_team.name}",
+            } for x in highlights]), use_container_width=True, hide_index=True)
+
+    st.subheader("En evolución")
+    if not trends:
+        st.caption("Se activará cuando tengamos al menos dos observaciones del mismo jugador.")
+    else:
+        st.dataframe(pd.DataFrame([{
+            "Jugador": r["full_name"], "Obs.": r["observations"],
+            "Primera": r["first_rating"], "Última": r["last_rating"], "Cambio": round(r["delta"], 2),
+        } for r in trends]), use_container_width=True, hide_index=True)
 
 
 def _admin_dashboard(user: dict) -> None:
@@ -148,6 +150,7 @@ def _admin_dashboard(user: dict) -> None:
         matches = repo.list_matches(session, limit=8)
         submitted = repo.list_reports(session, status="submitted", limit=20)
         users = repo.list_users(session, active_only=True)
+        progress_by_match = repo.assignment_progress_many(session, [m.id for m in matches])
 
     club = own_team.name if own_team else "No Name"
     page_header(f"{club} · Administración", "Prepara el postpartido en una sola pantalla. La base de datos queda para mantenimiento.")
@@ -173,8 +176,7 @@ def _admin_dashboard(user: dict) -> None:
         st.info("Todavía no hay partidos. Pulsa Nuevo postpartido para empezar.")
     else:
         for match in matches:
-            with session_scope() as session:
-                progress = repo.assignment_progress(session, match.id)
+            progress = progress_by_match.get(match.id, {"total": 0, "submitted": 0, "approved": 0})
             with st.container(border=True):
                 left, middle, action = st.columns([4, 1.3, 1.2])
                 left.markdown(f"**{safe_html(_match_title(match))}**", unsafe_allow_html=True)

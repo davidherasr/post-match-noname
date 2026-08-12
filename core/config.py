@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "No Name PostMatch"
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.4.0"
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 

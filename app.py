@@ -25,8 +25,12 @@ st.set_page_config(
 init_db()
 bootstrap_application()
 
-with session_scope() as session:
-    app_settings = repo.get_all_settings(session)
+@st.cache_data(ttl=180, show_spinner=False)
+def _load_app_settings() -> dict:
+    with session_scope() as session:
+        return repo.get_all_settings(session)
+
+app_settings = _load_app_settings()
 
 apply_global_styles(
     app_settings.get("primary_color") or "#B91C1C",
@@ -38,13 +42,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from pages import reports as reports_page
 
-    expected_api = "3.0.1"
+    expected_api = "3.4.0"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
-            "`app.py` es de No Name PostMatch 3.0, pero `pages/reports.py` no corresponde a esta versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 3.0 y reinicia la aplicación."
+            "`app.py` es de No Name PostMatch 3.4, pero `pages/reports.py` no corresponde a esta versión. "
+            "Sustituye **todo el contenido del repositorio** por el paquete 3.4 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -57,7 +61,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
         st.error(f"No se encuentra la función requerida: pages.reports.{renderer_name}().")
-        st.info("Vuelve a subir el paquete completo No Name PostMatch 3.0 y reinicia la aplicación.")
+        st.info("Vuelve a subir el paquete completo No Name PostMatch 3.4 y reinicia la aplicación.")
         st.stop()
     renderer(user)
 
@@ -137,12 +141,14 @@ ROLE_NAVIGATION: dict[str, list[tuple[str, str]]] = {
         ("Valorar partido", "report_work"),
         ("Mis informes", "report_archive"),
         ("Jugadores", "players"),
+        ("Jugadores ojeados", "scouted"),
     ],
     "director": [
         ("Inicio", "dashboard"),
         ("Revisar y decidir", "director"),
         ("Informes", "report_archive"),
         ("Jugadores", "players"),
+        ("Jugadores ojeados", "scouted"),
     ],
     "admin": [
         ("Inicio", "dashboard"),
@@ -150,6 +156,7 @@ ROLE_NAVIGATION: dict[str, list[tuple[str, str]]] = {
         ("Partidos", "matches"),
         ("Informes", "report_archive"),
         ("Jugadores", "players"),
+        ("Jugadores ojeados", "scouted"),
         ("Dirección deportiva", "director"),
         ("Base de datos", "catalog"),
         ("Administración", "admin"),
@@ -195,6 +202,9 @@ elif route == "players":
     render(user)
 elif route == "director":
     from pages.director import render
+    render(user)
+elif route == "scouted":
+    from pages.scouted import render
     render(user)
 elif route == "postmatch":
     from pages.postmatch import render

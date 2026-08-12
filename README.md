@@ -1,187 +1,230 @@
-# No Name PostMatch 3.0.1
+# No Name PostMatch 3.4.0
 
-Aplicación interna de No Name para convertir cada partido terminado en dos cosas a la vez: memoria de rendimiento del propio equipo y base acumulada de scouting de rivales. La edición 3.0 mantiene la arquitectura robusta de PostMatch Scout 2.x, pero cambia por completo el flujo visible para reducir pasos y carga administrativa.
+## Qué cierra 3.4
 
-## Idea de producto
+- Modo rápido real de valoración mediante `st.fragment`: mover nota/comentario no recarga la aplicación completa ni consulta Supabase.
+- Estado **cambios sin guardar** real por equipo, con bloqueo de navegación hasta guardar o deshacer.
+- Desambiguación de homónimos rivales: equipo+temporada, alias, fecha de nacimiento si existe y confirmación humana cuando hay varias coincidencias.
+- XI de la liga con filtros de confianza y estado DD.
+- Tendencias por ventanas no solapadas y muestra mínima de cuatro observaciones.
+- Confianza 0–100 explicada por muestra, informadores, consenso y recencia.
+- Bandeja DD con seguimientos vencidos/prioritarios sin observación.
+- Dossier rival con último XI conocido, jugadores de interés y futbolistas más observados.
+- Backup únicamente bajo demanda.
+- Archivo de informes con filtro por jornada.
+- Instrumentación SQL real: tiempo total, DB, render y número de queries.
+- Prueba de aceptación contra la base configurada con `SAVEPOINT` y rollback desde Administración.
+- Repositorios separados (`users`, `players`, `matches`, `reports`) y PDF dividido en `payload`, `summary_pdf`, `full_pdf`.
 
-El flujo normal ya no es `temporada → competición → equipo → plantilla → partido → alineaciones → informe`. Para el usuario es simplemente:
 
-**Nuevo postpartido → partido → No Name → rival → publicar → valorar jugadores.**
+Aplicación interna de **No Name** para preparar el postpartido, valorar en segundos a jugadores propios y rivales y convertir cada jornada en una base de conocimiento de **nuestra liga**.
 
-La base de datos, plantillas y relaciones siguen existiendo, pero trabajan por detrás. La sección **Base de datos** queda como mantenimiento y corrección, no como paso previo obligatorio.
+La versión **3.4.0** cierra la auditoría de producción de la 3.3 y mantiene cuatro objetivos: **postpartido rápido, informes de un minuto, Dirección Deportiva de liga y scouting de segundo nivel**. PostgreSQL/Supabase continúa siendo la fuente de verdad, pero la interfaz trabaja primero en memoria y sincroniza solo cuando tiene sentido.
 
-> **3.0.1:** la navegación automática de Streamlit queda desactivada. En login no aparece el sidebar y, tras autenticarse, cada rol ve únicamente el menú propio de No Name. No cambia la base de datos.
+## Filosofía de producto
 
-## Qué cambia en 3.0
+- Si la aplicación ya conoce un dato, no se lo vuelve a pedir al usuario.
+- Si diez cambios pueden guardarse juntos, no se hacen diez viajes a Supabase.
+- La administración prepara un partido como piensa un entrenador, no como piensa una base de datos.
+- El informador solo puntúa y, si quiere, comenta.
+- Dirección Deportiva no intenta ser una plataforma internacional: explota a fondo **los jugadores, equipos e informes de nuestra propia competición**.
 
-### Administración
+## Administración · Nuevo postpartido
 
-- Dashboard propio para administrador, distinto al del informador y dirección deportiva.
-- Acción principal **Nuevo postpartido**.
-- Flujo continuo en una sola página.
-- Configuración inicial de No Name desde el propio flujo si aún no existe equipo propio.
-- Creación rápida de temporada activa desde el flujo.
-- Competición nueva sin abandonar el postpartido.
-- Rival nuevo sin abandonar el postpartido.
-- Plantilla de No Name reutilizable durante toda la temporada.
-- Alta de jugadores propios desde la propia alineación.
-- Pegado masivo de jugadores propios con `Nombre;POS;Dorsal`.
-- Copia de la última alineación de No Name.
-- El rival no necesita tener una plantilla creada previamente.
-- Al escribir un rival, sus jugadores se crean/resuelven y se vinculan a su plantilla como consecuencia natural del partido.
-- Recuperación de la última alineación conocida del rival.
-- Pegado rápido de alineación rival.
-- Importación CSV/XLSX opcional.
-- Publicación y asignación de informadores al final del mismo flujo.
+El flujo principal se prepara casi íntegramente en `st.session_state`:
 
-### Informador
+1. Temporada, competición, rival, jornada, fecha, resultado y sistemas.
+2. La formación seleccionada genera automáticamente las 11 posiciones.
+3. Para No Name se propone el XI a partir de la plantilla y del último partido.
+4. El administrador cambia únicamente los nombres necesarios.
+5. Los cambios se escriben como `minuto · sale · entra`; la aplicación calcula los minutos de cada jugador.
+6. Para el rival puede reutilizarse la última alineación, pegarse una lista o escribirse directamente sobre los 11 slots.
+7. Los jugadores rivales nuevos se resuelven/crean al publicar, sin exigir una plantilla previa.
+8. Solo `Guardar borrador en nube` o `Publicar postpartido` escriben el flujo completo en PostgreSQL.
 
-Cada rol tiene su propio menú. El informador ve únicamente:
+Se puede crear competición o rival dentro del propio proceso. La Base de datos queda como zona de mantenimiento, no como requisito para operar cada semana.
 
-- Inicio.
-- Valorar partido.
-- Mis informes.
-- Jugadores.
+## Formaciones automáticas
 
-La valoración de jugadores propios y rivales usa exactamente la misma interfaz simple:
+Incluye estructuras predefinidas para:
 
-- jugador, dorsal, posición, minutos y titularidad: **solo lectura**;
-- slider 0–10 con precisión de 0,1;
-- botones rápidos 5 / 6 / 7 / 8 / 9;
-- observación opcional;
-- check **Destacado**;
-- check **Incluir en PDF**.
+- 4-3-3
+- 4-2-3-1
+- 4-4-2
+- 4-1-4-1
+- 4-3-1-2
+- 4-4-1-1
+- 3-4-3
+- 3-4-2-1
+- 3-5-2
+- 3-1-4-2
+- 5-4-1
+- 5-3-2
 
-Automatismos:
+Ejemplo **4-4-2**: `POR · LD · DFC · DFC · LI · ED · MC · MC · EI · DC · DC`. El administrador no vuelve a introducir posición, titularidad ni minuto inicial de esos once.
 
-- 0 = sin valorar;
-- nota > 0 activa PDF por defecto;
-- nota ≥ 8 marca destacado por defecto;
-- ambos checks pueden cambiarse manualmente;
-- no es obligatorio valorar a todos los participantes;
-- para entregar basta con al menos una valoración rival válida.
+## Informador · informe de un minuto
+
+- Carga conjunta del partido, participantes y evaluaciones existentes.
+- No se escribe en Supabase mientras se mueven sliders o se escriben comentarios.
+- Un formulario para No Name y otro para el rival.
+- Datos deportivos bloqueados: dorsal, posición, minutos y titular/suplente ya vienen del postpartido.
+- Nota 0–10, comentario opcional, Destacado e Incluir en PDF.
+- `0` significa **sin valorar**.
+- Guardado masivo por equipo.
+- Entrega independiente del guardado de cada jugador.
+- PDF **Resumen** automático; PDF **Completo** bajo demanda.
+
+## Dirección Deportiva · inteligencia de nuestra liga
+
+La navegación está orientada a decisiones:
+
+### Panorama
+
+- jugadores rivales observados;
+- jugadores vistos dos o más veces;
+- seguimientos activos;
+- perfiles prioritarios;
+- equipos observados;
+- informes pendientes de revisión;
+- bandeja de jugadores que necesitan una decisión;
+- destacados recientes;
+- tendencias de evolución;
+- radiografía de equipos de la liga.
 
 ### Jugadores
 
-La pantalla separa dos usos:
+Ranking de futbolistas observados con filtros por posición, equipo, edad, muestra, nota, estado y destacados. Cada jugador tiene una ficha **360** con:
 
-- **No Name**: histórico interno de rendimiento, últimas notas, evolución y comentarios.
-- **Rivales**: historial de scouting creado automáticamente a partir de los postpartidos aprobados.
+- media y tamaño de muestra;
+- número de informadores;
+- última nota;
+- dispersión;
+- nivel de confianza;
+- evolución temporal;
+- todos los comentarios aprobados;
+- estado de Dirección Deportiva;
+- prioridad;
+- conclusión acumulada;
+- seguimiento;
+- inclusión en listas.
 
-Las valoraciones propias nunca contaminan el ranking rival y las valoraciones rivales nunca contaminan el histórico interno.
+### Por posiciones
 
-### Dirección deportiva
+Rankings específicos de porteros, laterales, centrales, mediocentros, extremos, delanteros, etc. Siempre se muestra el tamaño de muestra junto a la nota.
 
-La pantalla se orienta primero a decisiones y después a análisis:
+### Equipos
 
-- informes pendientes de revisar;
-- últimas notas rivales ≥ 8;
-- jugadores observados varias veces;
-- seguimientos activos;
-- aprobación/devolución de informes;
-- historial y rankings con filtros avanzados;
-- consenso entre informadores;
-- comparación y exportaciones.
+Ficha de cada rival de la competición: partidos observados, jugadores vistos, destacados, media, última observación, última alineación conocida y jugadores que más interés han generado.
 
-### PDF
+### Seguimiento
 
-El PDF se acorta y prioriza lo seleccionado por el informador:
+Agenda práctica dividida en vencidos, esta semana y próximos. Incluye responsable, prioridad, próxima revisión, partido objetivo, nota e historial cargado solo cuando se solicita.
 
-- contexto del partido;
-- sistemas sobre campo cuando existen;
-- resumen de nuestro equipo;
-- resumen rival;
-- solo jugadores con **Incluir en PDF** y nota válida;
-- fichas individuales para perfiles seleccionados/destacados;
-- versión ejecutiva y completa;
-- snapshots y versiones históricas inmutables.
+### Comparador
 
-## Persistencia y Supabase
+Comparación de 2–4 jugadores usando únicamente información real disponible: media, observaciones, informadores, destacados, dispersión, confianza y estado de seguimiento/decisión.
 
-No Name PostMatch 3.0 mantiene PostgreSQL/Supabase como fuente de verdad. El ZIP **no contiene equipos, jugadores, temporadas, competiciones, partidos, evaluaciones ni informes de muestra**. Solo se crea el administrador inicial definido en Secrets cuando la tabla de usuarios está vacía.
+### XI de la liga
 
-La actualización desde 2.0/2.1/2.1.1 usa Alembic. La revisión `0002_noname_3_0` es no destructiva y no elimina ni transforma datos deportivos existentes.
+Selecciona una formación y un mínimo de observaciones. La aplicación construye el mejor XI observado por posición. Puede guardarse como una lista editable de Dirección Deportiva.
 
-## Despliegue Streamlit Community Cloud
+### Consenso
 
-Si subes el contenido del ZIP directamente a la raíz de GitHub:
+Agrupa valoraciones de varios informadores para el mismo jugador/partido, muestra media, dispersión y nivel de acuerdo y permite guardar una conclusión consolidada.
 
-```text
-Main file path: app.py
-```
+### Informes
 
-Secrets mínimos:
+Bandeja de revisión cargada en bloque, evitando consultas N+1 por informe. Permite aprobar o devolver informes.
 
-```toml
-DATABASE_URL = "postgresql://..."
-DEMO_MODE = false
-RUN_MIGRATIONS = true
-REQUIRE_REPORT_APPROVAL = true
+### Listas
 
-BOOTSTRAP_ADMIN_NAME = "Administrador"
-BOOTSTRAP_ADMIN_EMAIL = "tu-correo@dominio.com"
-BOOTSTRAP_ADMIN_PASSWORD = "CONTRASEÑA-FUERTE"
+Listas cortas, selecciones por posición, jugadores a revisar en segunda vuelta, XI objetivo y cualquier lista personalizada de la liga.
 
-LOGIN_MAX_ATTEMPTS = 10
-LOGIN_LOCK_MINUTES = 15
-```
+## Jugadores ojeados · scouting de segundo nivel
 
-Storage PDF opcional:
+El postpartido sigue siendo rápido. Solo los perfiles que Dirección Deportiva decide profundizar pasan a una ficha scout avanzada:
 
-```toml
-SUPABASE_URL = "https://PROJECT_REF.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = "CLAVE-BACKEND"
-SUPABASE_BUCKET = "postmatch-reports"
-```
+1. **Observado** por los informes normales.
+2. **Candidato** abierto por DD.
+3. **Ficha solicitada** a un informador/scout.
+4. **En revisión**, con análisis más completo y atributos opcionales por posición.
+5. **Ojeado**, cuando DD fija posición/rol en nuestro modelo, encaje, nivel, proyección y decisión final.
 
-## Primera utilización con una base vacía
+Esto permite responder no solo “¿nos gustó?”, sino también **“¿dónde jugaría en No Name y qué rol le pediríamos?”** sin hacer más pesado el informe semanal.
 
-1. Entra con el administrador de Secrets.
-2. Cambia la contraseña inicial si la aplicación lo solicita.
-3. Pulsa **Nuevo postpartido**.
-4. Configura No Name una sola vez.
-5. Crea la temporada activa si aún no existe.
-6. Crea el partido, las dos alineaciones y publícalo sin salir de esa pantalla.
-7. Crea los usuarios informadores desde Administración cuando los necesites.
+## Rendimiento 3.4
 
-## Actualización desde 2.1.1
+- Borrador de postpartido en memoria; escritura solo al guardar/publicar.
+- Catálogos del flujo de postpartido cacheados en sesión.
+- Plantilla propia y última alineación cacheadas durante el flujo.
+- Última alineación rival cargada una vez y reutilizada.
+- Borradores remotos cargados de forma lazy/cached.
+- Alineación rival guardada con precarga de jugadores y sincronización masiva de plantilla.
+- Evaluaciones guardadas por equipo y no por jugador.
+- Workspace del informe cargado como un payload conjunto.
+- Rankings agregados en SQL (`AVG`, `COUNT`, muestra, informadores, destacados) en vez de agrupar miles de filas en Python.
+- Bandeja de revisión cargada en bloque.
+- Historiales y seguimiento detallado solo bajo demanda.
+- Sin `st.tabs` en las pantallas principales.
+- PDF Completo únicamente bajo demanda.
+- Revalidación de sesión con TTL y bootstrap de aplicación memorizado.
+- Base de datos relegada a mantenimiento con búsqueda global y edición masiva de plantilla.
 
-1. Haz backup técnico desde la versión actual.
-2. Sustituye **todo** el contenido del repositorio por esta versión, no solo `app.py`.
-3. Conserva los mismos Secrets y el mismo `DATABASE_URL` de Supabase.
-4. Haz Reboot en Streamlit Cloud.
-5. Con `RUN_MIGRATIONS = true`, Alembic avanza hasta `0002_noname_3_0` sin borrar datos.
+## PDF
 
-## Estructura
+### Resumen
+
+Documento diario de 1–2 páginas: partido, resultado, No Name, rival, notas y observaciones relevantes.
+
+### Completo
+
+Dossier detallado con alineaciones, contexto, fichas seleccionadas, trazabilidad y versión documental.
+
+## Accesibilidad y simpleza
+
+- controles táctiles amplios;
+- foco visible por teclado;
+- contraste reforzado;
+- etiquetas claras;
+- responsive móvil;
+- respeto a `prefers-reduced-motion`;
+- una acción primaria clara por bloque;
+- lenguaje deportivo en lugar de lenguaje de base de datos;
+- información conocida bloqueada para evitar trabajo redundante.
+
+## Base de datos y actualización
+
+3.4.0 mantiene como revisión actual **`0004_scout_workflow_3_3`**; no necesita una migración nueva porque las mejoras 3.4 son de interfaz, consultas, diagnóstico y arquitectura. La 0004 sigue siendo no destructiva y añade soporte para: Ambas son no destructivas. La nueva migración añade soporte para:
+
+- expedientes scout avanzados;
+- revisiones scout asignadas a informadores;
+- ubicación del jugador dentro del modelo de No Name;
+- índices compuestos de rendimiento para los flujos más utilizados.
+
+Mantiene la misma `DATABASE_URL` y el mismo proyecto Supabase. No elimina jugadores, partidos, usuarios, informes ni evaluaciones existentes.
+
+La release **no contiene datos deportivos, bases SQLite, jugadores, equipos, partidos ni informes de demostración**.
+
+## Despliegue
+
+`Main file path`:
 
 ```text
 app.py
-pages/
-  dashboard.py
-  postmatch.py
-  reports.py
-  players.py
-  director.py
-  matches.py
-  catalog.py
-  admin.py
-repositories/
-services/
-models/
-core/
-alembic/
-tests/
-scripts/
 ```
+
+Los Secrets actuales se mantienen:
+
+```toml
+DATABASE_URL = "..."
+DEMO_MODE = false
+RUN_MIGRATIONS = true
+REQUIRE_REPORT_APPROVAL = true
+```
+
+Antes de una actualización con cambio de esquema se recomienda descargar un backup técnico. Consulta `UPGRADE_3_3.md`.
 
 ## Validación
 
-La release se valida con:
-
-```bash
-python scripts/check_release_consistency.py
-pytest -q
-alembic upgrade head
-```
-
-El entorno en el que se construyó esta release no incluye el paquete Streamlit para levantar el navegador, por lo que la aceptación visual final debe hacerse en Streamlit Cloud. La lógica de repositorio, flujos, PDF, migraciones y tests sí se ejecuta fuera de la interfaz.
+La release se valida con compilación completa, suite automatizada y pruebas de migración tanto en instalación nueva como desde la revisión 0003. Consulta `VALIDACION.md`.

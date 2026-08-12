@@ -16,16 +16,16 @@ from sqlalchemy import Date, DateTime, delete, func, inspect as sa_inspect, sele
 from core.database import init_db, session_scope
 from models.entities import (
     AppSetting, AuditLog, Competition, ConsolidatedPlayerEvaluation, ConsolidatedReport,
-    Document, FollowUp, FollowUpHistory, LoginAttempt, Match, Participation, Player,
-    PlayerAlias, PlayerEvaluation, PlayerMergeLog, Report, ReportAssignment, ReportVersion,
-    Season, Team, TeamRoster, User,
+    Document, FollowUp, FollowUpHistory, LeaguePlayerProfile, LoginAttempt, Match, Participation, Player,
+    PlayerAlias, PlayerEvaluation, PlayerMergeLog, PostMatchDraft, Report, ReportAssignment, ReportVersion,
+    ScoutingList, ScoutingListItem, Season, Team, TeamRoster, User,
 )
 
 MODELS = [
     User, LoginAttempt, Season, Competition, Team, Player, PlayerAlias, PlayerMergeLog,
     TeamRoster, Match, Participation, ReportAssignment, Report, PlayerEvaluation,
     ReportVersion, Document, FollowUp, FollowUpHistory, ConsolidatedReport,
-    ConsolidatedPlayerEvaluation, AppSetting, AuditLog,
+    ConsolidatedPlayerEvaluation, PostMatchDraft, LeaguePlayerProfile, ScoutingList, ScoutingListItem, AppSetting, AuditLog,
 ]
 
 
@@ -47,7 +47,7 @@ def convert_row(model, row: dict) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Restaurar una copia técnica de No Name PostMatch 3.0")
+    parser = argparse.ArgumentParser(description="Restaurar una copia técnica de No Name PostMatch 3.4")
     parser.add_argument("file", type=Path, help="ZIP generado desde Administración")
     parser.add_argument("--replace", action="store_true", help="Vaciar las tablas antes de restaurar")
     args = parser.parse_args()

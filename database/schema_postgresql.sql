@@ -1,5 +1,5 @@
--- No Name PostMatch 3.0
--- Esquema de referencia. En producción usa Alembic.
+-- No Name PostMatch 3.4.0 · Esquema PostgreSQL de referencia
+-- La aplicación real actualiza mediante Alembic.
 
 
 CREATE TABLE users (
@@ -187,6 +187,82 @@ CREATE TABLE matches (
 );
 
 
+CREATE TABLE postmatch_drafts (
+	id SERIAL NOT NULL, 
+	created_by INTEGER NOT NULL, 
+	season_id INTEGER, 
+	title VARCHAR(180), 
+	payload_json TEXT NOT NULL, 
+	status VARCHAR(30) NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE CASCADE, 
+	FOREIGN KEY(season_id) REFERENCES seasons (id) ON DELETE SET NULL
+);
+
+
+CREATE TABLE league_player_profiles (
+	id SERIAL NOT NULL, 
+	player_id INTEGER NOT NULL, 
+	decision_status VARCHAR(40) NOT NULL, 
+	priority INTEGER NOT NULL, 
+	director_note TEXT, 
+	updated_by INTEGER NOT NULL, 
+	revision INTEGER NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_league_player_profile UNIQUE (player_id), 
+	FOREIGN KEY(player_id) REFERENCES players (id) ON DELETE CASCADE, 
+	FOREIGN KEY(updated_by) REFERENCES users (id)
+);
+
+
+CREATE TABLE scouting_lists (
+	id SERIAL NOT NULL, 
+	name VARCHAR(120) NOT NULL, 
+	description TEXT, 
+	list_type VARCHAR(30) NOT NULL, 
+	formation VARCHAR(40), 
+	season_id INTEGER, 
+	active BOOLEAN NOT NULL, 
+	created_by INTEGER NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(season_id) REFERENCES seasons (id) ON DELETE SET NULL, 
+	FOREIGN KEY(created_by) REFERENCES users (id)
+);
+
+
+CREATE TABLE scouted_player_profiles (
+	id SERIAL NOT NULL, 
+	player_id INTEGER NOT NULL, 
+	status VARCHAR(30) NOT NULL, 
+	model_position VARCHAR(20), 
+	model_role VARCHAR(80), 
+	fit_score FLOAT, 
+	current_level FLOAT, 
+	potential_score FLOAT, 
+	final_decision VARCHAR(50), 
+	director_summary TEXT, 
+	requested_by INTEGER NOT NULL, 
+	assigned_to INTEGER, 
+	approved_by INTEGER, 
+	revision INTEGER NOT NULL, 
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	approved_at TIMESTAMP WITHOUT TIME ZONE, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_scouted_player_profile UNIQUE (player_id), 
+	FOREIGN KEY(player_id) REFERENCES players (id) ON DELETE CASCADE, 
+	FOREIGN KEY(requested_by) REFERENCES users (id), 
+	FOREIGN KEY(assigned_to) REFERENCES users (id), 
+	FOREIGN KEY(approved_by) REFERENCES users (id)
+);
+
+
 CREATE TABLE audit_logs (
 	id SERIAL NOT NULL, 
 	user_id INTEGER, 
@@ -317,6 +393,49 @@ CREATE TABLE consolidated_reports (
 	FOREIGN KEY(rival_team_id) REFERENCES teams (id), 
 	FOREIGN KEY(created_by) REFERENCES users (id), 
 	FOREIGN KEY(approved_by) REFERENCES users (id)
+);
+
+
+CREATE TABLE scouting_list_items (
+	id SERIAL NOT NULL, 
+	list_id INTEGER NOT NULL, 
+	player_id INTEGER NOT NULL, 
+	position VARCHAR(20), 
+	order_index INTEGER NOT NULL, 
+	note TEXT, 
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_scouting_list_player UNIQUE (list_id, player_id), 
+	FOREIGN KEY(list_id) REFERENCES scouting_lists (id) ON DELETE CASCADE, 
+	FOREIGN KEY(player_id) REFERENCES players (id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE scout_reviews (
+	id SERIAL NOT NULL, 
+	profile_id INTEGER NOT NULL, 
+	reviewer_id INTEGER NOT NULL, 
+	status VARCHAR(30) NOT NULL, 
+	observed_position VARCHAR(20), 
+	technical_rating FLOAT, 
+	tactical_rating FLOAT, 
+	physical_rating FLOAT, 
+	mental_rating FLOAT, 
+	current_level FLOAT, 
+	potential_score FLOAT, 
+	model_fit_score FLOAT, 
+	attributes_json TEXT, 
+	strengths TEXT, 
+	weaknesses TEXT, 
+	summary TEXT, 
+	recommendation VARCHAR(80), 
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	submitted_at TIMESTAMP WITHOUT TIME ZONE, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_scout_review_reviewer UNIQUE (profile_id, reviewer_id), 
+	FOREIGN KEY(profile_id) REFERENCES scouted_player_profiles (id) ON DELETE CASCADE, 
+	FOREIGN KEY(reviewer_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
 from core.config import settings
 from core.database import session_scope
 from repositories import scouting as repo
 
 
+@lru_cache(maxsize=1)
 def bootstrap_application() -> None:
     """Create only technical bootstrap data required to enter the application.
 
