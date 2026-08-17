@@ -9,6 +9,9 @@ from core.constants import ASSIGNMENT_STATUSES, REPORT_STATUSES
 from core.database import session_scope
 from core.utils import safe_html
 from repositories import scouting as repo
+from repositories import calendar as calendar_repo
+from repositories import planning as planning_repo
+from repositories import league_intelligence as league_repo
 from ui.styles import page_header
 
 
@@ -16,6 +19,17 @@ def _navigate(label: str, match_id: int | None = None) -> None:
     if match_id is not None:
         st.session_state["report_selected_match_id"] = match_id
     st.session_state["main_navigation"] = label
+
+
+def _continue_postmatch_draft(draft_id: int) -> None:
+    st.session_state["postmatch_open_cloud_draft_id"] = int(draft_id)
+    st.session_state["main_navigation"] = "Nuevo postpartido"
+
+
+def _open_director_player(player_id: int) -> None:
+    st.session_state["director_player_id"] = int(player_id)
+    st.session_state["director_section"] = "Jugadores"
+    st.session_state["main_navigation"] = "Revisar y decidir"
 
 
 def _match_title(match) -> str:
@@ -97,9 +111,9 @@ def _director_dashboard(user: dict) -> None:
         active = repo.get_active_season(session)
         season_id = active.id if active else None
         metrics = repo.league_panorama(session, season_id=season_id)
-        queue = repo.league_decision_queue(session, season_id=season_id, limit=5)
+        queue = league_repo.enhanced_decision_queue(session, season_id=season_id, limit=5)
         highlights = repo.recent_rival_highlights(session, limit=6, minimum_rating=8.0)
-        trends = repo.league_trends(session, season_id=season_id, min_observations=2, limit=5)
+        trends = league_repo.robust_trends(session, season_id=season_id, min_observations=4, limit=5)
 
     st.caption(f"{active.name if active else 'Todas las temporadas'} · solo información generada en nuestra competición")
     cols = st.columns(5)
@@ -116,10 +130,14 @@ def _director_dashboard(user: dict) -> None:
             st.success("No hay perfiles con muestra suficiente esperando decisión.")
         for row in queue:
             with st.container(border=True):
-                a, b = st.columns([4, 1])
+                a, b, c = st.columns([3.4, 1, 1.15])
                 a.markdown(f"**{safe_html(row['full_name'])}** · {safe_html(row.get('team_name') or '-')}", unsafe_allow_html=True)
-                a.caption(f"{row.get('primary_position') or '-'} · {row['observations']} obs. · confianza {row['confidence']}")
+                a.caption(f"{row.get('primary_position') or '-'} · {row['observations']} obs. · confianza {row['confidence']} · {'; '.join(row.get('reasons', [])[:2])}")
                 b.metric("Media", f"{row['avg_general']:.2f}")
+                c.button(
+                    "Abrir", use_container_width=True, key=f"director_open_{row['player_id']}",
+                    on_click=_open_director_player, args=(int(row["player_id"]),),
+                )
         st.button("Abrir bandeja de decisión", type="primary", use_container_width=True, on_click=_navigate, args=("Revisar y decidir",))
     with right:
         st.subheader("Destacados recientes")
@@ -134,12 +152,41 @@ def _director_dashboard(user: dict) -> None:
 
     st.subheader("En evolución")
     if not trends:
-        st.caption("Se activará cuando tengamos al menos dos observaciones del mismo jugador.")
+        st.caption("Se activará cuando tengamos al menos cuatro observaciones del mismo jugador.")
     else:
         st.dataframe(pd.DataFrame([{
             "Jugador": r["full_name"], "Obs.": r["observations"],
-            "Primera": r["first_rating"], "Última": r["last_rating"], "Cambio": round(r["delta"], 2),
+            "Media inicial": round(r["early_average"],2), "Media reciente": round(r["recent_average"],2), "Cambio": round(r["delta"], 2),
         } for r in trends]), use_container_width=True, hide_index=True)
+
+
+def _scout_dashboard(user: dict) -> None:
+    page_header("Inicio · Scout", "Tu jornada: partidos disponibles, tareas de Dirección Deportiva y observaciones por completar.")
+    with session_scope() as session:
+        active = repo.get_active_season(session)
+        missions = planning_repo.list_missions(session, assigned_to=user["id"], limit=100)
+        observations = planning_repo.list_observations(session, reviewer_id=user["id"], limit=100)
+        fixtures = calendar_repo.list_calendar(session, season_id=active.id if active else None, date_from=datetime.now().date(), limit=40)
+    pending=[m for m in missions if m.status in {"pending","in_progress"}]
+    a,b,c=st.columns(3)
+    a.metric("Misiones pendientes",len(pending)); b.metric("Observaciones entregadas",len([o for o in observations if o.status=="submitted"])); c.metric("Partidos próximos",len(fixtures))
+    unscheduled = [m for m in pending if getattr(m.match, "schedule_status", None) != "confirmed"]
+    if unscheduled:
+        st.warning(f"{len(unscheduled)} tareas asignadas todavía no tienen horario exacto. Se actualizarán automáticamente cuando Administración confirme el calendario.")
+    if pending:
+        st.subheader("Prioridad de esta jornada")
+        for m in pending[:5]:
+            with st.container(border=True):
+                x,y=st.columns([4,1])
+                x.markdown(f"**{m.title}**")
+                x.caption(f"{m.match.home_team.name} - {m.match.away_team.name} · {calendar_repo.schedule_label(m.match)}")
+                y.button("Abrir",key=f"scout_dash_{m.id}",use_container_width=True,on_click=_navigate,args=("Misiones",))
+    else:
+        st.success("No tienes observaciones asignadas pendientes.")
+    st.subheader("Partidos disponibles")
+    for m in fixtures[:6]:
+        st.caption(f"{m.round_name} · {m.home_team.name} - {m.away_team.name} · {calendar_repo.schedule_label(m)}")
+    st.button("Abrir calendario completo",use_container_width=True,on_click=_navigate,args=("Calendario de liga",))
 
 
 def _admin_dashboard(user: dict) -> None:
@@ -150,7 +197,9 @@ def _admin_dashboard(user: dict) -> None:
         matches = repo.list_matches(session, limit=8)
         submitted = repo.list_reports(session, status="submitted", limit=20)
         users = repo.list_users(session, active_only=True)
+        drafts = repo.list_postmatch_drafts(session, user["id"], limit=5)
         progress_by_match = repo.assignment_progress_many(session, [m.id for m in matches])
+        schedule_issues = calendar_repo.schedule_issues(session, season_id=active_season.id if active_season else None, horizon_days=21)
 
     club = own_team.name if own_team else "No Name"
     page_header(f"{club} · Administración", "Prepara el postpartido en una sola pantalla. La base de datos queda para mantenimiento.")
@@ -165,11 +214,34 @@ def _admin_dashboard(user: dict) -> None:
             left.write("Configura No Name y prepara el primer partido sin salir del mismo flujo.")
         right.button("＋ NUEVO POSTPARTIDO", type="primary", use_container_width=True, on_click=_navigate, args=("Nuevo postpartido",))
 
+    if drafts:
+        latest_draft = drafts[0]
+        with st.container(border=True):
+            left, action = st.columns([4, 1.25])
+            left.markdown("**Borrador pendiente**")
+            left.write(latest_draft.title or "Postpartido sin título")
+            left.caption(f"Último guardado: {latest_draft.updated_at.strftime('%d/%m/%Y %H:%M')}")
+            action.button(
+                "Continuar", type="secondary", use_container_width=True,
+                key=f"continue_cloud_draft_{latest_draft.id}",
+                on_click=_continue_postmatch_draft, args=(int(latest_draft.id),),
+            )
+
+    if schedule_issues:
+        urgent = [x for x in schedule_issues if x["urgency"] == "Urgente"]
+        with st.container(border=True):
+            left, action = st.columns([4,1.2])
+            left.markdown(f"**Horarios por confirmar: {len(schedule_issues)}**")
+            left.caption(f"{len(urgent)} próximos en menos de 7 días" if urgent else "Sin urgencias de menos de 7 días")
+            action.button("Resolver", use_container_width=True, on_click=_navigate, args=("Calendario",))
+
     cols = st.columns(4)
     cols[0].metric("Partidos publicados", counts["published_matches"])
     cols[1].metric("Informes por revisar", len(submitted))
     cols[2].metric("Jugadores rivales observados", counts["players_observed"])
     cols[3].metric("Usuarios activos", len(users))
+    if drafts:
+        st.caption(f"Tienes {len(drafts)} borrador{'es' if len(drafts) != 1 else ''} de postpartido guardado{'s' if len(drafts) != 1 else ''} en la nube.")
 
     st.subheader("Partidos recientes")
     if not matches:
@@ -196,5 +268,7 @@ def render(user: dict) -> None:
         _admin_dashboard(user)
     elif user["role"] == "director":
         _director_dashboard(user)
+    elif user["role"] == "scout":
+        _scout_dashboard(user)
     else:
         _reporter_dashboard(user)

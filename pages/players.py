@@ -116,14 +116,19 @@ def _render_rivals() -> None:
         st.session_state["rival_query_filters"] = {"search": search, "position": position, "min_reports": int(min_reports)}
         filters = st.session_state["rival_query_filters"]
 
+    page = int(st.number_input("Página", min_value=1, value=int(st.session_state.get("rival_players_page", 1)), step=1, key="rival_players_page_input"))
+    st.session_state["rival_players_page"] = page
+    per_page = 50
     with session_scope() as session:
-        rankings = repo.player_rankings(session, min_observations=int(filters["min_reports"]), position=filters["position"], limit=200)
-    if filters["search"]:
-        rankings = [r for r in rankings if filters["search"].casefold() in r["full_name"].casefold()]
+        rankings = repo.player_rankings(
+            session, min_observations=int(filters["min_reports"]), position=filters["position"],
+            search=filters["search"], limit=per_page, offset=(page-1)*per_page,
+        )
     if not rankings:
         st.info("No hay rivales observados que coincidan con los filtros.")
         return
 
+    st.caption(f"Página {page} · hasta {per_page} resultados · búsqueda y filtros ejecutados en PostgreSQL")
     st.dataframe(pd.DataFrame([{
         "Jugador": r["full_name"],
         "Posición": r["primary_position"] or "-",

@@ -93,5 +93,5 @@ def technical_backup_zip(session: Session) -> bytes:
     output = BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("backup.json", json.dumps(payload, ensure_ascii=False, default=str, indent=2))
-        archive.writestr("README.txt", "Copia técnica completa de No Name PostMatch 3.4. Contiene datos sensibles y hashes de contraseña. Guárdala de forma segura.\n")
+        archive.writestr("README.txt", "Copia técnica completa de No Name PostMatch 3.6. Contiene datos sensibles y hashes de contraseña. Guárdala de forma segura.\n")
     return output.getvalue()

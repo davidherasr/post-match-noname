@@ -1,3 +1,45 @@
+# Changelog
+
+## 3.6.0 · Player Report 360
+
+- Nuevo Player Report 360 en pantalla para jugadores observados/ojeados.
+- Cabecera profesional con rendimiento, encaje No Name y confianza explicable.
+- Resumen ejecutivo con conclusión, fortalezas, riesgos, nivel, proyección y recomendación.
+- Radar y criterios clave construidos exclusivamente desde el Modelo No Name y puntuaciones realmente registradas.
+- Separación entre rendimiento postpartido y perfil Scout.
+- Evolución conjunta de postpartidos y observaciones Scout con fuente, partido, posición y observador.
+- Posiciones realmente observadas.
+- Comparación contextual con la plantilla de No Name y perfiles conocidos de la liga para el mismo rol.
+- Mapeo de jugadores propios al Modelo No Name para crear referencias internas reales.
+- Decisiones DD por temporada ampliadas con nivel actual, proyección y criterios.
+- Ficha Scout Ejecutiva PDF y Dossier Player Report 360 PDF bajo demanda.
+- Política explícita de no inventar mercado, altura, estadísticas, comparables externos o atributos inexistentes.
+- Migración no destructiva `0006_player_report_360_3_6`.
+
+## 3.5.0 · Planning & Scouting
+
+- Calendario completo de toda la liga con importación masiva y horarios pendientes/confirmados.
+- Partidos neutrales disponibles para scouting y análisis rival.
+- Perfil Scout completo y capacidades múltiples por usuario.
+- Misiones DD por jugador, varios jugadores, equipo o rival.
+- Observaciones Scout repetibles y scouting espontáneo.
+- Informe estructurado de equipo/rival.
+- Modelo No Name configurable, criterios ponderados y consulta Scout.
+- Necesidades de plantilla, plantilla sombra y decisiones por temporada.
+- Planificación automática de observaciones usando calendario + necesidades + candidatos.
+- Evidencia postpartido y evidencia específica separadas.
+- Búsqueda/paginación SQL en vistas densas.
+- Centro de calidad de datos y logout con limpieza total de sesión.
+- Migración no destructiva `0005_planning_scout_3_5`.
+
+## 3.4.1 · Quality of Life
+
+- Nuevo postpartido precarga automáticamente competición, sistema de No Name e informadores del último partido de la temporada.
+- El dashboard de administración muestra y permite recuperar directamente el último borrador de postpartido guardado en la nube.
+- El informe añade progreso por equipo y filtro **Solo pendientes**, sin consultas adicionales mientras se puntúa.
+- Dirección Deportiva permite abrir directamente el expediente de un jugador desde la bandeja de decisiones.
+- Sin cambios de esquema: se mantiene la revisión Alembic `0004_scout_workflow_3_3`.
+
 ## 3.4.0 · Audit Closure & Live Performance
 
 - Informe compacto con `st.fragment` y estado real de cambios sin guardar.
@@ -8,8 +50,6 @@
 - Aceptación live con SAVEPOINT + rollback contra la DATABASE_URL configurada.
 - Repositorios y motor PDF divididos en módulos.
 - Sin nueva migración; misma base Supabase.
-
-# Changelog
 
 ## 3.3.0 · Advanced Scout & Production Polish
 

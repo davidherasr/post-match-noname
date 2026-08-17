@@ -83,6 +83,25 @@ def apply_global_styles(primary: str = "#B91C1C", secondary: str = "#111827") ->
           padding: 9px 12px; margin: 6px 0 2px 0;
         }}
         .pm-help {{ color: var(--pm-muted); font-size: .84rem; line-height: 1.35; }}
+        .pm360-hero {{ display:flex; justify-content:space-between; gap:18px; align-items:center; background:#fff; border:1px solid var(--pm-border); border-radius:18px; padding:18px; margin-bottom:14px; box-shadow:0 5px 18px rgba(17,24,39,.045); }}
+        .pm360-ident {{ display:flex; align-items:center; gap:14px; min-width:0; }}
+        .pm360-avatar {{ width:62px; height:62px; border-radius:14px; object-fit:cover; border:1px solid var(--pm-border); background:#F3F4F6; }}
+        .pm360-avatar-fallback {{ display:flex; align-items:center; justify-content:center; font-weight:850; color:#374151; font-size:1.05rem; }}
+        .pm360-kicker {{ color:var(--pm-primary); font-size:.72rem; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }}
+        .pm360-name {{ font-size:1.55rem; font-weight:900; letter-spacing:-.025em; color:var(--pm-secondary); line-height:1.1; }}
+        .pm360-meta {{ color:var(--pm-muted); font-size:.88rem; margin-top:4px; }}
+        .pm360-role {{ display:inline-block; margin-top:7px; padding:4px 9px; border-radius:999px; background:#EEF2FF; color:#3730A3; font-size:.78rem; font-weight:750; }}
+        .pm360-kpis {{ display:grid; grid-template-columns:repeat(3,minmax(105px,1fr)); gap:8px; min-width:390px; }}
+        .pm360-kpi {{ border:1px solid #E5E7EB; border-radius:12px; padding:10px 12px; background:#FAFBFC; text-align:center; }}
+        .pm360-kpi span {{ display:block; color:var(--pm-muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }}
+        .pm360-kpi strong {{ display:block; color:var(--pm-secondary); font-size:1.45rem; line-height:1.25; }}
+        .pm360-kpi small {{ color:var(--pm-muted); font-size:.72rem; }}
+        .pm360-note {{ background:#fff; border:1px solid var(--pm-border); border-radius:14px; padding:16px; margin-bottom:12px; color:#374151; line-height:1.55; }}
+        .pm360-note-title {{ color:var(--pm-primary); font-size:.75rem; text-transform:uppercase; font-weight:800; letter-spacing:.06em; margin-bottom:6px; }}
+        .pm360-radar {{ width:100%; max-width:430px; min-height:300px; background:#fff; border:1px solid var(--pm-border); border-radius:14px; padding:6px; }}
+        .pm360-criterion {{ display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid #EEF1F4; padding:9px 3px; }}
+        .pm360-criterion span small {{ display:block; color:var(--pm-muted); font-size:.72rem; margin-top:2px; }}
+        .pm360-criterion strong {{ white-space:nowrap; color:#1D4ED8; }}
 
         /* On narrow screens, reduce decorative spacing rather than shrinking controls. */
         @media (max-width: 720px) {{
@@ -99,6 +118,14 @@ def apply_global_styles(primary: str = "#B91C1C", secondary: str = "#111827") ->
           div[data-testid="stMetric"] {{ padding: 9px; }}
           div[data-testid="stForm"] {{ padding: 11px; border-radius: 11px; }}
           div[data-testid="stTextArea"] textarea {{ min-height: 72px !important; }}
+          .pm360-hero {{ display:block; padding:12px; }}
+          .pm360-kpis {{ min-width:0; grid-template-columns:repeat(3,1fr); margin-top:12px; }}
+          .pm360-kpi {{ padding:8px 4px; }}
+          .pm360-kpi strong {{ font-size:1.15rem; }}
+          .pm360-kpi span, .pm360-kpi small {{ font-size:.64rem; }}
+          .pm360-name {{ font-size:1.25rem; }}
+          .pm360-avatar {{ width:52px; height:52px; }}
+          .pm360-radar {{ min-height:260px; }}
           h1, h2, h3 {{ scroll-margin-top: 1rem; }}
         }}
         @media (prefers-reduced-motion: reduce) {{

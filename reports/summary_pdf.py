@@ -21,7 +21,7 @@ def generate_summary_pdf(payload: dict, *, current_version: int) -> bytes:
     doc = BaseDocTemplate(
         buffer, pagesize=A4, leftMargin=14*mm, rightMargin=14*mm, topMargin=14*mm, bottomMargin=15*mm,
         title=f"Resumen postpartido · {match.home_team.name} - {match.away_team.name}",
-        author=report.reporter.full_name, creator=f"{club_name} · No Name PostMatch 3.4",
+        author=report.reporter.full_name, creator=f"{club_name} · No Name PostMatch 3.6",
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="summary")
 

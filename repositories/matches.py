@@ -22,7 +22,7 @@ from models.entities import (
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
-from repositories.users import assert_role
+from repositories.users import assert_role, user_has_role
 from repositories.players import get_own_team
 
 def create_match(session: Session, *, season_id: int, competition_id: int, round_name: str, match_date: date, home_team_id: int, away_team_id: int, created_by: int, home_score: int | None = None, away_score: int | None = None, venue: str | None = None, home_formation: str | None = None, away_formation: str | None = None, status: str = "draft", report_due_at: datetime | None = None) -> Match:
@@ -162,7 +162,7 @@ def assign_reporters(session: Session, match_id: int, user_ids: Sequence[int], a
     result = []
     for uid in user_ids:
         user = session.get(User, int(uid))
-        if not user or not user.active or user.role not in {"reporter", "admin", "director"}:
+        if not user or not user.active or not user_has_role(session, user.id, "reporter", "admin", "director"):
             continue
         item = current.pop(user.id, None)
         if item is None:

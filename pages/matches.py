@@ -222,7 +222,7 @@ def render(user: dict) -> None:
     if section == "Asignaciones":
         with session_scope() as session:
             matches = repo.list_matches(session)
-            reporters = [u for u in repo.list_users(session, active_only=True) if u.role in {"reporter", "admin", "director"}]
+            reporters = [u for u in repo.list_users(session, active_only=True) if repo.user_has_role(session, u.id, "reporter", "admin", "director")]
         if not matches or not reporters:
             st.info("Necesitas al menos un partido y un usuario activo.")
             return

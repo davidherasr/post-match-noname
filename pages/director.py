@@ -13,6 +13,7 @@ from core.utils import safe_html
 from repositories import advanced_scouting as scout_repo
 from repositories import league_intelligence as league_repo
 from repositories import scouting as repo
+from repositories import planning as planning_repo
 from services.export_service import analytics_export_xlsx, technical_backup_zip
 from ui.styles import page_header
 
@@ -125,6 +126,8 @@ def _player_360(user: dict, player_id: int) -> None:
             team_map = repo.latest_player_team_map(session, [int(player_id)])
             positions = league_repo.observed_position_counts(session, int(player_id))
             scout_profile = scout_repo.get_profile(session, int(player_id))
+            active_season = repo.get_active_season(session)
+            evidence = planning_repo.scouting_evidence_summary(session, int(player_id), season_id=active_season.id if active_season else None)
     if not player:
         st.error("Jugador no encontrado."); return
     ratings = [float(x["evaluation"].general_rating) for x in history if x["evaluation"].general_rating is not None]
@@ -141,6 +144,14 @@ def _player_360(user: dict, player_id: int) -> None:
     k[2].metric("Informadores", reporter_count); k[3].metric("Última", "-" if not ratings else f"{ratings[0]:.1f}")
     k[4].metric("Dispersión", f"{dispersion:.2f}"); k[5].metric("Confianza", f"{conf['score']}/100")
     st.caption(f"Confianza {conf['label']}: {conf['consensus']} consenso · recencia {conf['recency']}")
+    if evidence["specific_observations"]:
+        st.success(
+            f"Evidencia scout específica: {evidence['specific_observations']} observaciones · "
+            f"{evidence['specific_scouts']} scouts · fuerza {evidence['specific_strength']}. "
+            "Se muestra como evidencia intencionada; no multiplica artificialmente la nota postpartido."
+        )
+    else:
+        st.caption("Todavía no hay observaciones scout específicas; la confianza procede del postpartido.")
     component_cols = st.columns(4)
     for col, (name, component) in zip(component_cols, conf["components"].items()):
         col.metric(name, f"{component['score']}/{component['max']}", component["detail"], delta_color="off")
@@ -200,13 +211,18 @@ def _players(user: dict) -> None:
     search = c1.text_input("Buscar jugador")
     position = c2.selectbox("Posición observada", ["Todas"] + POSITIONS)
     min_obs = c3.selectbox("Mínimo observaciones", [1,2,3,4,5], index=0)
+    page = int(st.number_input("Página", min_value=1, value=1, step=1, key="director_players_page"))
+    per_page = 50
     with session_scope() as session:
-        rows = repo.player_rankings(session, min_observations=min_obs, position=position, season_id=season_id, limit=400)
+        rows = repo.player_rankings(
+            session, min_observations=min_obs, position=position, season_id=season_id,
+            search=search, limit=per_page, offset=(page-1)*per_page,
+        )
         teams = repo.latest_player_team_map(session, [int(r["player_id"]) for r in rows])
         profiles = {p.player_id: p for p in repo.list_league_profiles(session)}
-    if search.strip(): rows = [r for r in rows if search.lower() in r["full_name"].lower()]
     if not rows:
         st.info("No hay jugadores con esos filtros."); return
+    st.caption(f"Página {page} · hasta {per_page} jugadores · consulta filtrada en PostgreSQL")
     st.dataframe(_ranking_frame(rows, teams, profiles), hide_index=True, use_container_width=True)
     labels = {int(r["player_id"]): f"{r['full_name']} · {teams.get(int(r['player_id']),{}).get('team_name','-')} · {r['avg_general']:.2f}" for r in rows}
     default_pid = st.session_state.pop("director_player_id", None)
@@ -283,8 +299,24 @@ def _followups(user: dict) -> None:
         for item in sorted(group, key=lambda x: x.next_review_date or date.max):
             with st.container(border=True):
                 c1, c2, c3 = st.columns([3,1,1])
-                c1.markdown(f"**{item.player.full_name}**"); c1.caption(item.status + (f" · {item.note}" if item.note else ""))
+                c1.markdown(f"**{item.player.full_name}**")
+                context=[item.status]
+                if item.assignee: context.append(f"Responsable: {item.assignee.full_name}")
+                if item.target_match: context.append(f"Objetivo: {item.target_match.home_team.name} - {item.target_match.away_team.name}")
+                if item.note: context.append(item.note)
+                c1.caption(" · ".join(context))
                 c2.metric("Prioridad", PRIORITY_LABELS.get(item.priority, item.priority)); c3.metric("Revisión", item.next_review_date.strftime('%d/%m') if item.next_review_date else "Sin fecha")
+                a,b,c=st.columns(3)
+                if a.button("Abrir jugador",key=f"fu_open_{item.id}",use_container_width=True):
+                    st.session_state["director_player_id"]=item.player_id; st.session_state["director_section"]="Jugadores"; st.rerun()
+                if b.button("+7 días",key=f"fu_week_{item.id}",use_container_width=True):
+                    with session_scope() as session:
+                        repo.upsert_follow_up(session,item.player_id,item.status,item.priority,item.note,user["id"],assigned_to=item.assigned_to,next_review_date=(item.next_review_date or date.today())+timedelta(days=7),target_match_id=item.target_match_id,expected_revision=item.revision)
+                    st.rerun()
+                if c.button("Completar",key=f"fu_done_{item.id}",use_container_width=True):
+                    with session_scope() as session:
+                        repo.upsert_follow_up(session,item.player_id,"Cerrado",item.priority,item.note,user["id"],assigned_to=item.assigned_to,next_review_date=None,target_match_id=item.target_match_id,closed_reason="Seguimiento completado",expected_revision=item.revision)
+                    st.rerun()
 
 
 def _compare() -> None:
@@ -292,19 +324,43 @@ def _compare() -> None:
     with session_scope() as session:
         rows = repo.player_rankings(session, min_observations=1, season_id=season_id, limit=300)
         teams = repo.latest_player_team_map(session, [int(r["player_id"]) for r in rows])
+        model_roles = planning_repo.list_model_roles(session)
+        decisions = planning_repo.list_season_decisions(session, season_id) if season_id else []
+    role_options=[None]+[r.id for r in model_roles]
+    role_id=st.selectbox("Comparar para nuestro modelo",role_options,format_func=lambda rid:"Comparación general" if rid is None else next(f"{r.position} · {r.name}" for r in model_roles if r.id==rid))
     labels = {int(r["player_id"]): f"{r['full_name']} · {teams.get(int(r['player_id']),{}).get('team_name','-')}" for r in rows}
     selected = st.multiselect("Comparar 2-4 jugadores", list(labels), max_selections=4, format_func=lambda x: labels[x])
     if len(selected) < 2: st.info("Selecciona al menos dos."); return
+    decision_map={(d.player_id,d.model_role_id):d for d in decisions}
     frame = []
+    criterion_rows=[]
     with session_scope() as session:
+        criteria=planning_repo.list_model_criteria(session,role_id) if role_id else []
         for pid in selected:
             row = next(r for r in rows if int(r["player_id"]) == pid)
             conf = league_repo.confidence_score(row["observations"], row["reporter_count"], row["rating_dispersion"], row.get("last_observed"))
             positions = league_repo.observed_position_counts(session, pid, season_id=season_id)
             history = repo.player_history(session, pid)
             recent = [float(h["evaluation"].general_rating) for h in history[:3] if h["evaluation"].general_rating is not None]
-            frame.append({"Jugador": row["full_name"], "Equipo": teams.get(pid,{}).get("team_name","-"), "Media": round(row["avg_general"],2), "Últimos 3": round(sum(recent)/len(recent),2) if recent else None, "Obs.": row["observations"], "Dest.": row["standouts"], "Confianza": f"{conf['score']}/100", "Posiciones": ", ".join(p["position"] for p in positions[:3])})
+            decision=decision_map.get((pid,role_id)) if role_id else next((d for d in decisions if d.player_id==pid),None)
+            observations=planning_repo.list_observations(session,player_id=pid,limit=30)
+            specific=[o for o in observations if o.status=="submitted"]
+            last_fit=next((o.model_fit_score for o in specific if o.model_fit_score is not None),None)
+            frame.append({"Jugador": row["full_name"], "Equipo": teams.get(pid,{}).get("team_name","-"), "Media": round(row["avg_general"],2), "Últimos 3": round(sum(recent)/len(recent),2) if recent else None, "Obs. postpartido": row["observations"], "Obs. scout": len(specific), "Dest.": row["standouts"], "Confianza": f"{conf['score']}/100", "Encaje DD": decision.fit_score if decision else None, "Último encaje scout":last_fit, "Posiciones": ", ".join(p["position"] for p in positions[:3])})
+            if criteria:
+                scores={c.id:[] for c in criteria}
+                for obs in specific:
+                    try: data=__import__('json').loads(obs.attributes_json or '{}')
+                    except Exception: data={}
+                    if int(data.get('model_role_id') or 0)!=int(role_id): continue
+                    for c in criteria:
+                        value=data.get(str(c.id))
+                        if value is not None: scores[c.id].append(float(value))
+                criterion_rows.append({"Jugador":row["full_name"],**{c.name:(round(sum(scores[c.id])/len(scores[c.id]),2) if scores[c.id] else None) for c in criteria}})
     st.dataframe(pd.DataFrame(frame), hide_index=True, use_container_width=True)
+    if criterion_rows:
+        st.markdown("#### Criterios de nuestro modelo")
+        st.dataframe(pd.DataFrame(criterion_rows),hide_index=True,use_container_width=True)
 
 
 def _best_xi(user: dict) -> None:

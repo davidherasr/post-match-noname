@@ -12,6 +12,7 @@ from core.constants import ROLES
 from core.database import session_scope
 from models.entities import LoginAttempt
 from repositories import scouting as repo
+from repositories import data_quality as quality_repo
 from services.export_service import technical_backup_zip
 from services.health_service import database_probe, live_acceptance_rollback
 from core.performance import clear_performance_events, measure, performance_events, performance_summary
@@ -31,8 +32,12 @@ def _pretty_json(value: str | None) -> str:
 def _section_users(user: dict) -> None:
     with session_scope() as session:
         users = repo.list_users(session)
+    with session_scope() as session:
+        role_map = {u.id: repo.get_user_roles(session, u.id) for u in users}
     st.dataframe(pd.DataFrame([{
-        "ID": u.id, "Nombre": u.full_name, "Correo": u.email, "Rol": ROLES.get(u.role, u.role),
+        "ID": u.id, "Nombre": u.full_name, "Correo": u.email,
+        "Perfiles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
+        "Perfil principal": ROLES.get(u.role, u.role),
         "Activo": u.active, "Cambio de contraseña": u.must_change_password, "Bloqueado hasta": u.locked_until,
         "Revisión sesión": u.session_revision, "Último acceso": u.last_login_at,
     } for u in users]), use_container_width=True, hide_index=True)
@@ -41,14 +46,15 @@ def _section_users(user: dict) -> None:
         name = c1.text_input("Nombre completo")
         email = c2.text_input("Correo")
         c3, c4 = st.columns(2)
-        role = c3.selectbox("Rol", list(ROLES.keys()), format_func=lambda r: ROLES[r])
+        roles = c3.multiselect("Perfiles y accesos", list(ROLES.keys()), default=["reporter"], format_func=lambda r: ROLES[r], help="Un usuario puede ser, por ejemplo, Scout + Administrador.")
+        primary = c3.selectbox("Perfil principal", roles or ["reporter"], format_func=lambda r: ROLES[r])
         password = c4.text_input("Contraseña inicial", type="password", help="Mínimo 10 caracteres, mayúscula, minúscula, número y símbolo.")
         force_change = st.checkbox("Obligar a cambiarla en el primer acceso", value=True)
         create = st.form_submit_button("Crear usuario", type="primary")
     if create:
         try:
             with session_scope() as session:
-                repo.create_user(session, name, email, password, role=role, actor_id=user["id"], must_change_password=force_change)
+                repo.create_user(session, name, email, password, role=primary, roles=roles or [primary], actor_id=user["id"], must_change_password=force_change)
             st.success("Usuario creado.")
             st.rerun()
         except Exception as exc:
@@ -59,8 +65,11 @@ def _section_users(user: dict) -> None:
         selected_user = next(u for u in users if u.id == selected)
         with st.form(f"edit_user_{selected}"):
             full_name = st.text_input("Nombre completo", value=selected_user.full_name)
+            current_roles = role_map.get(selected, [selected_user.role])
+            roles_new = st.multiselect("Perfiles y accesos", list(ROLES.keys()), default=current_roles, format_func=lambda r: ROLES[r])
             c1, c2 = st.columns(2)
-            role_new = c1.selectbox("Rol", list(ROLES.keys()), index=list(ROLES.keys()).index(selected_user.role), format_func=lambda r: ROLES[r])
+            primary_options = roles_new or [selected_user.role]
+            role_new = c1.selectbox("Perfil principal", primary_options, index=primary_options.index(selected_user.role) if selected_user.role in primary_options else 0, format_func=lambda r: ROLES[r])
             active = c2.checkbox("Activo", value=selected_user.active)
             password_new = st.text_input("Nueva contraseña", type="password", help="Déjala vacía para mantener la actual. Si se cambia, el usuario deberá sustituirla al entrar.")
             save = st.form_submit_button("Guardar usuario")
@@ -70,7 +79,7 @@ def _section_users(user: dict) -> None:
             else:
                 try:
                     with session_scope() as session:
-                        repo.update_user(session, selected, role_new, active, password_new or None, user["id"], full_name=full_name)
+                        repo.update_user(session, selected, role_new, active, password_new or None, user["id"], full_name=full_name, roles=roles_new or [role_new])
                     st.success("Usuario actualizado. Sus sesiones anteriores han quedado invalidadas.")
                     st.rerun()
                 except Exception as exc:
@@ -248,11 +257,25 @@ def _section_performance(user: dict) -> None:
         st.info("Todavía no hay mediciones en esta sesión.")
 
 
+def _section_data_quality(user: dict) -> None:
+    st.subheader("Calidad de datos")
+    st.caption("Solo aparecen excepciones que merece la pena revisar; no necesitas inspeccionar tablas manualmente.")
+    with session_scope() as session:
+        issues = quality_repo.quality_issues(session)
+    if not issues:
+        st.success("No se han detectado incidencias de calidad de datos.")
+        return
+    counts = {level: len([i for i in issues if i["severity"] == level]) for level in ["Alta","Media","Baja"]}
+    a,b,c=st.columns(3); a.metric("Altas",counts["Alta"]); b.metric("Medias",counts["Media"]); c.metric("Bajas",counts["Baja"]);
+    st.dataframe(pd.DataFrame(issues),hide_index=True,use_container_width=True)
+    st.info("Corrige estas incidencias desde Base de datos. Las posibles identidades duplicadas nunca se fusionan automáticamente.")
+
+
 def render(user: dict) -> None:
     page_header("Administración", 'Abre solo lo que necesites. Cada sección consulta la base de datos únicamente al entrar.')
     section = st.radio(
         "Sección",
-        ['Usuarios', 'Identidad', 'Seguridad', 'Documentos', 'Auditoría', 'Backup', 'Rendimiento'],
+        ['Usuarios', 'Identidad', 'Calidad de datos', 'Seguridad', 'Documentos', 'Auditoría', 'Backup', 'Rendimiento'],
         horizontal=True,
         key="admin_section",
         help="Solo se consulta la sección que abras; el resto no ejecuta consultas en segundo plano.",
@@ -261,6 +284,8 @@ def render(user: dict) -> None:
         _section_users(user)
     elif section == 'Identidad':
         _section_brand(user)
+    elif section == 'Calidad de datos':
+        _section_data_quality(user)
     elif section == 'Seguridad':
         _section_security(user)
     elif section == 'Documentos':

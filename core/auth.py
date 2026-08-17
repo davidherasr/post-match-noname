@@ -38,10 +38,12 @@ def current_user(revalidate: bool = True, force: bool = False) -> dict | None:
             st.session_state.pop(SESSION_USER_KEY, None)
             st.session_state.pop(SESSION_REVALIDATED_KEY, None)
             return None
+        roles = repo.get_user_roles(session, user.id)
         cached.update({
             "full_name": user.full_name,
             "email": user.email,
             "role": user.role,
+            "roles": roles,
             "must_change_password": user.must_change_password,
             "session_revision": user.session_revision,
         })
@@ -59,6 +61,7 @@ def login(email: str, password: str) -> bool:
             "full_name": user.full_name,
             "email": user.email,
             "role": user.role,
+            "roles": repo.get_user_roles(session, user.id),
             "must_change_password": user.must_change_password,
             "session_revision": user.session_revision,
         }
@@ -67,14 +70,12 @@ def login(email: str, password: str) -> bool:
 
 
 def logout() -> None:
-    st.session_state.pop(SESSION_USER_KEY, None)
-    st.session_state.pop(SESSION_REVALIDATED_KEY, None)
-    # Report workspaces contain club data and must not leak between logins.
+    # El cierre de sesión destruye todo el contexto operativo local: informes, filtros,
+    # borradores, jugador abierto, backups preparados y perfil activo.
     for key in list(st.session_state):
-        if str(key).startswith("report_workspace_") or str(key).startswith("eval_form_"):
-            st.session_state.pop(key, None)
+        st.session_state.pop(key, None)
 
 
 def require_role(*roles: str) -> bool:
     user = current_user()
-    return bool(user and user.get("role") in roles)
+    return bool(user and set(user.get("roles") or [user.get("role")]).intersection(set(roles)))

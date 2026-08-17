@@ -246,7 +246,7 @@ def dashboard_counts(session: Session, user_id: int | None = None) -> dict[str, 
     }
 
 
-def player_rankings(session: Session, min_observations: int = 1, position: str | None = None, recommendation: str | None = None, *, season_id: int | None = None, competition_id: int | None = None, team_id: int | None = None, reporter_id: int | None = None, confidence: str | None = None, date_from: date | None = None, date_to: date | None = None, minimum_minutes: int | None = None, limit: int | None = None, offset: int = 0) -> list[dict]:
+def player_rankings(session: Session, min_observations: int = 1, position: str | None = None, recommendation: str | None = None, *, season_id: int | None = None, competition_id: int | None = None, team_id: int | None = None, reporter_id: int | None = None, confidence: str | None = None, date_from: date | None = None, date_to: date | None = None, minimum_minutes: int | None = None, search: str | None = None, limit: int | None = None, offset: int = 0) -> list[dict]:
     """Aggregate rival scouting in SQL instead of loading every evaluation into Python.
 
     This is the hot path for Dirección Deportiva. PostgreSQL/SQLite return one row
@@ -298,6 +298,9 @@ def player_rankings(session: Session, min_observations: int = 1, position: str |
         stmt = stmt.where(Match.match_date <= date_to)
     if minimum_minutes:
         stmt = stmt.where((Participation.minute_out - Participation.minute_in) >= minimum_minutes)
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        stmt = stmt.where(or_(Player.full_name.ilike(term), Player.display_name.ilike(term)))
     stmt = (
         stmt.group_by(Player.id, Player.full_name, Player.date_of_birth)
         .having(func.count(PlayerEvaluation.id) >= int(min_observations))

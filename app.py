@@ -42,13 +42,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from pages import reports as reports_page
 
-    expected_api = "3.4.0"
+    expected_api = "3.6.0"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
-            "`app.py` es de No Name PostMatch 3.4, pero `pages/reports.py` no corresponde a esta versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 3.4 y reinicia la aplicación."
+            "`app.py` es de No Name PostMatch 3.6, pero `pages/reports.py` no corresponde a esta versión. "
+            "Sustituye **todo el contenido del repositorio** por el paquete 3.6 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -61,7 +61,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
         st.error(f"No se encuentra la función requerida: pages.reports.{renderer_name}().")
-        st.info("Vuelve a subir el paquete completo No Name PostMatch 3.4 y reinicia la aplicación.")
+        st.info("Vuelve a subir el paquete completo No Name PostMatch 3.6 y reinicia la aplicación.")
         st.stop()
     renderer(user)
 
@@ -138,32 +138,58 @@ if user.get("must_change_password"):
 ROLE_NAVIGATION: dict[str, list[tuple[str, str]]] = {
     "reporter": [
         ("Inicio", "dashboard"),
+        ("Calendario", "calendar"),
         ("Valorar partido", "report_work"),
         ("Mis informes", "report_archive"),
         ("Jugadores", "players"),
         ("Jugadores ojeados", "scouted"),
     ],
+    "scout": [
+        ("Inicio Scout", "dashboard"),
+        ("Calendario de liga", "calendar"),
+        ("Misiones", "scout"),
+        ("Jugadores ojeados", "scouted"),
+        ("Jugadores", "players"),
+    ],
     "director": [
         ("Inicio", "dashboard"),
+        ("Calendario", "calendar"),
         ("Revisar y decidir", "director"),
+        ("Modelo No Name", "model"),
         ("Informes", "report_archive"),
         ("Jugadores", "players"),
         ("Jugadores ojeados", "scouted"),
     ],
     "admin": [
         ("Inicio", "dashboard"),
+        ("Calendario", "calendar"),
         ("Nuevo postpartido", "postmatch"),
         ("Partidos", "matches"),
         ("Informes", "report_archive"),
         ("Jugadores", "players"),
         ("Jugadores ojeados", "scouted"),
         ("Dirección deportiva", "director"),
+        ("Modelo No Name", "model"),
+        ("Scout", "scout"),
         ("Base de datos", "catalog"),
         ("Administración", "admin"),
     ],
 }
 
-navigation_items = ROLE_NAVIGATION.get(user["role"], ROLE_NAVIGATION["reporter"])
+available_roles = [r for r in (user.get("roles") or [user.get("role")]) if r in ROLE_NAVIGATION]
+if not available_roles:
+    available_roles = ["reporter"]
+active_role = st.session_state.get("active_profile_role")
+if active_role not in available_roles:
+    active_role = user.get("role") if user.get("role") in available_roles else available_roles[0]
+    st.session_state["active_profile_role"] = active_role
+# Pages receive the active operating profile, while repositories re-check every
+# privileged write against all persisted user roles.
+user = dict(user)
+user["role"] = active_role
+user["roles"] = available_roles
+
+navigation_items = ROLE_NAVIGATION.get(active_role, ROLE_NAVIGATION["reporter"])
 labels = [label for label, _ in navigation_items]
 route_by_label = dict(navigation_items)
 nav_key = "main_navigation"
@@ -181,6 +207,12 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.caption(user["full_name"])
+    if len(available_roles) > 1:
+        selected_role = st.selectbox("Perfil activo", available_roles, index=available_roles.index(active_role), format_func=lambda r: ROLES.get(r, r), key="profile_role_selector")
+        if selected_role != active_role:
+            st.session_state["active_profile_role"] = selected_role
+            st.session_state.pop(nav_key, None)
+            st.rerun()
     selected_label = st.radio("Navegación", labels, label_visibility="collapsed", key=nav_key)
     st.divider()
     if st.button("Cerrar sesión", use_container_width=True):
@@ -199,6 +231,15 @@ elif route == "report_archive":
     _render_reports_route(user, mode="archive")
 elif route == "players":
     from pages.players import render
+    render(user)
+elif route == "calendar":
+    from pages.calendar import render
+    render(user)
+elif route == "scout":
+    from pages.scout import render
+    render(user)
+elif route == "model":
+    from pages.model import render
     render(user)
 elif route == "director":
     from pages.director import render

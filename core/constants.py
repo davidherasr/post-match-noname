@@ -2,9 +2,11 @@ ROLES = {
     "admin": "Administrador",
     "reporter": "Informador",
     "director": "Dirección deportiva",
+    "scout": "Scout",
 }
 
 MATCH_STATUSES = {
+    "scheduled": "Programado",
     "draft": "Borrador",
     "published": "Publicado",
     "closed": "Cerrado",
@@ -78,3 +80,29 @@ PDF_MODES = {
     "executive": "Resumen",
     "full": "Completo",
 }
+
+
+SCHEDULE_STATUSES = {
+    "window": "Fin de semana conocido",
+    "date_confirmed": "Fecha confirmada",
+    "confirmed": "Horario confirmado",
+    "postponed": "Aplazado",
+    "cancelled": "Suspendido",
+}
+
+SCOUT_MISSION_TYPES = {
+    "player": "Jugador concreto",
+    "multi_player": "Varios jugadores",
+    "team": "Equipo completo",
+    "rival_analysis": "Análisis de rival",
+    "spontaneous": "Observación espontánea",
+}
+
+SCOUT_MISSION_STATUSES = {
+    "pending": "Pendiente",
+    "in_progress": "En curso",
+    "completed": "Completada",
+    "cancelled": "Cancelada",
+}
+
+NEED_LEVELS = ["Alta", "Media", "Cubierta"]

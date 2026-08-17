@@ -18,7 +18,7 @@ from core.utils import json_dumps, normalize_name
 from models.entities import (
     AppSetting, AuditLog, Competition, ConsolidatedPlayerEvaluation, ConsolidatedReport, Document, FollowUp, FollowUpHistory, LoginAttempt,
     LeaguePlayerProfile, Match, Participation, Player, PlayerAlias, PlayerEvaluation, PlayerMergeLog, PostMatchDraft, Report, ReportAssignment,
-    ReportVersion, ScoutingList, ScoutingListItem, ScoutedPlayerProfile, ScoutReview, Season, Team, TeamRoster, User,
+    ReportVersion, ScoutingList, ScoutingListItem, ScoutedPlayerProfile, ScoutReview, Season, Team, TeamRoster, User, UserRole,
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
@@ -35,6 +35,7 @@ def create_user(
     active: bool = True,
     actor_id: int | None = None,
     must_change_password: bool = True,
+    roles: Sequence[str] | None = None,
 ) -> User:
     email = email.strip().lower()
     existing = session.scalar(select(User).where(User.email == email))
@@ -50,9 +51,45 @@ def create_user(
     )
     session.add(user)
     session.flush()
-    audit(session, actor_id, "create_user", "user", user.id, email, after=_snapshot(user, ["full_name", "email", "role", "active"]))
+    role_values = list(dict.fromkeys([role] + list(roles or [])))
+    for role_value in role_values:
+        session.add(UserRole(user_id=user.id, role=role_value))
+    session.flush()
+    audit(session, actor_id, "create_user", "user", user.id, email, after={**_snapshot(user, ["full_name", "email", "role", "active"]), "roles": role_values})
     return user
 
+
+def get_user_roles(session: Session, user_id: int) -> list[str]:
+    user = session.get(User, int(user_id))
+    if not user:
+        return []
+    rows = list(session.scalars(select(UserRole.role).where(UserRole.user_id == int(user_id))).all())
+    values = list(dict.fromkeys([user.role] + rows))
+    return [r for r in values if r]
+
+
+def user_has_role(session: Session, user_id: int, *roles: str) -> bool:
+    if not roles:
+        return True
+    current = set(get_user_roles(session, int(user_id)))
+    return bool(current.intersection(set(roles)))
+
+
+def set_user_roles(session: Session, user_id: int, roles: Sequence[str], actor_id: int | None = None, primary_role: str | None = None) -> User:
+    user = session.get(User, int(user_id))
+    if not user:
+        raise ValueError("Usuario no encontrado.")
+    clean = list(dict.fromkeys([str(r) for r in roles if str(r)]))
+    if not clean:
+        clean = [primary_role or user.role or "reporter"]
+    primary = primary_role if primary_role in clean else clean[0]
+    session.execute(delete(UserRole).where(UserRole.user_id == int(user_id)))
+    for value in clean:
+        session.add(UserRole(user_id=int(user_id), role=value))
+    user.role = primary
+    user.session_revision = (user.session_revision or 0) + 1
+    audit(session, actor_id, "set_user_roles", "user", user.id, after={"primary": primary, "roles": clean})
+    return user
 
 def authenticate(session: Session, email: str, password: str) -> User | None:
     email = email.strip().lower()
@@ -99,6 +136,7 @@ def update_user(
     password: str | None = None,
     actor_id: int | None = None,
     full_name: str | None = None,
+    roles: Sequence[str] | None = None,
 ) -> User:
     user = session.get(User, user_id)
     if not user:
@@ -113,6 +151,13 @@ def update_user(
     if password:
         user.password_hash = hash_password(password)
         user.must_change_password = True
+    if roles is not None:
+        clean = list(dict.fromkeys([str(r) for r in roles if str(r)])) or [user.role]
+        primary = role if role in clean else (user.role if user.role in clean else clean[0])
+        session.execute(delete(UserRole).where(UserRole.user_id == int(user_id)))
+        for value in clean:
+            session.add(UserRole(user_id=int(user_id), role=value))
+        user.role = primary
     user.session_revision = (user.session_revision or 0) + 1
     audit(session, actor_id, "update_user", "user", user.id, before=before, after=_snapshot(user, before.keys()))
     return user
@@ -133,7 +178,7 @@ def assert_role(session: Session, actor_id: int, *roles: str) -> User:
     actor = session.get(User, actor_id)
     if not actor or not actor.active:
         raise PermissionError("Sesión no válida o usuario desactivado.")
-    if roles and actor.role not in roles:
+    if roles and not user_has_role(session, actor_id, *roles):
         raise PermissionError("No tienes permisos para realizar esta acción.")
     return actor
 

@@ -16,7 +16,12 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "3.4.0"
+REPORTS_PAGE_API_VERSION = "3.6.0"
+
+
+
+def _set_quick_rating(key: str, value: float) -> None:
+    st.session_state[key] = float(value)
 
 
 def _minutes_played(participation) -> int:
@@ -60,10 +65,12 @@ def _build_bulk_row(participation, team_id: int, existing, prefix: str) -> dict:
         standout = True
     else:
         standout = submitted_standout
+    minutes = _minutes_played(participation)
+    observation_status = "evaluated" if rating > 0 else ("insufficient" if minutes < 10 else "not_observed")
     return {
         "player_id": int(participation.player_id), "team_id": int(team_id),
         "participation_id": int(participation.id), "expected_revision": existing.revision if existing else None,
-        "observation_status": "evaluated" if rating > 0 else "not_observed",
+        "observation_status": observation_status,
         "general_rating": rating if rating > 0 else None, "short_note": note,
         "standout": standout if rating > 0 else False, "pdf_include": pdf_include,
         "recommendation": None, "confidence": None,
@@ -153,6 +160,18 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
         for part in players:
             _ensure_eval_state(report.id, part, evaluations.get(part.player_id))
 
+    saved_snapshot = st.session_state.get(saved_key, {})
+    evaluated_saved = sum(1 for values in saved_snapshot.values() if float(values[0] or 0.0) > 0)
+    pending_saved = max(0, len(players) - evaluated_saved)
+    progress = evaluated_saved / len(players) if players else 0.0
+    st.progress(progress, text=f"{team_name}: {evaluated_saved}/{len(players)} valorados · {pending_saved} pendientes")
+    controls = st.columns([1.2, 1])
+    only_pending = controls[0].toggle(
+        "Solo pendientes", value=False, key=f"only_pending_341_{report.id}_{team_id}",
+        help="Muestra únicamente jugadores que todavía no estaban valorados en el último guardado.",
+    )
+    controls[1].caption("El filtro usa el último guardado, por eso un jugador no desaparece mientras escribes.")
+
     st.caption("Modo rápido · tocar notas/comentarios no consulta ni escribe en Supabase.")
     show_options = st.toggle(
         "Más opciones (Destacado / PDF)", value=False, key=f"show_eval_options_34_{report.id}_{team_id}",
@@ -160,7 +179,12 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
         disabled=read_only,
     )
 
-    for heading, group in [("Titulares", [p for p in players if p.starter]), ("Suplentes utilizados", [p for p in players if not p.starter])]:
+    pending_ids = {pid for pid, values in saved_snapshot.items() if float(values[0] or 0.0) <= 0}
+    visible_players = [p for p in players if (not only_pending or int(p.player_id) in pending_ids)]
+    if only_pending and not visible_players:
+        st.success("No quedan jugadores pendientes en este equipo.")
+
+    for heading, group in [("Titulares", [p for p in visible_players if p.starter]), ("Suplentes utilizados", [p for p in visible_players if not p.starter])]:
         if not group:
             continue
         st.markdown(f"#### {heading}")
@@ -178,6 +202,12 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
                 f"Nota · {display_name}", 0.0, 10.0, step=0.1, key=prefix + "rating", disabled=read_only,
                 help="0 = sin valorar. Flechas del teclado: ±0,1.", label_visibility="collapsed",
             )
+            if not read_only:
+                quick = rating_col.columns(5, gap="small")
+                for qcol, qvalue in zip(quick, [5, 6, 7, 8, 9]):
+                    qcol.button(str(qvalue), key=f"quick_{report.id}_{part.player_id}_{qvalue}", use_container_width=True, on_click=_set_quick_rating, args=(prefix + "rating", float(qvalue)))
+            if float(st.session_state.get(prefix + "rating", 0.0) or 0.0) <= 0 and _minutes_played(part) < 10:
+                rating_col.caption("Minutos insuficientes · no computará como valoración")
             note_col.text_input(
                 f"Observación · {display_name} (opcional)", key=prefix + "note", disabled=read_only,
                 placeholder="Comentario opcional…", label_visibility="collapsed",
@@ -189,7 +219,6 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
             st.markdown('<div class="pm-eval-separator"></div>', unsafe_allow_html=True)
 
     current_snapshot = _snapshot_from_widgets(report.id, players)
-    saved_snapshot = st.session_state.get(saved_key, {})
     dirty = current_snapshot != saved_snapshot
     st.session_state[dirty_key] = dirty
     if dirty and not read_only:

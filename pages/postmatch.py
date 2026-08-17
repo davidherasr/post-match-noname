@@ -10,6 +10,7 @@ from core.constants import FORMATIONS, POSITIONS, ROLES
 from models.entities import Competition, Team
 from core.database import session_scope
 from core.formations import slots_for
+from core.workflow_defaults import recent_match_defaults
 from core.performance import measure
 from core.postmatch_validation import validate_postmatch_draft
 from repositories import scouting as repo
@@ -59,11 +60,46 @@ def _new_draft(active_season_id: int | None = None) -> dict:
         "due_date": (date.today() + timedelta(days=1)).isoformat(),
         "due_time": "20:00",
         "reporter_ids": [],
+        "existing_match_id": None,
         "own_xi": [],
         "own_subs": [],
         "rival_xi": [],
         "rival_subs": [],
     }
+
+
+
+
+def _new_draft_with_recent_defaults(own_id: int, season_id: int) -> dict:
+    draft = _new_draft(season_id)
+    with session_scope() as session:
+        draft.update(recent_match_defaults(session, own_id, season_id))
+    return draft
+
+def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
+    with session_scope() as session:
+        match = repo.get_match(session, int(match_id))
+        if not match or own_id not in {match.home_team_id, match.away_team_id}:
+            raise ValueError("El partido programado no corresponde a No Name.")
+        rival_id = match.away_team_id if match.home_team_id == own_id else match.home_team_id
+        draft = _new_draft(match.season_id)
+        draft.update({
+            "existing_match_id": match.id,
+            "competition_id": match.competition_id,
+            "rival_id": rival_id,
+            "round_name": match.round_name,
+            "match_date": match.match_date.isoformat(),
+            "own_location": "Local" if match.home_team_id == own_id else "Visitante",
+            "venue": match.venue or "",
+            "own_formation": (match.home_formation if match.home_team_id == own_id else match.away_formation) or "4-3-3",
+            "rival_formation": (match.away_formation if match.home_team_id == own_id else match.home_formation) or "4-3-3",
+        })
+        # Reuse recurring staff and previous XI suggestions without replacing fixture identity.
+        recent = recent_match_defaults(session, own_id, match.season_id)
+        draft["reporter_ids"] = recent.get("reporter_ids", [])
+        if recent.get("own_formation") and not draft.get("own_formation"):
+            draft["own_formation"] = recent["own_formation"]
+        return draft
 
 
 def _draft() -> dict:
@@ -143,7 +179,7 @@ def _load_context():
         season_objs = repo.list_seasons(session, active_only=True)
         competition_objs = repo.list_competitions(session, active_only=True)
         team_objs = [t for t in repo.list_teams(session, active_only=True) if not t.is_own_team]
-        user_objs = [u for u in repo.list_users(session, active_only=True) if u.role in {"reporter", "admin", "director"}]
+        user_objs = [u for u in repo.list_users(session, active_only=True) if repo.user_has_role(session, u.id, "reporter", "admin", "director")]
     own = _ns(id=own_obj.id, name=own_obj.name) if own_obj else None
     active = _ns(id=active_obj.id, name=active_obj.name) if active_obj else None
     seasons = [_ns(id=x.id, name=x.name) for x in season_objs]
@@ -165,6 +201,13 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         d["round_name"] = f"Jornada {count + 1}"
     st.markdown("### 1 · Partido")
     st.caption("Preparar estos datos no escribe en Supabase. Solo se guardará cuando tú decidas.")
+    if d.get("existing_match_id"):
+        st.success("Este partido ya estaba en el calendario. No se creará otro: completarás el partido programado.")
+    elif d.get("defaults_source_match_id"):
+        st.info(
+            f"He precargado competición, sistema de No Name e informadores desde {d.get('defaults_source_round') or 'el último partido'}. "
+            "Cambia únicamente lo que sea diferente."
+        )
     season_ids = [s.id for s in seasons]
     comp_ids = [None] + [c.id for c in competitions]
     team_ids = [None] + [t.id for t in teams]
@@ -379,14 +422,17 @@ def _own_lineup(user: dict, own, d: dict) -> None:
             subs = []
             for i in range(6):
                 row = existing[i] if i < len(existing) else {}
-                c1, c2, c3 = st.columns([1, 2, 2])
+                c1, c2, c3, c4 = st.columns([1, 2, 2, 1.2])
                 minute = c1.number_input(f"Min {i+1}", 0, 130, int(row.get("minute", 0)), key=f"own_sub_min_{i}")
                 out_opts = [None] + xi_ids
                 in_opts = [None] + bench_ids
                 out_id = c2.selectbox(f"Sale {i+1}", out_opts, index=out_opts.index(row.get("out_id")) if row.get("out_id") in out_opts else 0, format_func=lambda x: "—" if x is None else labels[x], key=f"own_sub_out_{i}")
                 in_id = c3.selectbox(f"Entra {i+1}", in_opts, index=in_opts.index(row.get("in_id")) if row.get("in_id") in in_opts else 0, format_func=lambda x: "—" if x is None else labels[x], key=f"own_sub_in_{i}")
+                inherited = next((x.get("position") for x in d.get("own_xi", []) if x.get("player_id") == out_id), "Otro")
+                pos_default = row.get("position") or inherited
+                position = c4.selectbox(f"Pos {i+1}", POSITIONS, index=POSITIONS.index(pos_default) if pos_default in POSITIONS else len(POSITIONS)-1, key=f"own_sub_pos_{i}", help="Se hereda la posición del jugador que sale, pero puedes corregirla si cambia la estructura.")
                 if minute and out_id and in_id:
-                    subs.append({"minute": int(minute), "out_id": int(out_id), "in_id": int(in_id)})
+                    subs.append({"minute": int(minute), "out_id": int(out_id), "in_id": int(in_id), "position": position})
             save_subs = st.form_submit_button("Guardar cambios en el borrador", use_container_width=True)
         if save_subs:
             if len({x["out_id"] for x in subs}) != len(subs) or len({x["in_id"] for x in subs}) != len(subs):
@@ -497,14 +543,17 @@ def _rival_lineup(own, d: dict) -> None:
             subs = []
             for i in range(6):
                 row = existing[i] if i < len(existing) else {}
-                c1, c2, c3, c4 = st.columns([1,2,2,1])
+                c1, c2, c3, c4, c5 = st.columns([1,2,2,1,1.2])
                 minute = c1.number_input(f"Min R{i+1}", 0, 130, int(row.get("minute", 0)), key=f"rsub_min_{i}")
                 opts = [None] + names
                 out_name = c2.selectbox(f"Sale R{i+1}", opts, index=opts.index(row.get("out_name")) if row.get("out_name") in opts else 0, key=f"rsub_out_{i}", format_func=lambda x: "—" if x is None else x)
                 in_name = c3.text_input(f"Entra R{i+1}", value=row.get("in_name", ""), key=f"rsub_in_{i}", placeholder="Nombre")
                 shirt = c4.number_input(f"# R{i+1}", 0, 99, value=row.get("shirt_number"), step=1, key=f"rsub_shirt_{i}")
+                inherited = next((x.get("position") for x in d.get("rival_xi", []) if x.get("name") == out_name), "Otro")
+                pos_default = row.get("position") or inherited
+                position = c5.selectbox(f"Pos R{i+1}", POSITIONS, index=POSITIONS.index(pos_default) if pos_default in POSITIONS else len(POSITIONS)-1, key=f"rsub_pos_{i}")
                 if minute and out_name and in_name.strip():
-                    subs.append({"minute":int(minute),"out_name":out_name,"in_name":in_name.strip(),"shirt_number":int(shirt) if shirt is not None else None})
+                    subs.append({"minute":int(minute),"out_name":out_name,"in_name":in_name.strip(),"shirt_number":int(shirt) if shirt is not None else None,"position":position})
             save_subs = st.form_submit_button("Guardar cambios rivales en el borrador", use_container_width=True)
         if save_subs:
             d["rival_subs"] = subs
@@ -528,7 +577,7 @@ def _own_rows_for_publish(roster, d: dict) -> list[dict]:
         if out_id not in rows:
             continue
         rows[out_id]["minute_out"] = minute
-        position = rows[out_id]["position"]
+        position = sub.get("position") or rows[out_id]["position"]
         item = by_id[in_id]
         rows[in_id] = {"selected":True,"player_id":in_id,"shirt_number":item.shirt_number,"starter":False,"position":position,"minute_in":minute,"minute_out":90,"captain":False}
     return list(rows.values())
@@ -545,7 +594,7 @@ def _rival_rows_for_publish(d: dict) -> list[dict]:
         if not outgoing:
             continue
         minute = int(sub["minute"]); outgoing["minute_out"] = minute
-        incoming = {"name":sub["in_name"],"shirt_number":sub.get("shirt_number"),"position":outgoing["position"],"starter":False,"minute_in":minute,"minute_out":90,"captain":False}
+        incoming = {"name":sub["in_name"],"shirt_number":sub.get("shirt_number"),"position":sub.get("position") or outgoing["position"],"starter":False,"minute_in":minute,"minute_out":90,"captain":False}
         rows.append(incoming); by_name[incoming["name"]] = incoming
     return rows
 
@@ -642,7 +691,15 @@ def _publish(user: dict, own, d: dict) -> None:
                             home_score, away_score = d["rival_score"], d["own_score"]
                             home_formation, away_formation = d["rival_formation"], d["own_formation"]
                         due_at = datetime.combine(_to_date(d["due_date"]), _to_time(d["due_time"])) if d.get("due_enabled") else None
-                        match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at)
+                        if d.get("existing_match_id"):
+                            match = repo.update_match(
+                                session, int(d["existing_match_id"]), user["id"],
+                                season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]),
+                                home_team_id=home_id, away_team_id=away_id, home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None,
+                                home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at,
+                            )
+                        else:
+                            match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at)
                         roster = repo.get_roster(session, own.id, season_id)
                         repo.replace_participations(session, match.id, own.id, _own_rows_for_publish(roster, d), user["id"])
                         repo.save_named_lineup_fast(session, match_id=match.id, team_id=rival.id, season_id=season_id, rows=rival_rows, actor_id=user["id"], sync_roster=True, identity_resolutions=identity_resolutions)
@@ -689,11 +746,30 @@ def render(user: dict) -> None:
         _setup_own_team(user); return
     if not active or not seasons:
         _setup_season(user); return
+    requested_draft_id = st.session_state.pop("postmatch_open_cloud_draft_id", None)
+    if requested_draft_id:
+        try:
+            with session_scope() as session:
+                payload = repo.load_postmatch_draft(session, int(requested_draft_id), user["id"])
+            st.session_state[DRAFT_KEY] = payload
+            st.session_state[CLOUD_DRAFT_KEY] = int(requested_draft_id)
+            st.session_state.pop(CLOUD_DRAFT_LIST_KEY, None)
+            st.success("Borrador recuperado. Continúa exactamente donde lo dejaste.")
+        except Exception as exc:
+            st.warning(f"No se pudo recuperar el borrador: {exc}")
+    existing_match_id = st.session_state.pop("postmatch_existing_match_id", None)
+    if existing_match_id:
+        try:
+            _clear_draft()
+            st.session_state[DRAFT_KEY] = _draft_from_existing_match(int(existing_match_id), own.id)
+            st.success("Partido recuperado del calendario. Completa resultado y alineaciones.")
+        except Exception as exc:
+            st.warning(f"No se pudo preparar el partido programado: {exc}")
     if DRAFT_KEY not in st.session_state:
-        st.session_state[DRAFT_KEY] = _new_draft(active.id)
+        st.session_state[DRAFT_KEY] = _new_draft_with_recent_defaults(own.id, active.id)
     _cloud_drafts(user)
     if st.button("Empezar un postpartido limpio", use_container_width=True):
-        _clear_draft(); st.session_state[DRAFT_KEY] = _new_draft(active.id); st.rerun()
+        _clear_draft(); st.session_state[DRAFT_KEY] = _new_draft_with_recent_defaults(own.id, active.id); st.rerun()
     d = _draft()
     _header(user, own, active, seasons, competitions, teams, users)
     if d.get("competition_id") is not None or d.get("new_competition"):
