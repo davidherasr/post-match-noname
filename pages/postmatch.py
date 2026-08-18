@@ -13,6 +13,7 @@ from core.formations import slots_for
 from core.workflow_defaults import recent_match_defaults
 from core.performance import measure
 from core.postmatch_validation import validate_postmatch_draft
+from core.schedule import require_schedule_confirmed
 from repositories import scouting as repo
 from ui.styles import page_header
 
@@ -50,6 +51,7 @@ def _new_draft(active_season_id: int | None = None) -> dict:
         "new_rival": "",
         "round_name": "",
         "match_date": date.today().isoformat(),
+        "kickoff_time": "",
         "own_location": "Local",
         "own_score": 0,
         "rival_score": 0,
@@ -82,6 +84,7 @@ def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
         if not match or own_id not in {match.home_team_id, match.away_team_id}:
             raise ValueError("El partido programado no corresponde a No Name.")
         rival_id = match.away_team_id if match.home_team_id == own_id else match.home_team_id
+        require_schedule_confirmed(match, action="preparar el postpartido")
         draft = _new_draft(match.season_id)
         draft.update({
             "existing_match_id": match.id,
@@ -89,6 +92,7 @@ def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
             "rival_id": rival_id,
             "round_name": match.round_name,
             "match_date": match.match_date.isoformat(),
+            "kickoff_time": match.kickoff_at.strftime("%H:%M"),
             "own_location": "Local" if match.home_team_id == own_id else "Visitante",
             "venue": match.venue or "",
             "own_formation": (match.home_formation if match.home_team_id == own_id else match.away_formation) or "4-3-3",
@@ -221,10 +225,11 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         new_competition = x.text_input("Nueva competición", value=d.get("new_competition", ""), disabled=competition_id is not None, placeholder="Liga")
         new_rival = y.text_input("Nuevo rival", value=d.get("new_rival", ""), disabled=rival_id is not None, placeholder="Nombre del equipo")
 
-        a, b, c = st.columns([1.2, 1, 1])
+        a, b, c, e = st.columns([1.2, 1, .8, 1])
         round_name = a.text_input("Jornada / partido", value=d.get("round_name", ""))
-        match_date = b.date_input("Fecha", value=_to_date(d.get("match_date")))
-        own_location = c.radio("No Name", ["Local", "Visitante"], horizontal=True, index=0 if d.get("own_location") == "Local" else 1)
+        match_date = b.date_input("Fecha definitiva", value=_to_date(d.get("match_date")))
+        kickoff_text = c.text_input("Hora", value=str(d.get("kickoff_time") or ""), placeholder="17:00", help="Obligatoria para publicar y generar informes.")
+        own_location = e.radio("No Name", ["Local", "Visitante"], horizontal=True, index=0 if d.get("own_location") == "Local" else 1)
         a, b = st.columns(2)
         own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
         rival_score = b.number_input("Goles rival", 0, 30, int(d.get("rival_score", 0)))
@@ -245,6 +250,11 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         if rival_id is None and not new_rival.strip():
             st.error("Selecciona o escribe el rival.")
             return
+        try:
+            parsed_kickoff = time.fromisoformat(kickoff_text.strip())
+        except Exception:
+            st.error("Indica la hora definitiva del partido en formato HH:MM, por ejemplo 17:00.")
+            return
         d.update({
             "season_id": season_id,
             "competition_id": competition_id,
@@ -253,6 +263,7 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
             "new_rival": new_rival.strip(),
             "round_name": round_name.strip(),
             "match_date": match_date.isoformat(),
+            "kickoff_time": parsed_kickoff.isoformat(timespec="minutes"),
             "own_location": own_location,
             "own_score": int(own_score),
             "rival_score": int(rival_score),
@@ -691,15 +702,17 @@ def _publish(user: dict, own, d: dict) -> None:
                             home_score, away_score = d["rival_score"], d["own_score"]
                             home_formation, away_formation = d["rival_formation"], d["own_formation"]
                         due_at = datetime.combine(_to_date(d["due_date"]), _to_time(d["due_time"])) if d.get("due_enabled") else None
+                        kickoff_at = datetime.combine(_to_date(d["match_date"]), _to_time(d.get("kickoff_time"), time(17, 0)))
                         if d.get("existing_match_id"):
                             match = repo.update_match(
                                 session, int(d["existing_match_id"]), user["id"],
                                 season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]),
+                                window_start=None, window_end=None, kickoff_at=kickoff_at, schedule_status="confirmed",
                                 home_team_id=home_id, away_team_id=away_id, home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None,
                                 home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at,
                             )
                         else:
-                            match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at)
+                            match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at, kickoff_at=kickoff_at, schedule_status="confirmed")
                         roster = repo.get_roster(session, own.id, season_id)
                         repo.replace_participations(session, match.id, own.id, _own_rows_for_publish(roster, d), user["id"])
                         repo.save_named_lineup_fast(session, match_id=match.id, team_id=rival.id, season_id=season_id, rows=rival_rows, actor_id=user["id"], sync_roster=True, identity_resolutions=identity_resolutions)

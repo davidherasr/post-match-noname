@@ -1,10 +1,10 @@
-# No Name PostMatch 3.6.0 · Player Report 360
+# No Name PostMatch 3.7.0 · Calendario operativo + Scouting continuo
 
 Aplicación interna de **No Name** para postpartido, inteligencia de nuestra liga, planificación de observaciones y scouting continuo sobre PostgreSQL/Supabase.
 
 La 3.5 añade tres capas conectadas sin hacer más pesado el informe semanal:
 
-1. **Calendario completo de toda la liga**: No Name y partidos entre rivales, incluso cuando solo se conoce el fin de semana y todavía no existe una hora definitiva.
+1. **Calendario completo de toda la liga**: No Name y partidos entre rivales, incluso cuando solo se conoce la fecha federativa orientativa de la jornada y todavía no existe una hora definitiva.
 2. **Perfil Scout completo**: agenda, misiones de DD, partidos neutrales, observaciones específicas, scouting espontáneo e informes de equipo/rival.
 3. **Modelo No Name**: roles propios, criterios ponderados, necesidades de plantilla, plantilla sombra, decisiones por temporada y planificación automática de nuevos visionados.
 
@@ -106,27 +106,27 @@ Acceso a todos los módulos anteriores más:
 
 ## Calendario completo de liga
 
-Administración puede pegar toda la competición en una operación. Ejemplos:
+Administración puede pegar toda la competición en una operación usando **una sola fecha orientativa de jornada**:
 
 ```text
-1;15-16/08/2026;No Name;La Bañeza
-1;15-16/08/2026;Laguna;Benavente
-2;22/08/2026;18:30;La Bañeza;Laguna
+1;13/09/2026;Ciudad Rodrigo C.F.;C.D.F. Mojados
+1;13/09/2026;La Cistérniga C.F.;C.D. Noname
 ```
 
-La aplicación crea o actualiza equipos y partidos sin generar datos deportivos ficticios.
+La fecha publicada por Federación no se interpreta como día definitivo. Hasta que Administración confirme hora, el encuentro queda como:
 
-Un partido puede estar en:
-
-- **Fin de semana conocido**: conocemos el rango de fechas, no la hora.
-- **Fecha confirmada**: conocemos el día definitivo, hora pendiente.
-- **Horario confirmado**: fecha y hora definitivas.
+- **Fecha orientativa · horario pendiente** (`provisional`).
+- **Fecha y hora confirmadas** (`confirmed`).
 - **Aplazado**.
 - **Suspendido**.
 
-Los avisos de calendario se vuelven urgentes al acercarse la jornada. Administración puede confirmar fecha/hora desde la incidencia sin editar todo el partido.
+DD puede planificar misiones Scout sobre un partido provisional. Sin embargo, el postpartido, las observaciones Scout y los informes operativos requieren fecha y hora confirmadas.
 
-Los partidos de No Name importados **no se vuelven a crear** al llegar la jornada. Desde Calendario se pulsa `Preparar postpartido desde este partido`, se añade resultado/alineaciones/cambios y el mismo registro pasa a publicado.
+Los avisos de calendario se vuelven urgentes al acercarse la jornada. Administración confirma fecha/hora desde la incidencia sin editar todo el partido.
+
+Los partidos de No Name importados **no se vuelven a crear** al llegar la jornada. Una vez confirmado el horario, desde Calendario se pulsa `Preparar postpartido desde este partido`, se añade resultado/alineaciones/cambios y el mismo registro pasa a publicado.
+
+Una reimportación posterior del calendario provisional nunca sobrescribe un horario que Administración ya haya confirmado.
 
 ## Perfil Scout
 
@@ -311,7 +311,7 @@ Las búsquedas densas de jugadores se filtran y paginan desde PostgreSQL para ev
 
 ## Base de datos
 
-3.6.0 conserva la migración 3.5 y añade una segunda migración no destructiva:
+3.7.0 mantiene el mismo esquema de la 3.6. No añade una migración nueva:
 
 ```text
 0004_scout_workflow_3_3
@@ -334,7 +334,7 @@ La 3.5 añadió:
 - `player_season_decisions`;
 - índices para calendario, misiones, scouting y planificación.
 
-La 3.6 añade de forma opcional `current_level`, `potential_score` y `criteria_json` a `player_season_decisions` para consolidar el Player Report 360. Las migraciones conservan usuarios, jugadores, equipos, partidos, informes, evaluaciones, seguimientos, listas, observaciones y expedientes existentes.
+La 3.6 añadió `current_level`, `potential_score` y `criteria_json` a `player_season_decisions` para consolidar el Player Report 360. La 3.7 cambia únicamente la lógica operativa del calendario y conserva el esquema `0006`. Las migraciones conservan usuarios, jugadores, equipos, partidos, informes, evaluaciones, seguimientos, listas, observaciones y expedientes existentes.
 
 ## Despliegue
 

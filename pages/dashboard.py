@@ -21,6 +21,11 @@ def _navigate(label: str, match_id: int | None = None) -> None:
     st.session_state["main_navigation"] = label
 
 
+def _open_schedule_issues() -> None:
+    st.session_state["calendar_admin_mode"] = "Horarios pendientes"
+    st.session_state["main_navigation"] = "Calendario"
+
+
 def _continue_postmatch_draft(draft_id: int) -> None:
     st.session_state["postmatch_open_cloud_draft_id"] = int(draft_id)
     st.session_state["main_navigation"] = "Nuevo postpartido"
@@ -233,7 +238,7 @@ def _admin_dashboard(user: dict) -> None:
             left, action = st.columns([4,1.2])
             left.markdown(f"**Horarios por confirmar: {len(schedule_issues)}**")
             left.caption(f"{len(urgent)} próximos en menos de 7 días" if urgent else "Sin urgencias de menos de 7 días")
-            action.button("Resolver", use_container_width=True, on_click=_navigate, args=("Calendario",))
+            action.button("Resolver", use_container_width=True, on_click=_open_schedule_issues)
 
     cols = st.columns(4)
     cols[0].metric("Partidos publicados", counts["published_matches"])

@@ -7,7 +7,8 @@ from sqlalchemy import and_, asc, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from core.utils import normalize_name
-from models.entities import Competition, Match, Season, Team
+from models.entities import Competition, Match, ScoutMission, Season, Team
+from core.schedule import is_schedule_confirmed, require_schedule_confirmed
 from repositories.common import UTC_NOW, audit
 from repositories.users import assert_role
 
@@ -63,7 +64,7 @@ def import_fixtures(
             existing = Match(
                 season_id=int(season_id), competition_id=int(competition_id), round_name=str(row["round_name"]),
                 match_date=row["match_date"], window_start=row.get("window_start"), window_end=row.get("window_end"),
-                kickoff_at=row.get("kickoff_at"), schedule_status=row.get("schedule_status") or "window",
+                kickoff_at=row.get("kickoff_at"), schedule_status=row.get("schedule_status") or "provisional",
                 fixture_type=fixture_type, home_team_id=home.id, away_team_id=away.id,
                 venue=row.get("venue"), status="scheduled", created_by=int(actor_id), created_at=UTC_NOW(), updated_at=UTC_NOW(),
             )
@@ -71,13 +72,18 @@ def import_fixtures(
             session.flush()
             created += 1
         else:
-            existing.match_date = row["match_date"]
-            existing.window_start = row.get("window_start")
-            existing.window_end = row.get("window_end")
-            existing.kickoff_at = row.get("kickoff_at")
-            existing.schedule_status = row.get("schedule_status") or existing.schedule_status
+            incoming_status = row.get("schedule_status") or "provisional"
+            # Reimporting the federation calendar must never destroy a definitive
+            # kickoff that Administration already confirmed manually.
+            preserve_confirmed = is_schedule_confirmed(existing) and incoming_status != "confirmed"
+            if not preserve_confirmed:
+                existing.match_date = row["match_date"]
+                existing.window_start = row.get("window_start")
+                existing.window_end = row.get("window_end")
+                existing.kickoff_at = row.get("kickoff_at")
+                existing.schedule_status = incoming_status
             existing.fixture_type = fixture_type
-            if row.get("venue"):
+            if row.get("venue") and not (preserve_confirmed and existing.venue):
                 existing.venue = row.get("venue")
             existing.updated_at = UTC_NOW()
             existing.revision = int(existing.revision or 0) + 1
@@ -114,13 +120,14 @@ def list_calendar(
 
 
 def schedule_label(match: Match) -> str:
-    if match.schedule_status == "confirmed" and match.kickoff_at:
+    if is_schedule_confirmed(match):
         return match.kickoff_at.strftime("%d/%m/%Y · %H:%M")
-    if match.schedule_status == "date_confirmed":
-        return f"{match.match_date.strftime('%d/%m/%Y')} · hora pendiente"
-    if match.window_start and match.window_end and match.window_start != match.window_end:
-        return f"{match.window_start.strftime('%d/%m')}–{match.window_end.strftime('%d/%m/%Y')} · horario pendiente"
-    return f"{match.match_date.strftime('%d/%m/%Y')} · horario pendiente"
+    if match.schedule_status == "postponed":
+        return f"{match.match_date.strftime('%d/%m/%Y')} · aplazado"
+    if match.schedule_status == "cancelled":
+        return f"{match.match_date.strftime('%d/%m/%Y')} · suspendido"
+    # The stored date is only the federation/reference date until kickoff is confirmed.
+    return f"{match.match_date.strftime('%d/%m/%Y')} · fecha orientativa · horario pendiente"
 
 
 def schedule_issues(session: Session, *, season_id: int | None = None, today: date | None = None, horizon_days: int = 21) -> list[dict]:
@@ -130,7 +137,7 @@ def schedule_issues(session: Session, *, season_id: int | None = None, today: da
     for match in rows:
         if match.schedule_status in {"confirmed", "cancelled"}:
             continue
-        start = match.window_start or match.match_date
+        start = match.match_date
         days = (start - today).days
         urgency = "Urgente" if days <= 7 else "Pendiente"
         result.append({"match": match, "days": days, "urgency": urgency, "reason": "Horario sin confirmar" if match.schedule_status != "postponed" else "Partido aplazado"})
@@ -152,25 +159,45 @@ def update_schedule(
     if not match:
         raise ValueError("Partido no encontrado.")
     before = {"match_date": str(match.match_date), "kickoff_at": str(match.kickoff_at), "schedule_status": match.schedule_status, "venue": match.venue}
-    if definitive_date:
-        match.match_date = definitive_date
-        match.window_start = definitive_date
-        match.window_end = definitive_date
+    previous_kickoff = match.kickoff_at
+
     if kickoff_at is not None:
         match.kickoff_at = kickoff_at
         match.match_date = kickoff_at.date()
-        match.window_start = kickoff_at.date()
-        match.window_end = kickoff_at.date()
+        match.window_start = None
+        match.window_end = None
         match.schedule_status = "confirmed"
+    elif definitive_date is not None:
+        # A date without a kickoff is still provisional in 3.7.
+        match.match_date = definitive_date
+        match.window_start = None
+        match.window_end = None
+        match.kickoff_at = None
+        match.schedule_status = schedule_status or "provisional"
     elif schedule_status:
         match.schedule_status = schedule_status
-    elif definitive_date:
-        match.schedule_status = "date_confirmed"
+        if schedule_status != "confirmed":
+            match.kickoff_at = None
+
     if venue is not None:
         match.venue = venue.strip() or None
+
+    # Scouting tasks may be planned before kickoff is known. Once Administration
+    # confirms or changes the hour, their operational due time follows the match.
+    active_missions = list(session.scalars(select(ScoutMission).where(
+        ScoutMission.match_id == match.id, ScoutMission.status.in_(["pending", "in_progress"])
+    )).all())
+    for mission in active_missions:
+        mission.due_at = match.kickoff_at if is_schedule_confirmed(match) else None
+        mission.updated_at = UTC_NOW()
+
     match.revision = int(match.revision or 0) + 1
     match.updated_at = UTC_NOW()
-    audit(session, actor_id, "update_fixture_schedule", "match", match.id, before=before, after={"match_date": str(match.match_date), "kickoff_at": str(match.kickoff_at), "schedule_status": match.schedule_status, "venue": match.venue})
+    audit(session, actor_id, "update_fixture_schedule", "match", match.id, before=before, after={
+        "match_date": str(match.match_date), "kickoff_at": str(match.kickoff_at),
+        "schedule_status": match.schedule_status, "venue": match.venue,
+        "missions_synced": len(active_missions), "previous_kickoff": str(previous_kickoff),
+    })
     return match
 
 

@@ -182,7 +182,7 @@ class Match(Base):
     window_start: Mapped[date | None] = mapped_column(Date)
     window_end: Mapped[date | None] = mapped_column(Date)
     kickoff_at: Mapped[datetime | None] = mapped_column(DateTime)
-    schedule_status: Mapped[str] = mapped_column(String(30), default="window", nullable=False)
+    schedule_status: Mapped[str] = mapped_column(String(30), default="provisional", nullable=False)
     fixture_type: Mapped[str] = mapped_column(String(30), default="league", nullable=False)
     home_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     away_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)

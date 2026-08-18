@@ -118,7 +118,7 @@ def _doc(settings: dict, label: str):
     buffer=BytesIO()
     doc=BaseDocTemplate(buffer,pagesize=A4,leftMargin=14*mm,rightMargin=14*mm,topMargin=14*mm,bottomMargin=16*mm)
     frame=Frame(doc.leftMargin,doc.bottomMargin,doc.width,doc.height,id="main")
-    doc.addPageTemplates([PageTemplate(id="main",frames=[frame],onPage=lambda c,d:_footer(c,d,club,"3.6.0",label))])
+    doc.addPageTemplates([PageTemplate(id="main",frames=[frame],onPage=lambda c,d:_footer(c,d,club,"3.7.0",label))])
     return buffer,doc,_styles(primary,dark),primary,dark,club
 
 

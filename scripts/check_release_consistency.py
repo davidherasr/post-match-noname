@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "3.6.0"
+EXPECTED = "3.7.0"
 HEAD_MIGRATION = "0006_player_report_360_3_6"
 
 

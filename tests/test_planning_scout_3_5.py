@@ -24,8 +24,8 @@ def test_full_league_calendar_import_and_schedule_confirmation(session_factory):
     with session_factory.begin() as session:
         admin, _, season, comp, own = _base(session)
         rows, errors = parse_calendar_text(
-            "1;15-16/08/2026;No Name;La Bañeza\n"
-            "1;15-16/08/2026;Laguna;Benavente\n"
+            "1;16/08/2026;No Name;La Bañeza\n"
+            "1;16/08/2026;Laguna;Benavente\n"
             "2;22/08/2026;18:30;La Bañeza;Laguna",
             default_year=2026,
         )
@@ -37,9 +37,10 @@ def test_full_league_calendar_import_and_schedule_confirmation(session_factory):
         neutral = next(m for m in all_matches if {m.home_team.name, m.away_team.name} == {"Laguna", "Benavente"})
         assert neutral.fixture_type == "league"
         own_match = next(m for m in all_matches if own.id in {m.home_team_id, m.away_team_id})
-        assert own_match.schedule_status == "window"
-        assert own_match.window_start == date(2026, 8, 15)
-        assert own_match.window_end == date(2026, 8, 16)
+        assert own_match.schedule_status == "provisional"
+        assert own_match.match_date == date(2026, 8, 16)
+        assert own_match.window_start is None
+        assert own_match.window_end is None
         calendar_repo.update_schedule(
             session, own_match.id, admin.id, definitive_date=date(2026, 8, 16),
             kickoff_at=datetime(2026, 8, 16, 12, 0), schedule_status="confirmed", venue="Campo",
@@ -57,7 +58,7 @@ def test_multi_role_profile_and_scout_mission_with_repeated_observations(session
 
         a = repo.create_team(session, "La Bañeza", actor_id=admin.id)
         b = repo.create_team(session, "Laguna", actor_id=admin.id)
-        match = repo.create_match(session, season_id=season.id, competition_id=comp.id, round_name="J5", match_date=date(2026, 9, 17), home_team_id=a.id, away_team_id=b.id, created_by=admin.id, status="scheduled")
+        match = repo.create_match(session, season_id=season.id, competition_id=comp.id, round_name="J5", match_date=date(2026, 9, 17), home_team_id=a.id, away_team_id=b.id, created_by=admin.id, status="scheduled", kickoff_at=datetime(2026, 9, 17, 18, 0), schedule_status="confirmed")
         player = repo.find_or_create_player(session, "Objetivo Scout", primary_position="DC", actor_id=admin.id)
         repo.assign_player_to_roster(session, a.id, season.id, player.id, 9, actor_id=admin.id)
         mission = planning_repo.create_mission(
@@ -116,7 +117,7 @@ def test_scout_can_save_quick_sweep_for_multiple_players(session_factory):
         admin, scout, season, comp, _ = _base(session)
         home = repo.create_team(session, "Equipo Scan A", actor_id=admin.id)
         away = repo.create_team(session, "Equipo Scan B", actor_id=admin.id)
-        match = repo.create_match(session, season_id=season.id, competition_id=comp.id, round_name="J Scan", match_date=date(2026, 10, 4), home_team_id=home.id, away_team_id=away.id, created_by=admin.id, status="scheduled")
+        match = repo.create_match(session, season_id=season.id, competition_id=comp.id, round_name="J Scan", match_date=date(2026, 10, 4), home_team_id=home.id, away_team_id=away.id, created_by=admin.id, status="scheduled", kickoff_at=datetime(2026, 10, 4, 17, 0), schedule_status="confirmed")
         p1 = repo.find_or_create_player(session, "Scan Uno", primary_position="MC", actor_id=admin.id)
         p2 = repo.find_or_create_player(session, "Scan Dos", primary_position="DC", actor_id=admin.id)
         count = planning_repo.save_quick_match_observations(session, match_id=match.id, reviewer_id=scout.id, rows=[
@@ -127,3 +128,37 @@ def test_scout_can_save_quick_sweep_for_multiple_players(session_factory):
         rows = planning_repo.list_observations(session, reviewer_id=scout.id)
         assert {o.source_type for o in rows} == {"match_scan"}
         assert sorted(o.general_rating for o in rows) == [7.5, 8.0]
+
+
+def test_calendar_import_uses_single_provisional_reference_date():
+    rows, errors = parse_calendar_text(
+        '8;01/11/2026;C.D. Ribert;La Bañeza F.C.',
+        default_year=2026,
+    )
+    assert not errors
+    assert len(rows) == 1
+    assert rows[0]["match_date"] == date(2026, 11, 1)
+    assert rows[0]["window_start"] is None
+    assert rows[0]["window_end"] is None
+    assert rows[0]["schedule_status"] == "provisional"
+    assert rows[0]["kickoff_at"] is None
+
+
+def test_calendar_import_rejects_ranges_with_clear_guidance():
+    rows, errors = parse_calendar_text(
+        '1;12/09/2026-13/09/2026;Ciudad Rodrigo C.F.;C.D.F. Mojados',
+        default_year=2026,
+    )
+    assert rows == []
+    assert errors
+    assert "no uses rangos" in errors[0].lower()
+
+
+def test_calendar_import_can_confirm_exact_kickoff_directly():
+    rows, errors = parse_calendar_text(
+        '1;12/09/2026;18:30;Equipo A;Equipo B',
+        default_year=2026,
+    )
+    assert not errors
+    assert rows[0]["schedule_status"] == "confirmed"
+    assert rows[0]["kickoff_at"] == datetime(2026, 9, 12, 18, 30)

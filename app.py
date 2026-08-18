@@ -42,13 +42,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from pages import reports as reports_page
 
-    expected_api = "3.6.0"
+    expected_api = "3.7.0"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
-            "`app.py` es de No Name PostMatch 3.6, pero `pages/reports.py` no corresponde a esta versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 3.6 y reinicia la aplicación."
+            "`app.py` es de No Name PostMatch 3.7, pero `pages/reports.py` no corresponde a esta versión. "
+            "Sustituye **todo el contenido del repositorio** por el paquete 3.7 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -61,7 +61,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
         st.error(f"No se encuentra la función requerida: pages.reports.{renderer_name}().")
-        st.info("Vuelve a subir el paquete completo No Name PostMatch 3.6 y reinicia la aplicación.")
+        st.info("Vuelve a subir el paquete completo No Name PostMatch 3.7 y reinicia la aplicación.")
         st.stop()
     renderer(user)
 

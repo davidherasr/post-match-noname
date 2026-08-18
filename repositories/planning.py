@@ -12,6 +12,7 @@ from models.entities import (
     ScoutMissionTarget, ScoutObservation, ScoutedPlayerProfile, Season, SquadNeed, Team,
     TeamRoster, User,
 )
+from core.schedule import require_schedule_confirmed
 from repositories.common import UTC_NOW, audit
 from repositories.users import assert_role, user_has_role
 
@@ -98,6 +99,8 @@ def update_mission_status(session: Session, mission_id: int, actor_id: int, *, s
         raise ValueError("Misión no encontrada.")
     if item.assigned_to != int(actor_id):
         assert_role(session, actor_id, "director", "admin")
+    if status in {"in_progress", "completed"}:
+        require_schedule_confirmed(session.get(Match, item.match_id), action="iniciar o completar la tarea de scouting")
     item.status = status
     if result_summary is not None:
         item.result_summary = result_summary.strip() or None
@@ -141,6 +144,9 @@ def create_observation(
         if not mission or (mission.assigned_to != int(reviewer_id) and not user_has_role(session, reviewer_id, "director", "admin")):
             raise PermissionError("La misión no está asignada a este scout.")
         match_id = mission.match_id
+    if match_id:
+        require_schedule_confirmed(session.get(Match, int(match_id)), action="iniciar la observación Scout")
+    if mission_id:
         mission.status = "in_progress"
         mission.updated_at = UTC_NOW()
     item = ScoutObservation(
@@ -238,6 +244,7 @@ def save_quick_match_observations(session: Session, *, match_id: int, reviewer_i
     match = session.get(Match, int(match_id))
     if not match:
         raise ValueError("Partido no encontrado.")
+    require_schedule_confirmed(match, action="guardar una observación de partido")
     count = 0
     for row in rows:
         player_id = int(row.get("player_id") or 0)

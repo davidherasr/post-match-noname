@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from repositories import planning as planning_repo
 from repositories import player_report as player_report_repo
@@ -22,7 +22,7 @@ def _seed(session):
 
 
 def _approved_postmatch(session, admin, reporter, season, comp, own, rival, player, rating=8.2):
-    match = repo.create_match(session, season_id=season.id, competition_id=comp.id, round_name="J1", match_date=date(2026,8,16), home_team_id=own.id, away_team_id=rival.id, created_by=admin.id, status="published")
+    match = repo.create_match(session, season_id=season.id, competition_id=comp.id, round_name="J1", match_date=date(2026,8,16), home_team_id=own.id, away_team_id=rival.id, created_by=admin.id, status="published", kickoff_at=datetime(2026,8,16,17,0), schedule_status="confirmed")
     part = repo.replace_participations(session, match.id, rival.id, [{"selected":True,"player_id":player.id,"shirt_number":9,"starter":True,"position":"DC","minute_in":0,"minute_out":90,"captain":False}], admin.id)[0]
     report = repo.get_or_create_report(session, match.id, reporter.id)
     repo.bulk_upsert_evaluations_fast(session, report.id, [{"player_id":player.id,"team_id":rival.id,"participation_id":part.id,"observation_status":"evaluated","general_rating":rating,"short_note":"Ataca bien el espacio","standout":True,"pdf_include":True}], reporter.id)

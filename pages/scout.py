@@ -8,6 +8,7 @@ import streamlit as st
 
 from core.constants import POSITIONS, SCOUT_MISSION_STATUSES, SCOUT_MISSION_TYPES
 from core.database import session_scope
+from core.schedule import is_schedule_confirmed
 from repositories import calendar as calendar_repo
 from repositories import planning as planning_repo
 from repositories import scouting as repo
@@ -27,12 +28,36 @@ def _observation_form(observation, player, user: dict) -> None:
     st.markdown(f"### {player.display_name or player.full_name}")
     if observation.match:
         st.caption(f"{observation.match.home_team.name} - {observation.match.away_team.name} · {calendar_repo.schedule_label(observation.match)}")
+    try:
+        saved_attrs = json.loads(observation.attributes_json or "{}")
+    except Exception:
+        saved_attrs = {}
+    saved_role = saved_attrs.get("model_role_id")
+    try:
+        saved_role = int(saved_role) if saved_role is not None else None
+    except Exception:
+        saved_role = None
     role_options = [None] + [r.id for r in roles]
+    if saved_role not in role_options:
+        saved_role = None
+    # Outside the form on purpose: changing the role reruns immediately and reveals
+    # the correct model criteria instead of requiring a dummy submit.
+    model_role_id = st.selectbox(
+        "Rol No Name a contrastar", role_options,
+        index=role_options.index(saved_role),
+        format_func=lambda rid: "Sin rol concreto" if rid is None else next(f"{r.position} · {r.name}" for r in roles if r.id == rid),
+        key=f"scout_model_role_{observation.id}",
+    )
+    criteria = []
+    if model_role_id:
+        with session_scope() as session:
+            criteria = planning_repo.list_model_criteria(session, model_role_id)
+    recommendations = ["Sin conclusión", "No encaja", "Volver a ver", "Seguimiento", "Prioritario", "Descartar"]
+    saved_recommendation = observation.recommendation if observation.recommendation in recommendations else "Sin conclusión"
     with st.form(f"scout_observation_{observation.id}"):
-        a,b,c = st.columns(3)
+        a,b = st.columns(2)
         pos = a.selectbox("Posición observada", POSITIONS, index=POSITIONS.index(observation.observed_position) if observation.observed_position in POSITIONS else 0)
-        model_role_id = b.selectbox("Rol No Name a contrastar", role_options, format_func=lambda rid: "Sin rol concreto" if rid is None else next(f"{r.position} · {r.name}" for r in roles if r.id == rid))
-        recommendation = c.selectbox("Recomendación", ["Sin conclusión", "No encaja", "Volver a ver", "Seguimiento", "Prioritario", "Descartar"], index=0)
+        recommendation = b.selectbox("Recomendación", recommendations, index=recommendations.index(saved_recommendation))
         st.caption("Solo puntúa aquello que realmente puedas sostener con lo observado.")
         general = st.slider("Nota de este visionado", 0.0, 10.0, float(observation.general_rating or 0), .5, help="Rendimiento/impresión de este partido; no sustituye a nivel actual ni se mezcla automáticamente con la media postpartido.")
         r1,r2,r3,r4 = st.columns(4)
@@ -45,16 +70,14 @@ def _observation_form(observation, player, user: dict) -> None:
         potential = c2.slider("Proyección", 0.0, 10.0, float(observation.potential_score or 0), .5)
         fit = c3.slider("Encaje preliminar No Name", 0.0, 10.0, float(observation.model_fit_score or 0), .5)
         criteria_scores = {}
-        if model_role_id:
-            with session_scope() as session:
-                criteria = planning_repo.list_model_criteria(session, model_role_id)
-            if criteria:
-                st.markdown("**Criterios de nuestro modelo**")
-                for criterion in criteria:
-                    criteria_scores[criterion.id] = st.slider(f"{criterion.name} · peso {criterion.weight}", 0.0, 10.0, 0.0, .5, key=f"crit_{observation.id}_{criterion.id}")
-                weighted = planning_repo.weighted_model_fit(criteria, criteria_scores)
-                if weighted is not None:
-                    st.caption(f"Encaje ponderado por criterios: **{weighted:.2f}/10**")
+        if criteria:
+            st.markdown("**Criterios de nuestro modelo**")
+            for criterion in criteria:
+                default = float(saved_attrs.get(str(criterion.id), 0) or 0)
+                criteria_scores[criterion.id] = st.slider(f"{criterion.name} · peso {criterion.weight}", 0.0, 10.0, default, .5, key=f"crit_{observation.id}_{criterion.id}")
+            weighted = planning_repo.weighted_model_fit(criteria, criteria_scores)
+            if weighted is not None:
+                st.caption(f"Encaje ponderado por criterios: **{weighted:.2f}/10**")
         strengths = st.text_area("Fortalezas", value=observation.strengths or "", height=80)
         weaknesses = st.text_area("Riesgos / debilidades", value=observation.weaknesses or "", height=80)
         summary = st.text_area("Resumen scout", value=observation.summary or "", height=110)
@@ -95,6 +118,9 @@ def _mission_card(mission, user: dict) -> None:
             st.caption("Foco: " + " · ".join(focus))
         if targets:
             st.caption("Jugadores: " + ", ".join(t.player.display_name or t.player.full_name for t in targets))
+        if not is_schedule_confirmed(mission.match):
+            st.warning("Tarea planificada · horario pendiente. Podrás abrir el informe cuando Administración confirme fecha y hora.")
+            return
         if mission.mission_type in {"team", "rival_analysis"} and not targets:
             st.markdown("**Informe de equipo / rival**")
             with st.form(f"team_mission_{mission.id}"):
@@ -163,10 +189,13 @@ def _my_day(user: dict) -> None:
             b.metric("Tareas", len(tasks))
             if tasks:
                 st.caption(" · ".join(t.title for t in tasks))
-            if st.button("Observar este partido", key=f"scout_day_match_{match.id}", use_container_width=True):
+            ready = is_schedule_confirmed(match)
+            if st.button("Observar este partido", key=f"scout_day_match_{match.id}", use_container_width=True, disabled=not ready):
                 st.session_state["scout_match_id"] = match.id
                 st.session_state["scout_section"] = "Observar partido"
                 st.rerun()
+            if not ready:
+                st.caption("Horario pendiente · visible para planificar, todavía no para registrar el visionado.")
 
 def _my_missions(user: dict) -> None:
     with session_scope() as session:
@@ -193,6 +222,9 @@ def _spontaneous(user: dict) -> None:
     ids = [m.id for m in matches]
     match_id = st.selectbox("Partido", ids, index=ids.index(preset) if preset in ids else 0, format_func=lambda mid: next(f"{m.round_name} · {m.home_team.name} - {m.away_team.name} · {calendar_repo.schedule_label(m)}" for m in matches if m.id == mid))
     match = next(m for m in matches if m.id == match_id)
+    if not is_schedule_confirmed(match):
+        st.warning("Este partido aún tiene horario pendiente. Puedes consultarlo en el calendario, pero no registrar observaciones hasta confirmar fecha y hora.")
+        return
     with session_scope() as session:
         roster = repo.get_roster(session, match.home_team_id, match.season_id) + repo.get_roster(session, match.away_team_id, match.season_id)
     players = {r.player_id:r.player for r in roster}

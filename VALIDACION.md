@@ -1,52 +1,62 @@
-# Validación técnica · No Name PostMatch 3.6.0
+# Validación técnica · No Name PostMatch 3.7.0
 
-## Resultado
+## Release
 
-- Compilación Python completa: **correcta**.
-- Suite automatizada: **42 pruebas superadas**.
-- Contrato de versión: **3.6.0**.
-- Alembic head: **`0006_player_report_360_3_6`**.
-- Release consistency: **correcta**.
-- Bases `.db`, `.sqlite`, `.sqlite3` incluidas en release: **0**.
-- Datos deportivos de demostración incluidos: **0**.
+- `VERSION`: 3.7.0
+- `APP_VERSION`: 3.7.0
+- contrato `pages/reports.py`: 3.7.0
+- Alembic head: `0006_player_report_360_3_6`
+- migración nueva: no
 
-## Migraciones verificadas
+## Suite automatizada
 
-Se han comprobado dos escenarios con bases temporales:
+```text
+49 passed
+```
 
-1. base vacía → `alembic upgrade head` → 0006;
-2. base en revisión 0005 → `alembic upgrade head` → 0006.
+Se cubre específicamente:
 
-La migración 0006 añade únicamente a `player_season_decisions`:
+- importación con una única fecha orientativa;
+- rechazo claro de rangos antiguos;
+- importación directa de fecha+hora confirmadas;
+- calendario completo;
+- misión DD creada antes de conocer horario;
+- bloqueo de observación Scout mientras el partido es provisional;
+- desbloqueo tras confirmar fecha/hora;
+- sincronización de `ScoutMission.due_at` con el kickoff confirmado;
+- reimportación provisional sin destruir un horario confirmado;
+- bloqueo de informes nuevos sobre un `scheduled` sin horario;
+- permisos multirol usando `user_roles` y no solo el perfil principal;
+- Player Report 360;
+- PDFs;
+- evaluación rápida;
+- inteligencia DD;
+- seguridad y flujos heredados.
 
-- `current_level`;
-- `potential_score`;
-- `criteria_json`.
+## Calendario real 2026/27
 
-No elimina ni reinicia información existente.
+El fichero real generado para 3.7 se ha pasado por el parser de la release:
 
-## Cobertura específica 3.6
+```text
+240 partidos reconocidos
+0 errores
+30 jornadas
+16 equipos
+```
 
-La suite incorpora pruebas de:
+La Jornada 8 utiliza simplemente:
 
-- construcción del Player Report 360 con datos reales de postpartido y scouting;
-- criterios del Modelo No Name sin completar valores inexistentes;
-- decisión DD por temporada con encaje, nivel, proyección y criterios;
-- comparación con futbolistas de la plantilla propia asignados al mismo rol;
-- generación de Ficha Scout Ejecutiva PDF;
-- generación de Dossier Player Report 360 PDF.
+```text
+01/11/2026
+```
 
-Se conservan las pruebas anteriores de calendario completo, horarios, multirol, perfil Scout, misiones, scouting espontáneo, observaciones múltiples, análisis rival, Modelo No Name, plantilla sombra, calidad de datos, bulk UPSERT, dirty state, informes, DD, seguridad y migraciones.
+como fecha federativa orientativa, por lo que ya no existe ningún caso especial `31/10-01/11` que deba interpretar el parser.
 
-## Verificación visual de PDF
+## Compilación, migraciones y consistencia
 
-Los dos nuevos documentos se generaron con un dataset temporal fuera de la release y se renderizaron a imagen para inspección visual:
-
-- Ficha Scout Ejecutiva: 1 página;
-- Dossier Player Report 360: 2 páginas en la muestra de validación.
-
-Se comprobó ausencia de texto recortado, solapamientos, glifos rotos y valores inventados. Los archivos de demostración y sus renders **no se incluyen en el ZIP final**.
-
-## Limitación realista
-
-La latencia exacta de Streamlit Community Cloud ↔ Supabase solo puede medirse después del despliegue real. La aplicación mantiene las herramientas de rendimiento y aceptación con rollback de versiones anteriores.
+- `python -m compileall`: OK
+- `pytest -q`: OK · 49 tests
+- `python scripts/check_release_consistency.py`: OK
+- Alembic base vacía → `0006`: OK
+- Alembic `0005` → `0006`: OK
+- No existe migración 3.7 porque no cambia el esquema.

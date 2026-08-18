@@ -47,7 +47,7 @@ def convert_row(model, row: dict) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Restaurar una copia técnica de No Name PostMatch 3.6")
+    parser = argparse.ArgumentParser(description="Restaurar una copia técnica de No Name PostMatch 3.7")
     parser.add_argument("file", type=Path, help="ZIP generado desde Administración")
     parser.add_argument("--replace", action="store_true", help="Vaciar las tablas antes de restaurar")
     args = parser.parse_args()

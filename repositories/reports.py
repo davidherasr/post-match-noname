@@ -22,12 +22,12 @@ from models.entities import (
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
-from repositories.users import assert_role, get_all_settings, get_setting
+from repositories.users import assert_role, get_all_settings, get_setting, user_has_role
 from repositories.matches import _own_team_id_for_match, get_match, get_participations
 
 def _assert_report_owner_or_privileged(session: Session, report: Report, actor_id: int) -> User:
     actor = assert_role(session, actor_id)
-    if actor.id != report.reporter_id and actor.role not in {"admin", "director"}:
+    if actor.id != report.reporter_id and not user_has_role(session, actor_id, "admin", "director"):
         raise PermissionError("No puedes modificar un informe de otro usuario.")
     return actor
 
@@ -44,6 +44,11 @@ def get_or_create_report(session: Session, match_id: int, reporter_id: int, acto
     user = session.get(User, reporter_id)
     if not match or not user or not user.active:
         raise ValueError("Partido o usuario no válido.")
+    # New 3.7 workflows cannot start an evaluation from a merely provisional fixture.
+    # Historical/published legacy reports remain readable because existing reports
+    # return above and old published data is not invalidated retroactively.
+    if match.status in {"draft", "scheduled"} and (match.schedule_status != "confirmed" or not match.kickoff_at):
+        raise ValueError("El horario del partido todavía no está confirmado. Administración debe fijar fecha y hora antes de iniciar el informe.")
     assignments = list(session.scalars(select(ReportAssignment).where(and_(ReportAssignment.match_id == match_id, ReportAssignment.status != "waived"))).all())
     if assignments and reporter_id not in {a.user_id for a in assignments} and actor_role not in {"admin", "director"}:
         raise PermissionError("Este partido no está asignado a tu usuario.")

@@ -25,14 +25,14 @@ from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_ST
 from repositories.users import assert_role, user_has_role
 from repositories.players import get_own_team
 
-def create_match(session: Session, *, season_id: int, competition_id: int, round_name: str, match_date: date, home_team_id: int, away_team_id: int, created_by: int, home_score: int | None = None, away_score: int | None = None, venue: str | None = None, home_formation: str | None = None, away_formation: str | None = None, status: str = "draft", report_due_at: datetime | None = None) -> Match:
+def create_match(session: Session, *, season_id: int, competition_id: int, round_name: str, match_date: date, home_team_id: int, away_team_id: int, created_by: int, home_score: int | None = None, away_score: int | None = None, venue: str | None = None, home_formation: str | None = None, away_formation: str | None = None, status: str = "draft", report_due_at: datetime | None = None, kickoff_at: datetime | None = None, schedule_status: str | None = None) -> Match:
     assert_role(session, created_by, "admin")
     if home_team_id == away_team_id:
         raise ValueError("Los equipos local y visitante deben ser diferentes.")
-    item = Match(season_id=season_id, competition_id=competition_id, round_name=round_name.strip(), match_date=match_date, home_team_id=home_team_id, away_team_id=away_team_id, home_score=home_score, away_score=away_score, venue=venue, home_formation=home_formation, away_formation=away_formation, status=status, report_due_at=report_due_at, created_by=created_by)
+    item = Match(season_id=season_id, competition_id=competition_id, round_name=round_name.strip(), match_date=match_date, kickoff_at=kickoff_at, schedule_status=schedule_status or ("confirmed" if kickoff_at else "provisional"), window_start=None, window_end=None, home_team_id=home_team_id, away_team_id=away_team_id, home_score=home_score, away_score=away_score, venue=venue, home_formation=home_formation, away_formation=away_formation, status=status, report_due_at=report_due_at, created_by=created_by)
     session.add(item)
     session.flush()
-    audit(session, created_by, "create_match", "match", item.id, after=_snapshot(item, ["round_name", "match_date", "home_team_id", "away_team_id", "status"]))
+    audit(session, created_by, "create_match", "match", item.id, after=_snapshot(item, ["round_name", "match_date", "kickoff_at", "schedule_status", "home_team_id", "away_team_id", "status"]))
     return item
 
 
@@ -44,7 +44,7 @@ def update_match(session: Session, match_id: int, actor_id: int | None = None, e
         raise ValueError("Partido no encontrado.")
     if expected_revision is not None and item.revision != expected_revision:
         raise RuntimeError("El partido ha cambiado en otra sesión. Recarga antes de guardar.")
-    before = _snapshot(item, ["season_id", "competition_id", "round_name", "match_date", "home_team_id", "away_team_id", "home_score", "away_score", "venue", "home_formation", "away_formation", "status", "report_due_at", "revision"])
+    before = _snapshot(item, ["season_id", "competition_id", "round_name", "match_date", "window_start", "window_end", "kickoff_at", "schedule_status", "home_team_id", "away_team_id", "home_score", "away_score", "venue", "home_formation", "away_formation", "status", "report_due_at", "revision"])
     allowed = set(before) - {"revision"}
     for key, value in values.items():
         if key in allowed:

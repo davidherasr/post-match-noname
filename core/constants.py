@@ -83,11 +83,14 @@ PDF_MODES = {
 
 
 SCHEDULE_STATUSES = {
-    "window": "Fin de semana conocido",
-    "date_confirmed": "Fecha confirmada",
-    "confirmed": "Horario confirmado",
+    "provisional": "Fecha orientativa · horario pendiente",
+    "confirmed": "Fecha y hora confirmadas",
     "postponed": "Aplazado",
     "cancelled": "Suspendido",
+    # Estados heredados de 3.5/3.6. Se muestran como pendientes hasta que
+    # Administración confirme una hora real.
+    "window": "Fecha orientativa · horario pendiente",
+    "date_confirmed": "Fecha sin hora · pendiente",
 }
 
 SCOUT_MISSION_TYPES = {

@@ -5,9 +5,10 @@ from datetime import date, datetime, time, timedelta
 import pandas as pd
 import streamlit as st
 
-from core.calendar_import import parse_calendar_text
+from core.calendar_import import CALENDAR_PARSER_VERSION, parse_calendar_text
 from core.constants import ROLES, SCOUT_MISSION_TYPES, SCHEDULE_STATUSES
 from core.database import session_scope
+from core.schedule import is_schedule_confirmed
 from repositories import calendar as calendar_repo
 from repositories import planning as planning_repo
 from repositories import scouting as repo
@@ -38,14 +39,27 @@ def _fixture_table(matches, own_id: int | None) -> pd.DataFrame:
 
 def _admin_import(user: dict, season, competitions) -> None:
     st.markdown("### Importar calendario completo")
-    st.caption("Pega toda la liga. No hace falta conocer todavía la hora. Una sola confirmación crea o actualiza los partidos.")
+    st.caption(f"Importador {CALENDAR_PARSER_VERSION} · una sola fecha orientativa por jornada. Sin rangos. La hora queda pendiente hasta que Administración la confirme.")
     if not competitions:
         st.warning("Crea primero la competición en Base de datos.")
         return
     comp_id = st.selectbox("Competición", [c.id for c in competitions], format_func=lambda cid: next(c.name for c in competitions if c.id == cid), key="cal_import_comp")
-    example = "1;15-16/08/2026;La Bañeza;Laguna\n1;15-16/08/2026;No Name;Benavente\n2;22/08/2026;18:00;Laguna;No Name"
-    raw = st.text_area("Calendario", height=220, placeholder=example, help="Formatos: jornada;fin de semana;local;visitante o jornada;fecha;hora;local;visitante")
-    parsed, errors = parse_calendar_text(raw, default_year=season.start_date.year if season and season.start_date else date.today().year) if raw.strip() else ([], [])
+    example = "1;13/09/2026;La Bañeza;Laguna\n1;13/09/2026;No Name;Benavente\n8;01/11/2026;Laguna;No Name"
+    uploaded = st.file_uploader("O cargar archivo TXT", type=["txt"], key="cal_import_txt")
+    raw = st.text_area("Calendario", height=220, placeholder=example, help="Formato normal: jornada;fecha de jornada;local;visitante. Esa fecha es orientativa y NO confirma el día real. Si ya conoces el horario: jornada;fecha;hora;local;visitante.")
+    source_text = raw
+    if uploaded is not None:
+        try:
+            source_text = uploaded.getvalue().decode("utf-8-sig")
+            st.info(f"TXT cargado: {uploaded.name}")
+        except UnicodeDecodeError:
+            st.error("El TXT no está en UTF-8. Guárdalo como UTF-8 y vuelve a cargarlo.")
+            source_text = ""
+    parsed, errors = parse_calendar_text(source_text, default_year=season.start_date.year if season and season.start_date else date.today().year) if source_text.strip() else ([], [])
+    if source_text.strip():
+        c1, c2 = st.columns(2)
+        c1.metric("Partidos reconocidos", len(parsed))
+        c2.metric("Errores", len(errors))
     if parsed:
         st.dataframe(pd.DataFrame([{**r, "kickoff_at": r["kickoff_at"] or "Pendiente"} for r in parsed]), use_container_width=True, hide_index=True)
     if errors:
@@ -56,7 +70,7 @@ def _admin_import(user: dict, season, competitions) -> None:
         try:
             with session_scope() as session:
                 result = calendar_repo.import_fixtures(session, season_id=season.id, competition_id=comp_id, rows=parsed, actor_id=user["id"])
-            st.success(f"Calendario sincronizado: {result['created']} creados · {result['updated']} actualizados.")
+            st.success(f"Calendario sincronizado: {result['created']} creados · {result['updated']} actualizados. Los horarios ya confirmados se conservan si vuelves a importar el calendario.")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -77,20 +91,19 @@ def _admin_schedule(user: dict, season) -> None:
             a.caption(calendar_repo.schedule_label(m))
             b.metric("Prioridad", issue["urgency"])
             with st.form(f"schedule_{m.id}"):
+                st.caption("La fecha que vino del calendario es orientativa. Para activar informes/observaciones debes confirmar fecha y hora.")
                 d1, d2, d3 = st.columns(3)
-                definitive_date = d1.date_input("Fecha", value=m.match_date, key=f"date_{m.id}")
-                has_time = d2.checkbox("Hora confirmada", value=bool(m.kickoff_at), key=f"has_time_{m.id}")
-                kickoff_time = d2.time_input("Hora", value=m.kickoff_at.time() if m.kickoff_at else time(17, 0), disabled=not has_time, key=f"time_{m.id}")
+                definitive_date = d1.date_input("Fecha definitiva", value=m.kickoff_at.date() if m.kickoff_at else m.match_date, key=f"date_{m.id}")
+                kickoff_time = d2.time_input("Hora definitiva", value=m.kickoff_at.time() if m.kickoff_at else time(17, 0), key=f"time_{m.id}")
                 venue = d3.text_input("Campo", value=m.venue or "", key=f"venue_{m.id}")
-                save = st.form_submit_button("Confirmar programación", type="primary")
+                save = st.form_submit_button("Confirmar fecha y hora", type="primary")
             if save:
                 with session_scope() as session:
                     calendar_repo.update_schedule(
-                        session, m.id, user["id"], definitive_date=definitive_date,
-                        kickoff_at=datetime.combine(definitive_date, kickoff_time) if has_time else None,
-                        schedule_status="date_confirmed" if not has_time else "confirmed", venue=venue,
+                        session, m.id, user["id"],
+                        kickoff_at=datetime.combine(definitive_date, kickoff_time), venue=venue,
                     )
-                st.success("Horario actualizado.")
+                st.success("Fecha y hora confirmadas. El partido ya está operativo para informes y scouting.")
                 st.rerun()
 
 
@@ -129,7 +142,10 @@ def _calendar_actions(user: dict, match, own_id: int | None) -> None:
     with st.expander(f"Abrir · {_match_title(match)}", expanded=False):
         st.caption(calendar_repo.schedule_label(match))
         if user["role"] == "admin" and _is_own(match, own_id):
-            if st.button("Preparar postpartido desde este partido", key=f"prepare_{match.id}", use_container_width=True):
+            ready = is_schedule_confirmed(match)
+            if not ready:
+                st.warning("Horario pendiente: primero confirma fecha y hora para preparar el postpartido.")
+            if st.button("Preparar postpartido desde este partido", key=f"prepare_{match.id}", use_container_width=True, disabled=not ready):
                 st.session_state["postmatch_existing_match_id"] = match.id
                 st.session_state["main_navigation"] = "Nuevo postpartido"
                 st.rerun()
@@ -144,10 +160,13 @@ def _calendar_actions(user: dict, match, own_id: int | None) -> None:
                 } for m in existing_missions]), hide_index=True, use_container_width=True)
             _mission_form(user, match)
         if user["role"] == "scout":
-            if st.button("Observar este partido", key=f"observe_{match.id}", type="primary", use_container_width=True):
+            ready = is_schedule_confirmed(match)
+            if st.button("Observar este partido", key=f"observe_{match.id}", type="primary", use_container_width=True, disabled=not ready):
                 st.session_state["scout_match_id"] = match.id
                 st.session_state["main_navigation"] = "Misiones"
                 st.rerun()
+            if not ready:
+                st.caption("Disponible para planificar, pero la observación se activa cuando Administración confirme el horario.")
 
 
 def render(user: dict) -> None:

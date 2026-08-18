@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.7.0 · Calendario operativo
+
+- El calendario usa una sola fecha federativa orientativa; se eliminan rangos del flujo normal.
+- Nuevo estado `provisional`: fecha de jornada conocida, horario pendiente.
+- Fecha + hora son obligatorias para activar postpartido, informe nuevo y observación Scout.
+- Las misiones DD pueden planificarse antes del horario y sincronizan `due_at` al confirmarlo.
+- Reimportar calendario provisional preserva horarios ya confirmados.
+- Postpartido manual registra `kickoff_at`.
+- Corrección de autorización multirol en informes.
+- Observación Scout recupera rol, recomendación y criterios guardados, y el cambio de rol refresca criterios inmediatamente.
+- Acceso directo desde Dashboard Admin a incidencias de horario.
+- Sin migración nueva: Alembic permanece en `0006_player_report_360_3_6`.
+
+## 3.6.2 · Calendar importer compatibility
+
+- Admite ventanas completas `DD/MM/YYYY-DD/MM/YYYY` en cualquier mes.
+- Admite variante `DD/MM-DD/MM/YYYY`.
+- Identificador visible `Importador 3.6.2` en Calendario.
+- Carga directa de TXT UTF-8 y contadores de reconocidos/errores.
+- Sin migración de base de datos.
+
+## 3.6.2 · Calendar window hotfix
+
+- Corrige la importación de fines de semana que cruzan de mes o de año.
+- Nuevo formato recomendado: `31/10/2026-01/11/2026`.
+- Mantiene el formato compacto `15-16/08/2026` cuando ambos días pertenecen al mismo mes.
+- Una ventana de dos días sigue guardándose como `Horario pendiente`, nunca como fecha definitiva.
+- No hay cambios de base de datos ni nueva migración.
+
 ## 3.6.0 · Player Report 360
 
 - Nuevo Player Report 360 en pantalla para jugadores observados/ojeados.
