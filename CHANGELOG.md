@@ -1,3 +1,11 @@
+## 4.0.7 · XI observado sin jugadores duplicados
+
+- El selector de cada posición del XI es ahora reactivo: al elegir un jugador desaparece inmediatamente de los desplegables de las demás posiciones.
+- El jugador ya asignado a una posición permanece visible únicamente en su propio selector, para poder corregirlo sin perder el estado.
+- Se elimina el formulario agrupado del editor de XI para que Streamlit refresque las opciones en cada selección.
+- Se mantiene una segunda protección en repositorio: aunque llegara una entrada inconsistente, no se puede guardar un mismo jugador dos veces en el XI.
+- No hay cambios de base de datos ni migración nueva: el head sigue siendo `0010_core_workspace_schema_repair_4_0_4`.
+
 ## 4.0.5 · Navegación segura en Streamlit y Alembic PostgreSQL
 
 - Corrige `StreamlitWidgetAlreadyInstantiatedError` al abrir partidos/tareas desde Inicio.
@@ -284,3 +292,11 @@
 - Aviso específico cuando se usa el host directo `db.<project>.supabase.co`, recomendando Session pooler en despliegues sin IPv6.
 - Suite de pruebas estabilizada cerrando correctamente los engines SQLite de cada test.
 - No cambia el esquema respecto a 4.0.0: Alembic continúa en `0008_match_study_4_0`.
+
+## 4.0.7 · Convocatoria clara y Scouting operativo
+
+- Federación puede distinguir TITULARES y SUPLENTES sin inferencias por orden.
+- XI y banquillo se gestionan juntos cuando existe formación conocida.
+- Desplegables de XI y Scouting diferencian TIT / SUP / PLANTILLA.
+- Scouting explica claramente Barrido rápido, Observación individual y Dossier completo.
+- Sin cambios de esquema; mantiene Alembic en 0010.

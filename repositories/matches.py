@@ -206,8 +206,13 @@ def update_match_study_context(
     return match
 
 
-def import_federation_roster_text(session: Session, *, team_id: int, season_id: int, actor_id: int, text: str) -> dict:
-    """Import/update a team-season roster from pasted federation text."""
+def import_federation_roster_text(session: Session, *, team_id: int, season_id: int, actor_id: int, text: str, match_id: int | None = None) -> dict:
+    """Import/update a team-season roster from pasted federation text.
+
+    If the text explicitly separates TITULARES/SUPLENTES and ``match_id`` is
+    supplied, those labels are also stored as match participations. Plain lists
+    without headings remain roster-only: order never implies starter status.
+    """
     assert_role(session, actor_id, "scout", "director", "admin")
     from repositories import players as players_repo
     parsed = parse_federation_roster(text)
@@ -217,6 +222,7 @@ def import_federation_roster_text(session: Session, *, team_id: int, season_id: 
     by_name = {normalize_name(r.player.full_name): r.player for r in existing}
     created = linked = 0
     ambiguous: list[str] = []
+    resolved: list[tuple[object, Player]] = []
     for row in parsed:
         norm = normalize_name(row.name)
         player = by_name.get(norm)
@@ -234,15 +240,37 @@ def import_federation_roster_text(session: Session, *, team_id: int, season_id: 
             player.primary_position = row.position
         players_repo.assign_player_to_roster(session, int(team_id), int(season_id), player.id, row.shirt_number, actor_id)
         by_name[norm] = player
+        resolved.append((row, player))
         linked += 1
     if ambiguous:
         raise ValueError("Hay nombres ambiguos que no se han importado: " + ", ".join(ambiguous) + ". Revísalos en Jugadores/Datos antes de repetir.")
-    audit(session, actor_id, "import_federation_roster", "team", int(team_id), detail=f"season={season_id}; rows={linked}; created={created}")
-    return {"rows": linked, "created_players": created}
+
+    starters = [(row, player) for row, player in resolved if getattr(row, "squad_role", None) == "starter"]
+    substitutes = [(row, player) for row, player in resolved if getattr(row, "squad_role", None) == "substitute"]
+    if len(starters) > 11:
+        raise ValueError("La lista marca más de 11 titulares. Corrige el bloque TITULARES.")
+    if match_id is not None and (starters or substitutes):
+        rows = []
+        for idx, (row, player) in enumerate(starters):
+            rows.append({
+                "player_id": player.id, "shirt_number": row.shirt_number, "starter": True,
+                "position": row.position, "minute_in": 0, "minute_out": 90,
+                "captain": False, "selected": True, "order_index": idx,
+            })
+        for idx, (row, player) in enumerate(substitutes):
+            rows.append({
+                "player_id": player.id, "shirt_number": row.shirt_number, "starter": False,
+                "position": row.position, "minute_in": 0, "minute_out": 0,
+                "captain": False, "selected": True, "order_index": idx,
+            })
+        replace_participations(session, int(match_id), int(team_id), rows, int(actor_id))
+
+    audit(session, actor_id, "import_federation_roster", "team", int(team_id), detail=f"season={season_id}; rows={linked}; created={created}; starters={len(starters)}; substitutes={len(substitutes)}")
+    return {"rows": linked, "created_players": created, "starters": len(starters), "substitutes": len(substitutes)}
 
 
-def save_known_formation_lineup(session: Session, *, match_id: int, team_id: int, actor_id: int, formation: str, player_ids: Sequence[int | None]) -> list[Participation]:
-    """Save a (possibly partial) observed XI against formation slots."""
+def save_known_formation_lineup(session: Session, *, match_id: int, team_id: int, actor_id: int, formation: str, player_ids: Sequence[int | None], substitute_ids: Sequence[int] | None = None) -> list[Participation]:
+    """Save a (possibly partial) observed XI against formation slots plus bench."""
     slots = slots_for(formation)
     if not slots:
         raise ValueError("Formación no soportada para campograma.")
@@ -264,6 +292,20 @@ def save_known_formation_lineup(session: Session, *, match_id: int, team_id: int
         rows.append({
             "player_id": int(pid), "shirt_number": item.shirt_number if item else None,
             "starter": True, "position": slot.code, "minute_in": 0, "minute_out": 90,
+            "captain": False, "selected": True, "order_index": idx,
+        })
+    subs = [int(pid) for pid in (substitute_ids or []) if pid]
+    if set(chosen) & set(subs):
+        raise ValueError("Un jugador no puede ser titular y suplente a la vez.")
+    if len(subs) != len(set(subs)):
+        raise ValueError("Hay suplentes duplicados.")
+    for idx, pid in enumerate(subs):
+        item = roster.get(pid)
+        if not item:
+            raise ValueError("Todos los suplentes deben pertenecer a la plantilla cargada.")
+        rows.append({
+            "player_id": pid, "shirt_number": item.shirt_number, "starter": False,
+            "position": item.player.primary_position, "minute_in": 0, "minute_out": 0,
             "captain": False, "selected": True, "order_index": idx,
         })
     if not rows:

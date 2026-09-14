@@ -8,7 +8,7 @@ import streamlit as st
 
 from core.clock import local_today
 from core.constants import FORMATIONS, POSITIONS
-from core.formations import slots_for
+from core.formations import available_lineup_player_ids, slots_for
 from core.database import session_scope
 from core.permissions import can_admin, can_direct, can_report, can_scout
 from core.presentation import SCOUT_LEVELS, status_badge
@@ -77,13 +77,23 @@ def _federation_roster_editor(match, team, user: dict, *, side: str) -> None:
     if not can_scout(user):
         return
     with st.expander("Actualizar plantilla desde Federación", expanded=False):
-        st.caption("Una línea por jugador. Admite `7 Mario López`, `7;Mario López;DC` o solo el nombre. No se inventan dorsal ni posición.")
-        text=st.text_area("Plantilla Federación",height=190,key=f"fed_roster_40_{match.id}_{team.id}_{side}",placeholder="1;Nombre portero;POR\n2;Nombre jugador;DFC\n...",label_visibility="collapsed")
+        st.caption("Pega la lista de Federación. Si sabes convocatoria, separa con `TITULARES` y `SUPLENTES`. Si no, pega solo `dorsal;nombre` y quedará como plantilla sin inventar quién jugó.")
+        text=st.text_area(
+            "Plantilla / convocatoria Federación",height=230,key=f"fed_roster_40_{match.id}_{team.id}_{side}",
+            placeholder="TITULARES\n1;Portero titular;POR\n2;Jugador titular;DFC\n...\n\nSUPLENTES\n12;Portero suplente;POR\n14;Jugador suplente;MC",
+            label_visibility="collapsed",
+        )
+        st.caption("También admite `T;7;Nombre;DC` y `S;12;Nombre;POR`. Nunca se toma 'las primeras 11 líneas' como titulares si no lo indicas.")
         if st.button("Guardar plantilla",type="primary",use_container_width=True,key=f"fed_save_40_{match.id}_{team.id}_{side}"):
             try:
                 with session_scope() as session:
-                    result=matches_repo.import_federation_roster_text(session,team_id=team.id,season_id=match.season_id,actor_id=user["id"],text=text)
-                st.success(f"Plantilla actualizada: {result['rows']} jugadores · {result['created_players']} nuevos.")
+                    result=matches_repo.import_federation_roster_text(
+                        session,team_id=team.id,season_id=match.season_id,actor_id=user["id"],text=text,match_id=match.id
+                    )
+                detail=f"Plantilla actualizada: {result['rows']} jugadores · {result['created_players']} nuevos"
+                if result.get("starters") or result.get("substitutes"):
+                    detail += f" · {result.get('starters',0)} titulares · {result.get('substitutes',0)} suplentes"
+                st.success(detail + ".")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -91,10 +101,34 @@ def _federation_roster_editor(match, team, user: dict, *, side: str) -> None:
 
 def _render_roster_only(match, team, user: dict, *, side: str) -> None:
     st.markdown(f"#### {team.name}")
-    st.caption("Formación desconocida · plantilla disponible ordenada por dorsal")
     with session_scope() as session:
         roster=players_repo.get_roster(session,team.id,match.season_id)
-    if roster:
+        parts=matches_repo.get_participations(session,match.id,team.id)
+    starters=[p for p in parts if p.starter]
+    substitutes=[p for p in parts if not p.starter]
+    if starters or substitutes:
+        st.caption("Formación desconocida · convocatoria del partido sí identificada")
+        if starters:
+            st.markdown(f"**🟢 Titulares ({len(starters)})**")
+            st.dataframe(pd.DataFrame([{
+                "Dorsal": p.shirt_number if p.shirt_number is not None else "—",
+                "Jugador": _player_name(p.player),
+                "Pos.": p.position or p.player.primary_position or "—",
+            } for p in starters]),use_container_width=True,hide_index=True)
+        if substitutes:
+            st.markdown(f"**🟡 Suplentes ({len(substitutes)})**")
+            st.dataframe(pd.DataFrame([{
+                "Dorsal": p.shirt_number if p.shirt_number is not None else "—",
+                "Jugador": _player_name(p.player),
+                "Pos.": p.position or p.player.primary_position or "—",
+            } for p in substitutes]),use_container_width=True,hide_index=True)
+        roster_part_ids={p.player_id for p in parts}
+        others=[r for r in roster if r.player_id not in roster_part_ids]
+        if others:
+            with st.expander(f"⚪ Resto de plantilla ({len(others)})",expanded=False):
+                st.dataframe(_roster_table(others),use_container_width=True,hide_index=True)
+    elif roster:
+        st.caption("Formación y convocatoria desconocidas · plantilla de temporada ordenada por dorsal")
         st.dataframe(_roster_table(roster),use_container_width=True,hide_index=True)
     else:
         st.info("Todavía no hay plantilla cargada para este equipo en la temporada.")
@@ -106,7 +140,13 @@ def _formation_lineup_editor(match, team, user: dict, *, side: str, formation: s
         roster=players_repo.get_roster(session,team.id,match.season_id)
         parts=matches_repo.get_participations(session,match.id,team.id)
     slots=slots_for(formation)
-    by_order={p.order_index:p for p in parts if p.starter}
+    raw_by_order={p.order_index:p for p in parts if p.starter}
+    # Only reuse slot positions when they were previously saved against this
+    # exact formation. A pasted TITULARES list does not imply tactical order.
+    by_order={
+        idx: part for idx, part in raw_by_order.items()
+        if 0 <= idx < len(slots) and part.position == slots[idx].code
+    }
     pitch_rows=[]
     for idx,slot in enumerate(slots):
         part=by_order.get(idx)
@@ -121,24 +161,69 @@ def _formation_lineup_editor(match, team, user: dict, *, side: str, formation: s
             _federation_roster_editor(match,team,user,side=side)
             return
         player_map={r.player_id:r for r in roster}
-        choices=[None]+list(player_map)
-        selected=[]
-        with st.form(f"formation_xi_40_{match.id}_{team.id}_{side}"):
-            for idx,slot in enumerate(slots):
-                default=by_order.get(idx).player_id if by_order.get(idx) and by_order.get(idx).player_id in player_map else None
-                index=choices.index(default) if default in choices else 0
-                pid=st.selectbox(
-                    f"{slot.label} · {slot.code}",choices,index=index,
-                    format_func=lambda x:"— Sin identificar —" if x is None else f"#{player_map[x].shirt_number} · {_player_name(player_map[x].player)}" if player_map[x].shirt_number is not None else _player_name(player_map[x].player),
-                    key=f"formation_slot_40_{match.id}_{team.id}_{idx}",
-                )
-                selected.append(pid)
-            save=st.form_submit_button("Guardar XI",type="primary",use_container_width=True)
+        match_status={p.player_id:("starter" if p.starter else "substitute") for p in parts}
+        roster_ids=sorted(
+            player_map,
+            key=lambda pid: (
+                {"starter":0,"substitute":1}.get(match_status.get(pid),2),
+                player_map[pid].shirt_number if player_map[pid].shirt_number is not None else 999,
+                _player_name(player_map[pid].player),
+            ),
+        )
+        existing_sub_ids=[p.player_id for p in parts if not p.starter and p.player_id in player_map]
+
+        def lineup_option_label(pid):
+            if pid is None:
+                return "— Sin identificar —"
+            item=player_map[pid]
+            badge="🟢 TIT" if match_status.get(pid)=="starter" else "🟡 SUP" if match_status.get(pid)=="substitute" else "⚪ PLANTILLA"
+            dorsal=f"#{item.shirt_number} · " if item.shirt_number is not None else ""
+            return f"{badge} · {dorsal}{_player_name(item.player)}"
+        slot_keys=[f"formation_slot_40_{match.id}_{team.id}_{formation}_{idx}" for idx in range(len(slots))]
+
+        # Inicializa todos los slots antes de crear los widgets. Así, al cambiar una
+        # posición Streamlit puede recalcular inmediatamente las opciones del resto.
+        for idx,key in enumerate(slot_keys):
+            default=by_order.get(idx).player_id if by_order.get(idx) and by_order.get(idx).player_id in player_map else None
+            if key not in st.session_state or (st.session_state.get(key) is not None and st.session_state.get(key) not in player_map):
+                st.session_state[key]=default
+
+        st.caption("Cada jugador seleccionado desaparece automáticamente del resto de posiciones del XI.")
+        for idx,slot in enumerate(slots):
+            key=slot_keys[idx]
+            current=st.session_state.get(key)
+            slot_values=[st.session_state.get(k) for k in slot_keys]
+            available_ids=available_lineup_player_ids(roster_ids,slot_values,idx)
+            choices=[None]+available_ids
+            if current is not None and current not in choices and current in player_map:
+                choices.append(current)
+            index=choices.index(current) if current in choices else 0
+            st.selectbox(
+                f"{slot.label} · {slot.code}",choices,index=index,
+                format_func=lineup_option_label,
+                key=key,
+            )
+
+        selected=[st.session_state.get(key) for key in slot_keys]
+        starter_ids={pid for pid in selected if pid is not None}
+        bench_choices=[pid for pid in roster_ids if pid not in starter_ids]
+        bench_default=[pid for pid in existing_sub_ids if pid in bench_choices]
+        substitute_ids=st.multiselect(
+            "🟡 Suplentes / banquillo",bench_choices,default=bench_default,
+            format_func=lineup_option_label,
+            key=f"formation_bench_40_{match.id}_{team.id}_{formation}_{side}",
+            help="No hace falta conocer la posición táctica de los suplentes. Quedan asociados a este partido y diferenciados del XI.",
+        )
+        st.caption(f"XI identificado: {len(starter_ids)}/11 · Suplentes: {len(substitute_ids)}")
+        save=st.button("Guardar XI y banquillo",type="primary",use_container_width=True,key=f"save_formation_xi_40_{match.id}_{team.id}_{formation}_{side}")
         if save:
             try:
                 with session_scope() as session:
-                    matches_repo.save_known_formation_lineup(session,match_id=match.id,team_id=team.id,actor_id=user["id"],formation=formation,player_ids=selected)
-                st.success("XI observado guardado.")
+                    matches_repo.save_known_formation_lineup(
+                        session,match_id=match.id,team_id=team.id,actor_id=user["id"],formation=formation,
+                        player_ids=selected,substitute_ids=substitute_ids,
+                    )
+                st.success("XI y banquillo observados guardados.")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -237,6 +322,23 @@ def _scouting_form(match, user: dict, players: list) -> None:
         st.info("No hay jugadores asociados a las plantillas de este partido.")
         return
     player_map = {p.id: p for p in players}
+    with session_scope() as session:
+        all_parts=matches_repo.get_participations(session,match.id)
+        all_roster=list(players_repo.get_roster(session,match.home_team_id,match.season_id))+list(players_repo.get_roster(session,match.away_team_id,match.season_id))
+    participant_status={p.player_id:("starter" if p.starter else "substitute") for p in all_parts}
+    participant_shirt={p.player_id:p.shirt_number for p in all_parts}
+    roster_shirt={r.player_id:r.shirt_number for r in all_roster}
+
+    def scout_player_label(pid: int) -> str:
+        player=player_map[pid]
+        status=participant_status.get(pid)
+        badge="🟢 TIT" if status=="starter" else "🟡 SUP" if status=="substitute" else "⚪ PLANTILLA"
+        shirt=participant_shirt.get(pid)
+        if shirt is None:
+            shirt=roster_shirt.get(pid)
+        dorsal=f"#{shirt} · " if shirt is not None else ""
+        return f"{badge} · {dorsal}{player.display_name or player.full_name}"
+
     # Neutral matches can easily contain 35-50 known players. Filter by team
     # before asking the Scout to select a player; this keeps the daily workflow fast.
     with session_scope() as session:
@@ -261,10 +363,19 @@ def _scouting_form(match, user: dict, players: list) -> None:
         if not player_map:
             st.info("No hay jugadores cargados para ese equipo. Añade primero la plantilla de Federación en Estudio del partido.")
             return
-    level_label = st.segmented_control("Nivel", SCOUT_LEVELS, default="Barrido", key=f"scout_level_38_{match.id}") or "Barrido"
-    level = {"Barrido":"scan", "Observación":"observation", "Dossier":"dossier"}[level_label]
+    st.markdown("#### ¿Qué tipo de seguimiento quieres hacer?")
+    scout_modes=["⚡ Barrido rápido","👁 Observación individual","📁 Dossier completo"]
+    mode=st.segmented_control("Tipo de seguimiento",scout_modes,default=scout_modes[0],key=f"scout_level_38_{match.id}",label_visibility="collapsed") or scout_modes[0]
+    level={scout_modes[0]:"scan",scout_modes[1]:"observation",scout_modes[2]:"dossier"}[mode]
+    if level=="scan":
+        st.caption("⚡ **Barrido rápido:** compara varios jugadores del partido con nota + apunte corto. Úsalo para detectar quién merece volver a verse.")
+    elif level=="observation":
+        st.caption("👁 **Observación individual:** un jugador, posición, rendimiento y encaje con el Modelo No Name.")
+    else:
+        st.caption("📁 **Dossier completo:** evaluación profunda para jugadores que ya están en seguimiento: nivel, proyección, fortalezas y riesgos.")
     if level == "scan":
-        selected = st.multiselect("Jugadores", list(player_map), format_func=lambda pid: player_map[pid].display_name or player_map[pid].full_name, key=f"scan_ids_38_{match.id}")
+        ordered_ids=sorted(player_map, key=lambda pid: ({"starter":0,"substitute":1}.get(participant_status.get(pid),2), (participant_shirt.get(pid) if participant_shirt.get(pid) is not None else 999), (player_map[pid].display_name or player_map[pid].full_name)))
+        selected = st.multiselect("Jugadores", ordered_ids, format_func=scout_player_label, key=f"scan_ids_38_{match.id}")
         if not selected:
             st.caption("Selecciona uno o varios jugadores para un barrido rápido.")
             return
@@ -284,7 +395,8 @@ def _scouting_form(match, user: dict, players: list) -> None:
             if count: st.rerun()
         return
 
-    pid=st.selectbox("Jugador",list(player_map),format_func=lambda x:player_map[x].display_name or player_map[x].full_name,key=f"scout_player_38_{match.id}_{level}")
+    ordered_ids=sorted(player_map, key=lambda pid: ({"starter":0,"substitute":1}.get(participant_status.get(pid),2), (participant_shirt.get(pid) if participant_shirt.get(pid) is not None else 999), (player_map[pid].display_name or player_map[pid].full_name)))
+    pid=st.selectbox("Jugador",ordered_ids,format_func=scout_player_label,key=f"scout_player_38_{match.id}_{level}")
     player=player_map[pid]
     with session_scope() as session:
         roles=planning_repo.list_model_roles(session)

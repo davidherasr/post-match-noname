@@ -118,3 +118,17 @@ def slots_for(formation: str | None) -> list[FormationSlot]:
 
 def position_codes_for(formation: str | None) -> list[str]:
     return [slot.code for slot in slots_for(formation)]
+
+
+def available_lineup_player_ids(roster_ids: list[int], slot_values: list[int | None], slot_index: int) -> list[int]:
+    """Return roster ids still available for one XI slot.
+
+    A player selected in another position is hidden, while the current slot keeps
+    its own value so Streamlit can preserve the selection safely across reruns.
+    """
+    current = slot_values[slot_index] if 0 <= slot_index < len(slot_values) else None
+    used_elsewhere = {
+        pid for idx, pid in enumerate(slot_values)
+        if idx != slot_index and pid is not None
+    }
+    return [pid for pid in roster_ids if pid not in used_elsewhere or pid == current]

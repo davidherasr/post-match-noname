@@ -1,4 +1,4 @@
-# No Name PostMatch 4.0.5
+# No Name PostMatch 4.0.7
 
 Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
 
@@ -14,9 +14,11 @@ Los roles son capacidades acumulativas. No existe Perfil activo.
 
 
 
-## 4.0.5 · Hotfix de esquema completo
+## 4.0.7 · XI observado reactivo
 
-4.0.5 corrige el `ProgrammingError` observado en Inicio después de 4.0.3. El problema era que la comprobación de esquema anterior solo cubría columnas recientes mientras SQLAlchemy hidrataba entidades completas. La revisión 0010 repara campos opcionales/defaultables del núcleo y el Home carga únicamente las columnas que realmente necesita.
+En el editor de alineaciones con formación conocida, cada jugador seleccionado se elimina automáticamente de los desplegables de las demás posiciones. Esto hace más rápida la identificación del XI y evita duplicados desde la propia interfaz. El botón **Guardar XI** conserva además la validación de servidor que impide guardar un jugador dos veces.
+
+4.0.7 no introduce cambios de esquema. Mantiene el mismo Supabase y el head Alembic `0010_core_workspace_schema_repair_4_0_4`.
 
 ## 4.0.3 · Hotfix de esquema real
 
@@ -42,11 +44,11 @@ Para la prueba de Jornada 1 consulta `PRUEBA_REAL_J1.md`.
 
 ## Datos y Supabase
 
-4.0.3 mantiene el mismo Supabase, `DATABASE_URL` y Secrets. El head Alembic pasa a `0009_schema_repair_4_0_3`, una reparación aditiva/no destructiva sobre `0008_match_study_4_0`. Todos los datos existentes se conservan y no se incluyen datos demo.
+4.0.7 mantiene el mismo Supabase, `DATABASE_URL` y Secrets. El head Alembic actual es `0010_core_workspace_schema_repair_4_0_4`; 4.0.7 no añade una migración nueva. Todos los datos existentes se conservan y no se incluyen datos demo.
 
 ## Validación
 
-Consulta `VALIDACION_4_0_3.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
+Consulta `VALIDACION_4_0_6.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
 ## 4.0.5 · Hotfix de navegación
 
 4.0.5 corrige la navegación desde tarjetas y tareas: las vistas ya no escriben directamente en el estado del widget `main_navigation` después de que Streamlit haya creado el radio lateral. La navegación se solicita mediante un estado pendiente y se aplica en el siguiente rerun antes de construir el widget. También protege PostgreSQL ampliando automáticamente la columna de versión de Alembic a 128 caracteres.
