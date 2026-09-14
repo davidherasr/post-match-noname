@@ -5,7 +5,7 @@ from datetime import date, datetime, time
 import re
 
 from sqlalchemy import and_, asc, case as sa_case, desc, func, or_, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, load_only
 
 from core.clock import local_today
 
@@ -147,8 +147,22 @@ def load_match_workspace(session: Session, *, match_id: int, user_id: int | None
 
 def _next_own_match(session: Session, own_team_id: int, season_id: int) -> Match | None:
     today = local_today()
+    # Home needs only fixture identity/schedule/result and the two team names.
+    # Do not hydrate every Match/Competition column here: production databases
+    # upgraded across many historical releases may temporarily contain optional
+    # legacy gaps, and an unnecessary joinedload used to turn those into a hard
+    # startup ProgrammingError.
     return session.scalar(
-        select(Match).options(joinedload(Match.home_team), joinedload(Match.away_team), joinedload(Match.competition))
+        select(Match).options(
+            load_only(
+                Match.id, Match.season_id, Match.round_name, Match.match_date,
+                Match.kickoff_at, Match.schedule_status, Match.home_team_id,
+                Match.away_team_id, Match.home_score, Match.away_score,
+                Match.status, Match.deleted_at,
+            ),
+            joinedload(Match.home_team).load_only(Team.id, Team.name),
+            joinedload(Match.away_team).load_only(Team.id, Team.name),
+        )
         .where(
             Match.season_id == int(season_id), Match.deleted_at.is_(None), Match.status != "archived",
             Match.match_date >= today,

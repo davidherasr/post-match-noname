@@ -1,3 +1,10 @@
+## 4.0.4 · Reparación completa del workspace de Inicio
+
+- Nueva migración no destructiva `0010_core_workspace_schema_repair_4_0_4`.
+- El contrato de esquema comprueba todas las columnas ORM de Match/Team/Competition/Season.
+- Inicio usa una consulta ligera y deja de hidratar datos que no necesita.
+- Se corrige el caso en que 4.0.3 podía validar el esquema y aun así fallar después con `ProgrammingError`.
+
 ## 4.0.3 · Reparación de esquema real en Supabase
 
 - Nueva migración no destructiva `0009_schema_repair_4_0_3`.

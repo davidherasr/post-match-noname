@@ -34,11 +34,22 @@ class DatabaseSchemaError(RuntimeError):
 # Keeping this contract explicit prevents an ORM SELECT from being the first
 # place where a stale Supabase schema is discovered.
 _REQUIRED_COLUMNS: dict[str, set[str]] = {
+    # Home/Jornada ORM paths load these mapped entities.  The full mapped
+    # column set is checked, not only fields introduced by recent migrations.
     "matches": {
+        "id", "season_id", "competition_id", "round_name", "match_date",
         "window_start", "window_end", "kickoff_at", "schedule_status", "fixture_type",
-        "video_available", "video_reference", "home_formation_known",
-        "away_formation_known", "study_notes",
+        "home_team_id", "away_team_id", "home_score", "away_score", "venue",
+        "home_formation", "away_formation", "video_available", "video_reference",
+        "home_formation_known", "away_formation_known", "study_notes", "status",
+        "report_due_at", "revision", "deleted_at", "created_by", "created_at", "updated_at",
     },
+    "teams": {
+        "id", "name", "short_name", "country", "logo_b64", "logo_mime",
+        "is_own_team", "active", "created_at", "updated_at",
+    },
+    "competitions": {"id", "name", "country", "active", "updated_at"},
+    "seasons": {"id", "name", "start_date", "end_date", "active", "updated_at"},
     "player_season_decisions": {"current_level", "potential_score", "criteria_json"},
     "scout_observations": {"observation_level", "model_role_id", "legacy_review_id"},
 }

@@ -1,4 +1,4 @@
-# No Name PostMatch 4.0.3
+# No Name PostMatch 4.0.4
 
 Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
 
@@ -12,6 +12,11 @@ Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva 
 
 Los roles son capacidades acumulativas. No existe Perfil activo.
 
+
+
+## 4.0.4 · Hotfix de esquema completo
+
+4.0.4 corrige el `ProgrammingError` observado en Inicio después de 4.0.3. El problema era que la comprobación de esquema anterior solo cubría columnas recientes mientras SQLAlchemy hidrataba entidades completas. La revisión 0010 repara campos opcionales/defaultables del núcleo y el Home carga únicamente las columnas que realmente necesita.
 
 ## 4.0.3 · Hotfix de esquema real
 
