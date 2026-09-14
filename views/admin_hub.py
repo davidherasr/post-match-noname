@@ -5,6 +5,8 @@ import re
 import pandas as pd
 import streamlit as st
 
+from core.navigation import request_navigation
+
 from core.database import session_scope
 from core.permissions import can_admin
 from repositories import data_quality as quality_repo
@@ -36,7 +38,7 @@ def _real_data_status(user: dict) -> None:
             a.caption(calendar_repo.schedule_label(match))
             if b.button("Abrir", type="primary", use_container_width=True, key=f"admin_ready_match39_{match.id}"):
                 st.session_state["workspace_match_id"] = match.id
-                st.session_state["main_navigation"] = "Jornada"
+                request_navigation("Jornada")
                 st.rerun()
     for warning in data.get("warnings") or []:
         st.warning(warning)
@@ -55,7 +57,7 @@ def _data_search(user: dict) -> None:
             with st.container(border=True):
                 a,b=st.columns([5,1]); a.markdown(f"**{p.full_name}** · {p.primary_position or '-'}"); a.caption(f"ID {p.id}")
                 if b.button("Abrir",key=f"admin_data_player38_{p.id}",use_container_width=True):
-                    st.session_state["workspace_player_id"]=p.id; st.session_state["main_navigation"]="Jugadores"; st.rerun()
+                    st.session_state["workspace_player_id"]=p.id; request_navigation("Jugadores"); st.rerun()
         for t in result.get("teams",[]):
             with st.container(border=True):
                 st.markdown(f"**{t.name}**"); st.caption(f"ID {t.id}")

@@ -109,7 +109,7 @@ def test_calendar_ui_no_longer_navigates_to_legacy_modules():
     source = Path("views/calendar.py").read_text(encoding="utf-8")
     assert 'main_navigation"] = "Nuevo postpartido"' not in source
     assert 'main_navigation"] = "Misiones"' not in source
-    assert 'main_navigation"] = "Jornada"' in source
+    assert 'request_navigation("Jornada")' in source
 
 
 def test_reports_use_cumulative_capabilities_not_primary_role():

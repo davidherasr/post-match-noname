@@ -1,4 +1,4 @@
-# No Name PostMatch 4.0.4
+# No Name PostMatch 4.0.5
 
 Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
 
@@ -14,9 +14,9 @@ Los roles son capacidades acumulativas. No existe Perfil activo.
 
 
 
-## 4.0.4 · Hotfix de esquema completo
+## 4.0.5 · Hotfix de esquema completo
 
-4.0.4 corrige el `ProgrammingError` observado en Inicio después de 4.0.3. El problema era que la comprobación de esquema anterior solo cubría columnas recientes mientras SQLAlchemy hidrataba entidades completas. La revisión 0010 repara campos opcionales/defaultables del núcleo y el Home carga únicamente las columnas que realmente necesita.
+4.0.5 corrige el `ProgrammingError` observado en Inicio después de 4.0.3. El problema era que la comprobación de esquema anterior solo cubría columnas recientes mientras SQLAlchemy hidrataba entidades completas. La revisión 0010 repara campos opcionales/defaultables del núcleo y el Home carga únicamente las columnas que realmente necesita.
 
 ## 4.0.3 · Hotfix de esquema real
 
@@ -47,3 +47,6 @@ Para la prueba de Jornada 1 consulta `PRUEBA_REAL_J1.md`.
 ## Validación
 
 Consulta `VALIDACION_4_0_3.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
+## 4.0.5 · Hotfix de navegación
+
+4.0.5 corrige la navegación desde tarjetas y tareas: las vistas ya no escriben directamente en el estado del widget `main_navigation` después de que Streamlit haya creado el radio lateral. La navegación se solicita mediante un estado pendiente y se aplica en el siguiente rerun antes de construir el widget. También protege PostgreSQL ampliando automáticamente la columna de versión de Alembic a 128 caracteres.

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.navigation import request_navigation
+
 from core.constants import POSITIONS
 from core.database import session_scope
 from core.permissions import can_direct
@@ -13,7 +15,7 @@ from ui.styles import page_header
 
 def _open_player(pid: int) -> None:
     st.session_state["workspace_player_id"]=int(pid)
-    st.session_state["main_navigation"]="Jugadores"
+    request_navigation("Jugadores")
     st.rerun()
 
 

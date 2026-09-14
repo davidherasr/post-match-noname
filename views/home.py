@@ -4,6 +4,7 @@ import streamlit as st
 
 from core.database import session_scope
 from core.permissions import roles_for, can_direct
+from core.navigation import request_navigation
 from core.presentation import status_badge
 from core.schedule import is_schedule_confirmed
 from repositories import calendar as calendar_repo
@@ -13,7 +14,7 @@ from ui.styles import page_header
 
 def _open_match(match_id: int) -> None:
     st.session_state["workspace_match_id"] = int(match_id)
-    st.session_state["main_navigation"] = "Jornada"
+    request_navigation("Jornada")
     st.rerun()
 
 
@@ -74,5 +75,5 @@ def render(user: dict) -> None:
                 for text in actionable:
                     st.markdown(f"- {text}")
                 if st.button("Abrir jugadores", use_container_width=True, key="home_to_players"):
-                    st.session_state["main_navigation"] = "Jugadores"
+                    request_navigation("Jugadores")
                     st.rerun()

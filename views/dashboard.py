@@ -5,6 +5,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from core.navigation import request_navigation
+
 from core.constants import ASSIGNMENT_STATUSES, REPORT_STATUSES
 from core.database import session_scope
 from core.utils import safe_html
@@ -18,23 +20,23 @@ from ui.styles import page_header
 def _navigate(label: str, match_id: int | None = None) -> None:
     if match_id is not None:
         st.session_state["report_selected_match_id"] = match_id
-    st.session_state["main_navigation"] = label
+    request_navigation(label)
 
 
 def _open_schedule_issues() -> None:
     st.session_state["calendar_admin_mode"] = "Horarios pendientes"
-    st.session_state["main_navigation"] = "Calendario"
+    request_navigation("Calendario")
 
 
 def _continue_postmatch_draft(draft_id: int) -> None:
     st.session_state["postmatch_open_cloud_draft_id"] = int(draft_id)
-    st.session_state["main_navigation"] = "Nuevo postpartido"
+    request_navigation("Nuevo postpartido")
 
 
 def _open_director_player(player_id: int) -> None:
     st.session_state["director_player_id"] = int(player_id)
     st.session_state["director_section"] = "Jugadores"
-    st.session_state["main_navigation"] = "Revisar y decidir"
+    request_navigation("Revisar y decidir")
 
 
 def _match_title(match) -> str:

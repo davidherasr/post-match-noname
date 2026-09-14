@@ -5,6 +5,8 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+from core.navigation import request_navigation
+
 from core.constants import FOLLOW_UP_STATUSES, FORMATIONS, POSITIONS, RECOMMENDATIONS
 from core.database import session_scope
 from core.formations import slots_for
@@ -185,12 +187,12 @@ def _player_360(user: dict, player_id: int) -> None:
         if scout_profile:
             st.info(f"Ficha scout: {scout_repo.SCOUT_STATUSES.get(scout_profile.status, scout_profile.status)} · {scout_profile.model_position or '-'} · {scout_profile.model_role or 'rol por definir'}")
             if st.button("Abrir Jugadores ojeados", type="primary", use_container_width=True):
-                st.session_state["main_navigation"] = "Jugadores ojeados"; st.rerun()
+                request_navigation("Jugadores ojeados"); st.rerun()
         else:
             if st.button("Abrir ficha scout / ubicar en nuestro modelo", type="primary", use_container_width=True):
                 with session_scope() as session:
                     scout_repo.request_profile(session, player_id=player_id, actor_id=user["id"], model_position=positions[0]["position"] if positions else player.primary_position)
-                st.session_state["main_navigation"] = "Jugadores ojeados"; st.rerun()
+                request_navigation("Jugadores ojeados"); st.rerun()
 
         st.subheader("Seguimiento")
         with st.form(f"followup_{player_id}"):

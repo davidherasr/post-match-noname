@@ -1,3 +1,10 @@
+## 4.0.5 · Navegación segura en Streamlit y Alembic PostgreSQL
+
+- Corrige `StreamlitWidgetAlreadyInstantiatedError` al abrir partidos/tareas desde Inicio.
+- Los cambios de navegación se difieren a la siguiente ejecución y se aplican antes de instanciar el `st.radio` lateral.
+- Extiende automáticamente `alembic_version.version_num` a VARCHAR(128) en PostgreSQL antes de ejecutar migraciones, evitando el fallo detectado con la revisión 0010.
+- No introduce una nueva migración de datos: el head sigue siendo `0010_core_workspace_schema_repair_4_0_4`.
+
 ## 4.0.4 · Reparación completa del workspace de Inicio
 
 - Nueva migración no destructiva `0010_core_workspace_schema_repair_4_0_4`.

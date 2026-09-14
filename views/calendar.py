@@ -5,6 +5,8 @@ from datetime import date, datetime, time, timedelta
 import pandas as pd
 import streamlit as st
 
+from core.navigation import request_navigation
+
 from core.calendar_import import CALENDAR_PARSER_VERSION, parse_calendar_text
 from core.clock import local_today
 from core.constants import ROLES, SCOUT_MISSION_TYPES, SCHEDULE_STATUSES
@@ -160,7 +162,7 @@ def _calendar_actions(user: dict, match, own_id: int | None) -> None:
                 st.warning("Horario pendiente: primero confirma fecha y hora para preparar el postpartido.")
             if st.button("Preparar postpartido desde este partido", key=f"prepare_{match.id}", use_container_width=True, disabled=not ready):
                 st.session_state["workspace_match_id"] = match.id
-                st.session_state["main_navigation"] = "Jornada"
+                request_navigation("Jornada")
                 st.rerun()
         if can_direct(user):
             with session_scope() as session:
@@ -176,7 +178,7 @@ def _calendar_actions(user: dict, match, own_id: int | None) -> None:
             ready = is_schedule_confirmed(match)
             if st.button("Observar este partido", key=f"observe_{match.id}", type="primary", use_container_width=True, disabled=not ready):
                 st.session_state["workspace_match_id"] = match.id
-                st.session_state["main_navigation"] = "Jornada"
+                request_navigation("Jornada")
                 st.rerun()
             if not ready:
                 st.caption("Disponible para planificar, pero la observación se activa cuando Administración confirme el horario.")

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.navigation import request_navigation
+
 from core.database import session_scope
 from repositories import players as players_repo
 from repositories import workspaces
@@ -35,7 +37,7 @@ def render(user:dict,team_id:int)->None:
             a,b=st.columns([5,1]);a.markdown(f"**{p.display_name or p.full_name}** · {p.primary_position or '-'}")
             a.caption(d.status if d else "Observado")
             if b.button("Abrir",key=f"teamplayer38_{team.id}_{p.id}",use_container_width=True):
-                st.session_state["workspace_player_id"]=p.id;st.session_state["main_navigation"]="Jugadores";st.rerun()
+                st.session_state["workspace_player_id"]=p.id;request_navigation("Jugadores");st.rerun()
     if data["analyses"]:
         st.markdown("### Últimos análisis")
         for analysis in data["analyses"]:

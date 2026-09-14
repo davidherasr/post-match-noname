@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.0.4"
+EXPECTED = "4.0.5"
 HEAD_MIGRATION = "0010_core_workspace_schema_repair_4_0_4"
 
 
