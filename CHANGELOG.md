@@ -1,3 +1,13 @@
+## 4.0.3 · Reparación de esquema real en Supabase
+
+- Nueva migración no destructiva `0009_schema_repair_4_0_3`.
+- Repara bases cuyo `alembic_version` avanzó pero cuya estructura física quedó incompleta.
+- Verifica antes de renderizar Inicio que `matches`, `player_season_decisions` y `scout_observations` tengan las columnas requeridas.
+- Repara de forma idempotente las columnas de calendario 3.5 y Match Study 4.0 que falten.
+- Conserva partidos, jugadores, resultados, informes, observaciones, plantillas y decisiones existentes.
+- Si el esquema siguiera incompleto, la app se detiene con un diagnóstico legible antes de ejecutar consultas ORM.
+- Suite final: 71 tests.
+
 ## 4.0.2 · Hotfix de integridad de despliegue
 
 - El ZIP se distribuye con **raíz plana**: `app.py`, `core/`, `views/`, etc. quedan directamente al extraerlo.

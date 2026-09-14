@@ -1,4 +1,4 @@
-# No Name PostMatch 4.0.2
+# No Name PostMatch 4.0.3
 
 Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
 
@@ -11,6 +11,13 @@ Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva 
 - **Administración**: usuarios, club, datos, configuración y herramientas técnicas.
 
 Los roles son capacidades acumulativas. No existe Perfil activo.
+
+
+## 4.0.3 · Hotfix de esquema real
+
+4.0.3 corrige el fallo observado en producción donde PostgreSQL llegaba a `Inicio` con una revisión Alembic aparente compatible pero faltaban columnas físicas que el ORM de `Match` intentaba seleccionar. La nueva revisión `0009_schema_repair_4_0_3` es idempotente y no destructiva: comprueba y restaura únicamente columnas aditivas esperadas, y después valida el contrato físico antes de renderizar cualquier workspace.
+
+No cambia de Supabase ni reinicia datos. Mantén `RUN_MIGRATIONS = true` para que el hotfix se aplique automáticamente al reiniciar Streamlit Cloud.
 
 ## 4.0.1 · Match Study + hotfix de despliegue
 
@@ -30,8 +37,8 @@ Para la prueba de Jornada 1 consulta `PRUEBA_REAL_J1.md`.
 
 ## Datos y Supabase
 
-4.0.2 mantiene el mismo Supabase y el mismo head Alembic `0008_match_study_4_0`. Se conservan `DATABASE_URL`, Secrets y todos los datos existentes. No se incluyen datos demo.
+4.0.3 mantiene el mismo Supabase, `DATABASE_URL` y Secrets. El head Alembic pasa a `0009_schema_repair_4_0_3`, una reparación aditiva/no destructiva sobre `0008_match_study_4_0`. Todos los datos existentes se conservan y no se incluyen datos demo.
 
 ## Validación
 
-Consulta `VALIDACION_4_0_2.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
+Consulta `VALIDACION_4_0_3.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
