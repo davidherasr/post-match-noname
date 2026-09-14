@@ -1,3 +1,28 @@
+## 4.1.1 · Contraseñas libres y gestión completa de usuarios
+
+- Se elimina toda exigencia de complejidad de contraseña: cualquier valor no vacío es válido.
+- Desaparece el cambio obligatorio de contraseña; `Mi cuenta` ofrece el cambio solo como opción.
+- Administración → Usuarios incorpora Listado, Añadir, Editar / eliminar y Eliminados.
+- Admin puede modificar nombre, correo, roles, rol principal, estado y contraseña de cualquier cuenta.
+- Eliminación lógica segura con restauración posterior, preservando todo el histórico referenciado.
+- Protecciones: no se puede eliminar la propia cuenta conectada ni el último administrador activo.
+- Nueva migración no destructiva `0011_user_lifecycle_4_1_1`.
+- Suite automatizada: 96 tests.
+
+## 4.1.0 · Admin → DD → Scout
+
+- Administración deja de heredar automáticamente las capacidades de Dirección Deportiva y Scout. Los roles son explícitos y combinables.
+- Solo Dirección Deportiva puede crear y asignar trabajo de scouting; el responsable debe tener el rol Scout.
+- DD puede asignar Partido completo, Equipo o Jugador(es), a uno o varios scouts, con prioridad y objetivo.
+- Jornada elimina el selector Barrido / Observación / Dossier. Varios jugadores abren apuntes rápidos; uno abre observación individual.
+- El Dossier deja de ser un nivel de captura: Player Report 360 lo construye con el historial de observaciones.
+- El Scout ve sus encargos de DD y puede vincular la observación a la tarea; las tareas con objetivos se completan cuando queda registrada la evidencia correspondiente.
+- Administración muestra con claridad qué hace cada rol y permite asignar varios roles a una misma persona.
+- Contraseñas provisionales simples: mínimo 4 caracteres cuando el cambio en primer acceso es obligatorio. La contraseña definitiva mantiene la política fuerte.
+- Restablecer contraseña desde Administración crea siempre una credencial provisional y fuerza el cambio en el siguiente acceso.
+- No hay migración nueva: el head continúa en `0010_core_workspace_schema_repair_4_0_4`.
+- Suite automatizada de la release: 94 tests.
+
 ## 4.0.7 · XI observado sin jugadores duplicados
 
 - El selector de cada posición del XI es ahora reactivo: al elegir un jugador desaparece inmediatamente de los desplegables de las demás posiciones.

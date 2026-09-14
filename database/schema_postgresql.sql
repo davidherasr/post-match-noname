@@ -94,10 +94,12 @@ CREATE TABLE users (
 	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	last_login_at TIMESTAMP WITHOUT TIME ZONE, 
+	deleted_at TIMESTAMP WITHOUT TIME ZONE, 
 	PRIMARY KEY (id)
 );
 
 CREATE UNIQUE INDEX ix_users_email ON users (email);
+CREATE INDEX ix_users_deleted_at ON users (deleted_at);
 
 
 CREATE TABLE audit_logs (

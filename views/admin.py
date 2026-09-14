@@ -30,61 +30,211 @@ def _pretty_json(value: str | None) -> str:
 
 
 def _section_users(user: dict) -> None:
-    with session_scope() as session:
-        users = repo.list_users(session)
-    with session_scope() as session:
-        role_map = {u.id: repo.get_user_roles(session, u.id) for u in users}
-    st.dataframe(pd.DataFrame([{
-        "ID": u.id, "Nombre": u.full_name, "Correo": u.email,
-        "Perfiles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
-        "Perfil principal": ROLES.get(u.role, u.role),
-        "Activo": u.active, "Cambio de contraseña": u.must_change_password, "Bloqueado hasta": u.locked_until,
-        "Revisión sesión": u.session_revision, "Último acceso": u.last_login_at,
-    } for u in users]), use_container_width=True, hide_index=True)
-    with st.form("new_user"):
-        c1, c2 = st.columns(2)
-        name = c1.text_input("Nombre completo")
-        email = c2.text_input("Correo")
-        c3, c4 = st.columns(2)
-        roles = c3.multiselect("Perfiles y accesos", list(ROLES.keys()), default=["reporter"], format_func=lambda r: ROLES[r], help="Un usuario puede ser, por ejemplo, Scout + Administrador.")
-        primary = c3.selectbox("Perfil principal", roles or ["reporter"], format_func=lambda r: ROLES[r])
-        password = c4.text_input("Contraseña inicial", type="password", help="Mínimo 10 caracteres, mayúscula, minúscula, número y símbolo.")
-        force_change = st.checkbox("Obligar a cambiarla en el primer acceso", value=True)
-        create = st.form_submit_button("Crear usuario", type="primary")
-    if create:
-        try:
-            with session_scope() as session:
-                repo.create_user(session, name, email, password, role=primary, roles=roles or [primary], actor_id=user["id"], must_change_password=force_change)
-            st.success("Usuario creado.")
-            st.rerun()
-        except Exception as exc:
-            st.error(str(exc))
+    st.markdown("### Gestión de usuarios")
+    st.caption(
+        "Desde aquí el Administrador puede añadir, editar, desactivar o eliminar cuentas y repartir roles. "
+        "Las contraseñas pueden ser tan simples como 1, 1234 o cualquier otro valor no vacío. Cambiarlas es siempre opcional."
+    )
 
-    if users:
-        selected = st.selectbox("Editar usuario", [u.id for u in users], format_func=lambda uid: next(f"{u.full_name} · {u.email}" for u in users if u.id == uid))
-        selected_user = next(u for u in users if u.id == selected)
-        with st.form(f"edit_user_{selected}"):
-            full_name = st.text_input("Nombre completo", value=selected_user.full_name)
-            current_roles = role_map.get(selected, [selected_user.role])
-            roles_new = st.multiselect("Perfiles y accesos", list(ROLES.keys()), default=current_roles, format_func=lambda r: ROLES[r])
+    r1, r2, r3, r4 = st.columns(4)
+    r1.info("**Administrador**\n\nUsuarios, calendario, equipos y calidad de datos.")
+    r2.info("**Dirección Deportiva**\n\nDecide qué seguir y asigna trabajo a Scout.")
+    r3.info("**Scout**\n\nEjecuta visionados y registra observaciones.")
+    r4.info("**Informador**\n\nCompleta informes de partidos asignados.")
+
+    with session_scope() as session:
+        all_users = repo.list_users(session, include_deleted=True)
+        users = [u for u in all_users if u.deleted_at is None]
+        deleted_users = [u for u in all_users if u.deleted_at is not None]
+        role_map = {u.id: repo.get_user_roles(session, u.id) for u in all_users}
+
+    mode = st.segmented_control(
+        "Gestión",
+        ["Listado", "Añadir", "Editar / eliminar", "Eliminados"],
+        default="Listado",
+        key="admin_user_management_411",
+    ) or "Listado"
+
+    if mode == "Listado":
+        if not users:
+            st.info("No hay usuarios activos o desactivados.")
+            return
+        rows = []
+        for u in users:
+            rows.append({
+                "ID": u.id,
+                "Nombre": u.full_name,
+                "Correo": u.email,
+                "Roles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
+                "Rol principal": ROLES.get(u.role, u.role),
+                "Estado": "Activo" if u.active else "Desactivado",
+                "Último acceso": u.last_login_at,
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.caption("Desactivar conserva la cuenta pero impide iniciar sesión. Eliminar la oculta de la gestión habitual y preserva el historial deportivo/auditoría.")
+        return
+
+    if mode == "Añadir":
+        st.markdown("#### Añadir usuario")
+        with st.form("new_user_411"):
             c1, c2 = st.columns(2)
+            name = c1.text_input("Nombre completo")
+            email = c2.text_input("Correo")
+            c3, c4 = st.columns(2)
+            roles = c3.multiselect(
+                "Roles y accesos",
+                list(ROLES.keys()),
+                default=["reporter"],
+                format_func=lambda r: ROLES[r],
+                help="Los roles son independientes. Si una persona hace dos funciones, asigna ambos.",
+            )
+            primary_options = roles or ["reporter"]
+            primary = c3.selectbox("Rol principal", primary_options, format_func=lambda r: ROLES[r])
+            password = c4.text_input(
+                "Contraseña",
+                type="password",
+                help="Sin requisitos de complejidad. Puede ser 1, 1234, nombre+numero, etc. Solo no puede estar vacía.",
+            )
+            active = c4.checkbox("Cuenta activa", value=True)
+            create = st.form_submit_button("Crear usuario", type="primary", use_container_width=True)
+        if create:
+            try:
+                with session_scope() as session:
+                    repo.create_user(
+                        session,
+                        name,
+                        email,
+                        password,
+                        role=primary,
+                        roles=roles or [primary],
+                        active=active,
+                        actor_id=user["id"],
+                        must_change_password=False,
+                    )
+                st.success("Usuario creado. Puede mantener esa contraseña indefinidamente si quiere.")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+        return
+
+    if mode == "Editar / eliminar":
+        if not users:
+            st.info("No hay usuarios para editar.")
+            return
+        selected = st.selectbox(
+            "Usuario",
+            [u.id for u in users],
+            format_func=lambda uid: next(f"{u.full_name} · {u.email}" for u in users if u.id == uid),
+            key="admin_edit_user_select_411",
+        )
+        selected_user = next(u for u in users if u.id == selected)
+        current_roles = role_map.get(selected, [selected_user.role])
+
+        with st.form(f"edit_user_411_{selected}"):
+            c1, c2 = st.columns(2)
+            full_name = c1.text_input("Nombre completo", value=selected_user.full_name)
+            email = c2.text_input("Correo", value=selected_user.email)
+            roles_new = st.multiselect(
+                "Roles y accesos",
+                list(ROLES.keys()),
+                default=current_roles,
+                format_func=lambda r: ROLES[r],
+            )
+            c3, c4 = st.columns(2)
             primary_options = roles_new or [selected_user.role]
-            role_new = c1.selectbox("Perfil principal", primary_options, index=primary_options.index(selected_user.role) if selected_user.role in primary_options else 0, format_func=lambda r: ROLES[r])
-            active = c2.checkbox("Activo", value=selected_user.active)
-            password_new = st.text_input("Nueva contraseña", type="password", help="Déjala vacía para mantener la actual. Si se cambia, el usuario deberá sustituirla al entrar.")
-            save = st.form_submit_button("Guardar usuario")
+            role_new = c3.selectbox(
+                "Rol principal",
+                primary_options,
+                index=primary_options.index(selected_user.role) if selected_user.role in primary_options else 0,
+                format_func=lambda r: ROLES[r],
+            )
+            active = c4.checkbox("Cuenta activa", value=selected_user.active)
+            password_new = st.text_input(
+                "Nueva contraseña (opcional)",
+                type="password",
+                help="Déjala vacía para mantener la actual. Si escribes una nueva, puede ser cualquier valor no vacío, incluido 1234.",
+            )
+            save = st.form_submit_button("Guardar cambios", type="primary", use_container_width=True)
         if save:
             if selected == user["id"] and not active:
                 st.error("No puedes desactivar tu propia cuenta durante la sesión.")
             else:
                 try:
                     with session_scope() as session:
-                        repo.update_user(session, selected, role_new, active, password_new or None, user["id"], full_name=full_name, roles=roles_new or [role_new])
-                    st.success("Usuario actualizado. Sus sesiones anteriores han quedado invalidadas.")
+                        repo.update_user(
+                            session,
+                            selected,
+                            role_new,
+                            active,
+                            password_new or None,
+                            user["id"],
+                            full_name=full_name,
+                            email=email,
+                            roles=roles_new or [role_new],
+                            force_password_change=False,
+                        )
+                    st.success("Usuario actualizado.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
+        st.markdown("#### Eliminar usuario")
+        st.caption("La eliminación bloquea el acceso y oculta la cuenta sin romper informes, scouting, asignaciones o auditoría anteriores.")
+        if selected == user["id"]:
+            st.info("Tu propia cuenta no se puede eliminar mientras estás conectado con ella.")
+        else:
+            confirm = st.checkbox(
+                f"Confirmo que quiero eliminar a {selected_user.full_name}",
+                key=f"confirm_delete_user_411_{selected}",
+            )
+            if st.button(
+                "Eliminar usuario",
+                type="secondary",
+                use_container_width=True,
+                disabled=not confirm,
+                key=f"delete_user_411_{selected}",
+            ):
+                try:
+                    with session_scope() as session:
+                        repo.delete_user(session, selected, user["id"])
+                    st.success("Usuario eliminado. Su historial se conserva.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        return
+
+    # Eliminados
+    st.markdown("#### Usuarios eliminados")
+    if not deleted_users:
+        st.info("No hay usuarios eliminados.")
+        return
+    st.dataframe(pd.DataFrame([{
+        "ID": u.id,
+        "Nombre": u.full_name,
+        "Correo": u.email,
+        "Eliminado": u.deleted_at,
+        "Roles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
+    } for u in deleted_users]), use_container_width=True, hide_index=True)
+    selected_deleted = st.selectbox(
+        "Usuario eliminado",
+        [u.id for u in deleted_users],
+        format_func=lambda uid: next(f"{u.full_name} · {u.email}" for u in deleted_users if u.id == uid),
+        key="admin_deleted_user_select_411",
+    )
+    restore_password = st.text_input(
+        "Nueva contraseña al restaurar (opcional)",
+        type="password",
+        help="Si la dejas vacía, conservará la contraseña anterior.",
+        key=f"restore_password_411_{selected_deleted}",
+    )
+    if st.button("Restaurar usuario", type="primary", use_container_width=True, key=f"restore_user_411_{selected_deleted}"):
+        try:
+            with session_scope() as session:
+                repo.restore_user(session, selected_deleted, user["id"], password=restore_password or None)
+            st.success("Usuario restaurado y activado.")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
 def _section_brand(user: dict) -> None:
     with session_scope() as session:

@@ -20,12 +20,15 @@ from repositories.users import assert_role, user_has_role
 MISSION_TYPES = {"player", "multi_player", "team", "rival_analysis", "spontaneous"}
 
 
-def list_scout_users(session: Session, *, include_privileged: bool = True) -> list[User]:
+def list_scout_users(session: Session, *, include_privileged: bool = False) -> list[User]:
+    """Return users that explicitly carry the Scout role.
+
+    4.1 separates administrative and sporting responsibilities. Admin/Director do
+    not become scouts by hierarchy; a multi-role user simply receives ``scout``
+    explicitly from Administration.
+    """
     users = list(session.scalars(select(User).where(User.active.is_(True)).order_by(User.full_name)).all())
-    allowed = {"scout"}
-    if include_privileged:
-        allowed |= {"admin", "director"}
-    return [u for u in users if any(user_has_role(session, u.id, role) for role in allowed)]
+    return [u for u in users if user_has_role(session, u.id, "scout")]
 
 
 def create_mission(
@@ -43,13 +46,13 @@ def create_mission(
     priority: int = 2,
     due_at: datetime | None = None,
 ) -> ScoutMission:
-    assert_role(session, requested_by, "director", "admin")
+    assert_role(session, requested_by, "director")
     if mission_type not in MISSION_TYPES:
         raise ValueError("Tipo de misión no válido.")
     match = session.get(Match, int(match_id))
     assignee = session.get(User, int(assigned_to))
-    if not match or not assignee or not assignee.active or not user_has_role(session, assignee.id, "scout", "admin", "director"):
-        raise ValueError("Partido o scout no disponible.")
+    if not match or not assignee or not assignee.active or not user_has_role(session, assignee.id, "scout"):
+        raise ValueError("Partido o Scout no disponible. El responsable debe tener el rol Scout asignado.")
     item = ScoutMission(
         match_id=int(match_id), mission_type=mission_type, target_team_id=target_team_id,
         title=title.strip() or "Observación", purpose=(purpose or "").strip() or None,
@@ -99,7 +102,7 @@ def update_mission_status(session: Session, mission_id: int, actor_id: int, *, s
     if not item:
         raise ValueError("Misión no encontrada.")
     if item.assigned_to != int(actor_id):
-        assert_role(session, actor_id, "director", "admin")
+        assert_role(session, actor_id, "director")
     if status in {"in_progress", "completed"}:
         require_schedule_confirmed(session.get(Match, item.match_id), action="iniciar o completar la tarea de scouting")
     item.status = status
@@ -112,7 +115,7 @@ def update_mission_status(session: Session, mission_id: int, actor_id: int, *, s
 
 
 def ensure_scout_profile(session: Session, player_id: int, actor_id: int) -> ScoutedPlayerProfile:
-    assert_role(session, actor_id, "scout", "director", "admin")
+    assert_role(session, actor_id, "scout")
     item = session.scalar(select(ScoutedPlayerProfile).where(ScoutedPlayerProfile.player_id == int(player_id)))
     if item:
         return item
@@ -140,12 +143,12 @@ def create_observation(
     observation_level: str = "observation",
     model_role_id: int | None = None,
 ) -> ScoutObservation:
-    assert_role(session, reviewer_id, "scout", "director", "admin")
+    assert_role(session, reviewer_id, "scout")
     profile = ensure_scout_profile(session, int(player_id), reviewer_id)
     if mission_id:
         mission = session.get(ScoutMission, int(mission_id))
-        if not mission or (mission.assigned_to != int(reviewer_id) and not user_has_role(session, reviewer_id, "director", "admin")):
-            raise PermissionError("La misión no está asignada a este scout.")
+        if not mission or mission.assigned_to != int(reviewer_id):
+            raise PermissionError("La tarea no está asignada a este Scout.")
         match_id = mission.match_id
     if match_id:
         require_schedule_confirmed(session.get(Match, int(match_id)), action="iniciar la observación Scout")
@@ -195,7 +198,7 @@ def save_observation(
     if not item:
         raise ValueError("Observación no encontrada.")
     if item.reviewer_id != int(actor_id):
-        assert_role(session, actor_id, "director", "admin")
+        raise PermissionError("Solo el Scout autor puede editar esta observación.")
     item.observed_position = observed_position
     if model_role_id is not None:
         if not session.get(GameModelRole, int(model_role_id)):
@@ -262,14 +265,24 @@ def list_observations(session: Session, *, player_id: int | None = None, reviewe
 
 
 
-def save_quick_match_observations(session: Session, *, match_id: int, reviewer_id: int, rows: Sequence[dict]) -> int:
-    """Save a Scout's quick sweep of several players from one neutral/league match in one transaction."""
-    assert_role(session, reviewer_id, "scout", "director", "admin")
+def save_quick_match_observations(
+    session: Session, *, match_id: int, reviewer_id: int, rows: Sequence[dict], mission_id: int | None = None,
+) -> int:
+    """Save quick observations for several players and optionally fulfil an assigned task."""
+    assert_role(session, reviewer_id, "scout")
     match = session.get(Match, int(match_id))
     if not match:
         raise ValueError("Partido no encontrado.")
     require_schedule_confirmed(match, action="guardar una observación de partido")
+    mission = None
+    if mission_id is not None:
+        mission = session.get(ScoutMission, int(mission_id))
+        if not mission or mission.match_id != match.id or mission.assigned_to != int(reviewer_id):
+            raise PermissionError("La tarea no está asignada a este Scout para este partido.")
+        mission.status = "in_progress"
+        mission.updated_at = UTC_NOW()
     count = 0
+    saved_player_ids: set[int] = set()
     for row in rows:
         player_id = int(row.get("player_id") or 0)
         rating = row.get("general_rating")
@@ -277,16 +290,28 @@ def save_quick_match_observations(session: Session, *, match_id: int, reviewer_i
             continue
         profile = ensure_scout_profile(session, player_id, reviewer_id)
         item = ScoutObservation(
-            profile_id=profile.id, reviewer_id=int(reviewer_id), match_id=match.id, mission_id=None,
+            profile_id=profile.id, reviewer_id=int(reviewer_id), match_id=match.id, mission_id=mission.id if mission else None,
             source_type="match_scan", observation_level="scan", status="submitted", observed_at=UTC_NOW(),
             observed_position=row.get("observed_position"), general_rating=float(rating),
             summary=(row.get("summary") or "").strip() or None, recommendation=row.get("recommendation") or "Sin conclusión",
             submitted_at=UTC_NOW(), created_at=UTC_NOW(), updated_at=UTC_NOW(),
         )
         session.add(item)
+        saved_player_ids.add(player_id)
         count += 1
     session.flush()
-    audit(session, reviewer_id, "quick_match_scout", "match", match.id, detail=f"observations={count}")
+    if mission and count:
+        targets = {t.player_id for t in mission_targets(session, mission.id)}
+        observed_players = set(session.scalars(
+            select(ScoutedPlayerProfile.player_id)
+            .join(ScoutObservation, ScoutObservation.profile_id == ScoutedPlayerProfile.id)
+            .where(ScoutObservation.mission_id == mission.id, ScoutObservation.status == "submitted")
+        ).all())
+        if not targets or targets.issubset(observed_players):
+            mission.status = "completed"
+            mission.completed_at = UTC_NOW()
+        mission.updated_at = UTC_NOW()
+    audit(session, reviewer_id, "quick_match_scout", "match", match.id, detail=f"observations={count}; mission={mission_id}")
     return count
 
 def create_model_role(session: Session, actor_id: int, *, name: str, position: str, description: str | None = None) -> GameModelRole:

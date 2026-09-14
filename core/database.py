@@ -52,6 +52,7 @@ _REQUIRED_COLUMNS: dict[str, set[str]] = {
     "seasons": {"id", "name", "start_date", "end_date", "active", "updated_at"},
     "player_season_decisions": {"current_level", "potential_score", "criteria_json"},
     "scout_observations": {"observation_level", "model_role_id", "legacy_review_id"},
+    "users": {"deleted_at"},
 }
 
 

@@ -1,4 +1,4 @@
-# No Name PostMatch 4.0.7
+# No Name PostMatch 4.1.1
 
 Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
 
@@ -10,8 +10,18 @@ Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva 
 - **Plantilla**: roles, necesidades, referencias internas, candidatos y oportunidades de scouting.
 - **Administración**: usuarios, club, datos, configuración y herramientas técnicas.
 
-Los roles son capacidades acumulativas. No existe Perfil activo.
+Los roles son capacidades explícitas y combinables. No existe Perfil activo: Administración, Dirección Deportiva, Scout e Informador son responsabilidades independientes.
 
+
+## 4.1 · Flujo de trabajo por responsabilidades
+
+4.1 separa definitivamente **Administración → Dirección Deportiva → Scout**. Administración prepara usuarios, calendario, equipos, horarios y datos; Dirección Deportiva decide qué merece seguimiento y lo asigna a uno o varios usuarios con rol Scout; el Scout ejecuta el visionado y registra lo observado. Ser Administrador ya no concede automáticamente capacidades de DD o Scout: si una persona realiza varias funciones, Administración le asigna varios roles.
+
+En Jornada desaparece el selector manual **Barrido / Observación / Dossier**. El flujo se deduce del trabajo real: varios jugadores generan apuntes rápidos, un jugador abre una observación individual y el **dossier 360** se construye automáticamente con el historial acumulado en Player Report 360.
+
+Desde 4.1.1 las contraseñas son deliberadamente simples para este entorno interno: se acepta cualquier valor no vacío, incluido `1` o `1234`. Cambiarla es una opción del usuario, nunca una obligación. Administración dispone además de una gestión completa de cuentas: alta, edición de nombre/correo/roles/estado/contraseña, eliminación segura y restauración.
+
+4.1.1 añade la migración no destructiva `0011_user_lifecycle_4_1_1` para soportar borrado lógico de usuarios sin romper el historial.
 
 
 ## 4.0.7 · XI observado reactivo
@@ -44,11 +54,11 @@ Para la prueba de Jornada 1 consulta `PRUEBA_REAL_J1.md`.
 
 ## Datos y Supabase
 
-4.0.7 mantiene el mismo Supabase, `DATABASE_URL` y Secrets. El head Alembic actual es `0010_core_workspace_schema_repair_4_0_4`; 4.0.7 no añade una migración nueva. Todos los datos existentes se conservan y no se incluyen datos demo.
+4.1.1 mantiene el mismo Supabase, `DATABASE_URL` y Secrets. El head Alembic actual es `0011_user_lifecycle_4_1_1`. La migración es aditiva y conserva todos los datos existentes; no se incluyen datos demo.
 
 ## Validación
 
-Consulta `VALIDACION_4_0_6.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
+Consulta `VALIDACION_4_1_1.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
 ## 4.0.5 · Hotfix de navegación
 
 4.0.5 corrige la navegación desde tarjetas y tareas: las vistas ya no escriben directamente en el estado del widget `main_navigation` después de que Streamlit haya creado el radio lateral. La navegación se solicita mediante un estado pendiente y se aplica en el siguiente rerun antes de construir el widget. También protege PostgreSQL ampliando automáticamente la columna de versión de Alembic a 128 caracteres.

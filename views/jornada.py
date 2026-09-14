@@ -10,8 +10,8 @@ from core.clock import local_today
 from core.constants import FORMATIONS, POSITIONS
 from core.formations import available_lineup_player_ids, slots_for
 from core.database import session_scope
-from core.permissions import can_admin, can_direct, can_report, can_scout
-from core.presentation import SCOUT_LEVELS, status_badge
+from core.permissions import can_admin, can_direct, can_report, can_scout, roles_for
+from core.presentation import status_badge
 from core.schedule import is_schedule_confirmed
 from repositories import calendar as calendar_repo
 from repositories import matches as matches_repo
@@ -74,7 +74,7 @@ def _roster_table(roster: list) -> pd.DataFrame:
 
 
 def _federation_roster_editor(match, team, user: dict, *, side: str) -> None:
-    if not can_scout(user):
+    if not (can_admin(user) or can_scout(user)):
         return
     with st.expander("Actualizar plantilla desde Federación", expanded=False):
         st.caption("Pega la lista de Federación. Si sabes convocatoria, separa con `TITULARES` y `SUPLENTES`. Si no, pega solo `dorsal;nombre` y quedará como plantilla sin inventar quién jugó.")
@@ -154,6 +154,8 @@ def _formation_lineup_editor(match, team, user: dict, *, side: str, formation: s
     st.markdown(f"#### {team.name} · {formation}")
     render_campogram(formation,pitch_rows)
     if not can_scout(user):
+        if can_admin(user):
+            _federation_roster_editor(match, team, user, side=side)
         return
     with st.expander("Editar XI observado", expanded=not bool(parts)):
         if not roster:
@@ -280,162 +282,281 @@ def _neutral_match_study(match, user: dict) -> None:
             _render_roster_only(match,match.away_team,user,side="away")
 
 
+def _mission_target_text(mission, targets_by_mission: dict[int, list]) -> str:
+    targets = targets_by_mission.get(mission.id, [])
+    if targets:
+        names = [t.player.display_name or t.player.full_name for t in targets]
+        return ", ".join(names)
+    if mission.target_team:
+        return mission.target_team.name
+    return "Partido completo"
+
+
 def _mission_planning(match, user: dict, players: list) -> None:
+    """DD decides what is worth following and assigns it to explicit Scout roles."""
     if not can_direct(user):
         return
-    with st.expander("Planificar observación", expanded=False):
-        with session_scope() as session:
-            scouts = planning_repo.list_scout_users(session)
-        if not scouts:
-            st.info("No hay usuarios con capacidad Scout.")
-            return
-        player_map = {p.id: p for p in players}
-        with st.form(f"mission_38_{match.id}"):
-            target_ids = st.multiselect("Objetivos", list(player_map), format_func=lambda pid: player_map[pid].display_name or player_map[pid].full_name)
-            assignee = st.selectbox("Responsable", [u.id for u in scouts], format_func=lambda uid: next(u.full_name for u in scouts if u.id == uid))
-            priority = st.select_slider("Prioridad", [3, 2, 1], value=2, format_func=lambda x: {1:"Alta",2:"Media",3:"Baja"}[x])
-            purpose = st.text_input("Objetivo", placeholder="Qué queremos resolver en este visionado")
-            create = st.form_submit_button("Asignar próxima acción", type="primary", use_container_width=True)
-        if create:
-            try:
-                title = "Observar " + (player_map[target_ids[0]].full_name if len(target_ids) == 1 else f"{len(target_ids)} jugadores" if target_ids else _match_title(match))
-                with session_scope() as session:
+    st.markdown("### Dirección Deportiva · asignar seguimiento")
+    st.caption("Administración deja el partido y los datos preparados. Dirección Deportiva decide si hay algo que seguir y quién lo observa.")
+    with session_scope() as session:
+        scouts = planning_repo.list_scout_users(session)
+    if not scouts:
+        st.warning("No hay ningún usuario con rol Scout. Administración debe asignar ese rol antes de poder repartir trabajo.")
+        return
+
+    player_map = {p.id: p for p in players}
+    with st.form(f"mission_41_{match.id}"):
+        scope = st.segmented_control(
+            "Qué quieres seguir",
+            ["Partido completo", "Equipo", "Jugador(es)"],
+            default="Jugador(es)",
+            key=f"mission_scope_41_{match.id}",
+        ) or "Jugador(es)"
+        target_ids: list[int] = []
+        target_team_id = None
+        if scope == "Equipo":
+            target_team_id = st.selectbox(
+                "Equipo objetivo",
+                [match.home_team_id, match.away_team_id],
+                format_func=lambda tid: match.home_team.name if tid == match.home_team_id else match.away_team.name,
+            )
+        elif scope == "Jugador(es)":
+            target_ids = st.multiselect(
+                "Jugadores objetivo",
+                list(player_map),
+                format_func=lambda pid: player_map[pid].display_name or player_map[pid].full_name,
+                help="Selecciona uno o varios. Si todavía no sabes a quién seguir, usa Partido completo o Equipo.",
+            )
+        assignees = st.multiselect(
+            "Asignar a Scout",
+            [u.id for u in scouts],
+            format_func=lambda uid: next(u.full_name for u in scouts if u.id == uid),
+            help="Puedes asignar el mismo encargo a varios scouts; se crea una tarea individual para cada uno.",
+        )
+        c1, c2 = st.columns([1, 2])
+        priority = c1.selectbox("Prioridad", [3, 2, 1], index=1, format_func=lambda x: {3: "Alta", 2: "Media", 1: "Baja"}[x])
+        purpose = c2.text_input("Qué queremos resolver", placeholder="Ej. valorar al 9 en ataques al espacio / entender salida de balón")
+        create = st.form_submit_button("Asignar trabajo de scouting", type="primary", use_container_width=True)
+
+    if create:
+        try:
+            if not assignees:
+                raise ValueError("Selecciona al menos un Scout responsable.")
+            if scope == "Jugador(es)" and not target_ids:
+                raise ValueError("Selecciona al menos un jugador o cambia el alcance a Partido completo / Equipo.")
+            if scope == "Partido completo":
+                mission_type = "spontaneous"
+                title = f"Visionar · {_match_title(match)}"
+            elif scope == "Equipo":
+                mission_type = "team"
+                team_name = match.home_team.name if target_team_id == match.home_team_id else match.away_team.name
+                title = f"Observar equipo · {team_name}"
+            else:
+                mission_type = "player" if len(target_ids) == 1 else "multi_player"
+                title = "Observar · " + (player_map[target_ids[0]].full_name if len(target_ids) == 1 else f"{len(target_ids)} jugadores")
+            with session_scope() as session:
+                for assignee in assignees:
                     planning_repo.create_mission(
-                        session, match_id=match.id, mission_type="player" if len(target_ids) <= 1 else "multi_player",
-                        title=title, assigned_to=assignee, requested_by=user["id"], player_ids=target_ids,
-                        purpose=purpose, priority=priority, due_at=match.kickoff_at if is_schedule_confirmed(match) else None,
+                        session,
+                        match_id=match.id,
+                        mission_type=mission_type,
+                        title=title,
+                        assigned_to=assignee,
+                        requested_by=user["id"],
+                        target_team_id=target_team_id,
+                        player_ids=target_ids,
+                        purpose=purpose,
+                        priority=priority,
+                        due_at=match.kickoff_at if is_schedule_confirmed(match) else None,
                     )
-                st.success("Próxima acción asignada.")
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            st.success(f"Trabajo asignado a {len(assignees)} Scout{'s' if len(assignees) != 1 else ''}.")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
 
-def _scouting_form(match, user: dict, players: list) -> None:
+def _scouting_form(match, user: dict, players: list, data: dict) -> None:
     if not can_scout(user):
         return
-    st.markdown("### Scouting")
+    st.markdown("### Scout · registrar lo observado")
+    st.caption("No tienes que elegir 'Barrido / Observación / Dossier'. Selecciona jugadores: varios = apuntes rápidos; uno = observación individual. El dossier 360 se construye automáticamente con el historial.")
+
+    my_active = [m for m in data.get("my_missions", []) if m.status in {"pending", "in_progress"}]
+    if my_active:
+        st.markdown("#### Tus encargos de Dirección Deportiva")
+        for mission in my_active:
+            target_text = _mission_target_text(mission, data.get("targets_by_mission", {}))
+            with st.container(border=True):
+                a, b = st.columns([4, 1])
+                a.markdown(f"**{mission.title}**")
+                priority_label = {3: "Alta", 2: "Media", 1: "Baja"}.get(mission.priority, "Media")
+                state_label = "En curso" if mission.status == "in_progress" else "Pendiente"
+                a.caption(f"Objetivo: {target_text} · Prioridad: {priority_label} · Estado: {state_label}")
+                if mission.purpose:
+                    a.write(mission.purpose)
+                if mission.status == "pending" and is_schedule_confirmed(match):
+                    if b.button("Empezar", key=f"mission_start_41_{mission.id}", use_container_width=True):
+                        with session_scope() as session:
+                            planning_repo.update_mission_status(session, mission.id, user["id"], status="in_progress")
+                        st.rerun()
+    else:
+        st.info("No tienes un encargo de DD en este partido. Puedes registrar una observación espontánea si has visto algo relevante.")
+
     if not is_schedule_confirmed(match):
-        st.caption("Puedes planificar el visionado, pero la observación se habilita cuando exista fecha y hora reales.")
+        st.caption("El registro de observaciones se habilita cuando exista fecha y hora reales del partido.")
         return
     if not players:
         st.info("No hay jugadores asociados a las plantillas de este partido.")
         return
+
     player_map = {p.id: p for p in players}
     with session_scope() as session:
-        all_parts=matches_repo.get_participations(session,match.id)
-        all_roster=list(players_repo.get_roster(session,match.home_team_id,match.season_id))+list(players_repo.get_roster(session,match.away_team_id,match.season_id))
-    participant_status={p.player_id:("starter" if p.starter else "substitute") for p in all_parts}
-    participant_shirt={p.player_id:p.shirt_number for p in all_parts}
-    roster_shirt={r.player_id:r.shirt_number for r in all_roster}
+        all_parts = matches_repo.get_participations(session, match.id)
+        all_roster = list(players_repo.get_roster(session, match.home_team_id, match.season_id)) + list(players_repo.get_roster(session, match.away_team_id, match.season_id))
+    participant_status = {p.player_id: ("starter" if p.starter else "substitute") for p in all_parts}
+    participant_shirt = {p.player_id: p.shirt_number for p in all_parts}
+    roster_shirt = {r.player_id: r.shirt_number for r in all_roster}
 
     def scout_player_label(pid: int) -> str:
-        player=player_map[pid]
-        status=participant_status.get(pid)
-        badge="🟢 TIT" if status=="starter" else "🟡 SUP" if status=="substitute" else "⚪ PLANTILLA"
-        shirt=participant_shirt.get(pid)
+        player = player_map[pid]
+        status = participant_status.get(pid)
+        badge = "🟢 TIT" if status == "starter" else "🟡 SUP" if status == "substitute" else "⚪ PLANTILLA"
+        shirt = participant_shirt.get(pid)
         if shirt is None:
-            shirt=roster_shirt.get(pid)
-        dorsal=f"#{shirt} · " if shirt is not None else ""
+            shirt = roster_shirt.get(pid)
+        dorsal = f"#{shirt} · " if shirt is not None else ""
         return f"{badge} · {dorsal}{player.display_name or player.full_name}"
 
-    # Neutral matches can easily contain 35-50 known players. Filter by team
-    # before asking the Scout to select a player; this keeps the daily workflow fast.
     with session_scope() as session:
-        own=players_repo.get_own_team(session)
-        neutral=not own or own.id not in {match.home_team_id,match.away_team_id}
+        own = players_repo.get_own_team(session)
+        neutral = not own or own.id not in {match.home_team_id, match.away_team_id}
         if neutral:
-            home_ids={r.player_id for r in players_repo.get_roster(session,match.home_team_id,match.season_id)}
-            away_ids={r.player_id for r in players_repo.get_roster(session,match.away_team_id,match.season_id)}
-            for part in matches_repo.get_participations(session,match.id,match.home_team_id): home_ids.add(part.player_id)
-            for part in matches_repo.get_participations(session,match.id,match.away_team_id): away_ids.add(part.player_id)
+            home_ids = {r.player_id for r in players_repo.get_roster(session, match.home_team_id, match.season_id)}
+            away_ids = {r.player_id for r in players_repo.get_roster(session, match.away_team_id, match.season_id)}
+            for part in matches_repo.get_participations(session, match.id, match.home_team_id):
+                home_ids.add(part.player_id)
+            for part in matches_repo.get_participations(session, match.id, match.away_team_id):
+                away_ids.add(part.player_id)
         else:
-            home_ids=away_ids=set()
+            home_ids = away_ids = set()
     if neutral:
-        team_scope=st.segmented_control(
-            "Equipo",["Ambos",match.home_team.name,match.away_team.name],default="Ambos",
-            key=f"scout_team_scope40_{match.id}",
+        team_scope = st.segmented_control(
+            "Equipo", ["Ambos", match.home_team.name, match.away_team.name], default="Ambos", key=f"scout_team_scope41_{match.id}"
         ) or "Ambos"
-        if team_scope==match.home_team.name:
-            player_map={pid:p for pid,p in player_map.items() if pid in home_ids}
-        elif team_scope==match.away_team.name:
-            player_map={pid:p for pid,p in player_map.items() if pid in away_ids}
+        if team_scope == match.home_team.name:
+            player_map = {pid: p for pid, p in player_map.items() if pid in home_ids}
+        elif team_scope == match.away_team.name:
+            player_map = {pid: p for pid, p in player_map.items() if pid in away_ids}
         if not player_map:
-            st.info("No hay jugadores cargados para ese equipo. Añade primero la plantilla de Federación en Estudio del partido.")
+            st.info("No hay jugadores cargados para ese equipo. Añade primero la plantilla / convocatoria disponible.")
             return
-    st.markdown("#### ¿Qué tipo de seguimiento quieres hacer?")
-    scout_modes=["⚡ Barrido rápido","👁 Observación individual","📁 Dossier completo"]
-    mode=st.segmented_control("Tipo de seguimiento",scout_modes,default=scout_modes[0],key=f"scout_level_38_{match.id}",label_visibility="collapsed") or scout_modes[0]
-    level={scout_modes[0]:"scan",scout_modes[1]:"observation",scout_modes[2]:"dossier"}[mode]
-    if level=="scan":
-        st.caption("⚡ **Barrido rápido:** compara varios jugadores del partido con nota + apunte corto. Úsalo para detectar quién merece volver a verse.")
-    elif level=="observation":
-        st.caption("👁 **Observación individual:** un jugador, posición, rendimiento y encaje con el Modelo No Name.")
-    else:
-        st.caption("📁 **Dossier completo:** evaluación profunda para jugadores que ya están en seguimiento: nivel, proyección, fortalezas y riesgos.")
-    if level == "scan":
-        ordered_ids=sorted(player_map, key=lambda pid: ({"starter":0,"substitute":1}.get(participant_status.get(pid),2), (participant_shirt.get(pid) if participant_shirt.get(pid) is not None else 999), (player_map[pid].display_name or player_map[pid].full_name)))
-        selected = st.multiselect("Jugadores", ordered_ids, format_func=scout_player_label, key=f"scan_ids_38_{match.id}")
-        if not selected:
-            st.caption("Selecciona uno o varios jugadores para un barrido rápido.")
-            return
-        with st.form(f"scan_form_38_{match.id}"):
-            rows=[]
-            for pid in selected:
-                p=player_map[pid]
-                a,b=st.columns([1,3])
-                rating=a.number_input(f"{p.display_name or p.full_name} · nota",0.0,10.0,0.0,.5,key=f"scan38_rate_{match.id}_{pid}")
-                note=b.text_input(f"{p.display_name or p.full_name} · apunte",key=f"scan38_note_{match.id}_{pid}")
-                rows.append({"player_id":pid,"general_rating":rating,"observed_position":p.primary_position,"summary":note})
-            save=st.form_submit_button("Guardar barrido",type="primary",use_container_width=True)
-        if save:
-            with session_scope() as session:
-                count=planning_repo.save_quick_match_observations(session,match_id=match.id,reviewer_id=user["id"],rows=rows)
-            st.success(f"{count} observaciones guardadas.") if count else st.warning("Asigna una nota superior a 0 para guardar.")
-            if count: st.rerun()
+
+    player_missions = [m for m in my_active if m.mission_type in {"player", "multi_player", "spontaneous"}]
+    mission_options = [None] + [m.id for m in player_missions]
+    mission_id = st.selectbox(
+        "Encargo asociado (opcional)",
+        mission_options,
+        format_func=lambda mid: "Observación espontánea" if mid is None else next(f"{m.title} · {_mission_target_text(m, data.get('targets_by_mission', {}))}" for m in player_missions if m.id == mid),
+        key=f"scout_mission_link_41_{match.id}",
+    )
+    target_defaults: list[int] = []
+    if mission_id is not None:
+        target_defaults = [t.player_id for t in data.get("targets_by_mission", {}).get(mission_id, []) if t.player_id in player_map]
+
+    ordered_ids = sorted(
+        player_map,
+        key=lambda pid: (
+            {"starter": 0, "substitute": 1}.get(participant_status.get(pid), 2),
+            participant_shirt.get(pid) if participant_shirt.get(pid) is not None else roster_shirt.get(pid) if roster_shirt.get(pid) is not None else 999,
+            player_map[pid].display_name or player_map[pid].full_name,
+        ),
+    )
+    selected = st.multiselect(
+        "Jugadores observados",
+        ordered_ids,
+        default=target_defaults,
+        format_func=scout_player_label,
+        key=f"scout_players_41_{match.id}_{mission_id or 0}",
+        help="Selecciona uno para abrir una observación individual. Selecciona varios para un barrido rápido del partido.",
+    )
+    if not selected:
+        st.caption("Selecciona el jugador o jugadores que has observado.")
         return
 
-    ordered_ids=sorted(player_map, key=lambda pid: ({"starter":0,"substitute":1}.get(participant_status.get(pid),2), (participant_shirt.get(pid) if participant_shirt.get(pid) is not None else 999), (player_map[pid].display_name or player_map[pid].full_name)))
-    pid=st.selectbox("Jugador",ordered_ids,format_func=scout_player_label,key=f"scout_player_38_{match.id}_{level}")
-    player=player_map[pid]
+    if len(selected) > 1:
+        st.caption(f"⚡ Apuntes rápidos · {len(selected)} jugadores. El sistema los guarda como observaciones de barrido sin pedirte que elijas un nivel.")
+        with st.form(f"scan_form_41_{match.id}_{mission_id or 0}"):
+            rows = []
+            for pid in selected:
+                p = player_map[pid]
+                a, b = st.columns([1, 3])
+                rating = a.number_input(f"{p.display_name or p.full_name} · nota", 0.0, 10.0, 0.0, .5, key=f"scan41_rate_{match.id}_{pid}")
+                note = b.text_input(f"{p.display_name or p.full_name} · apunte", key=f"scan41_note_{match.id}_{pid}")
+                rows.append({"player_id": pid, "general_rating": rating, "observed_position": p.primary_position, "summary": note})
+            save = st.form_submit_button("Guardar apuntes rápidos", type="primary", use_container_width=True)
+        if save:
+            try:
+                with session_scope() as session:
+                    count = planning_repo.save_quick_match_observations(
+                        session, match_id=match.id, reviewer_id=user["id"], rows=rows, mission_id=mission_id,
+                    )
+                if count:
+                    st.success(f"{count} observaciones guardadas.")
+                    st.rerun()
+                else:
+                    st.warning("Asigna una nota superior a 0 al menos a un jugador para guardar.")
+            except Exception as exc:
+                st.error(str(exc))
+        return
+
+    pid = selected[0]
+    player = player_map[pid]
+    st.caption("👁 Observación individual · un jugador. El historial de estas observaciones alimenta automáticamente su Player Report 360.")
     with session_scope() as session:
-        roles=planning_repo.list_model_roles(session)
-    role_options=[None]+[r.id for r in roles if not player.primary_position or r.position==player.primary_position] or [None]
-    role_id=st.selectbox("Rol No Name",role_options,format_func=lambda rid:"Sin rol todavía" if rid is None else next(f"{r.position} · {r.name}" for r in roles if r.id==rid),key=f"scout_role_38_{match.id}_{pid}_{level}")
+        model_roles = planning_repo.list_model_roles(session)
+    role_options = [None] + [r.id for r in model_roles if not player.primary_position or r.position == player.primary_position]
+    role_id = st.selectbox(
+        "Rol No Name", role_options,
+        format_func=lambda rid: "Sin rol todavía" if rid is None else next(f"{r.position} · {r.name}" for r in model_roles if r.id == rid),
+        key=f"scout_role_41_{match.id}_{pid}",
+    )
     with session_scope() as session:
-        criteria=planning_repo.list_model_criteria(session,role_id) if role_id else []
-    with st.form(f"obs_form_38_{match.id}_{pid}_{level}_{role_id}"):
-        c1,c2=st.columns(2)
-        position=c1.selectbox("Posición observada",POSITIONS,index=POSITIONS.index(player.primary_position) if player.primary_position in POSITIONS else 0)
-        rating=c2.number_input("Rendimiento del partido",0.0,10.0,0.0,.5)
-        scores={}
+        criteria = planning_repo.list_model_criteria(session, role_id) if role_id else []
+    with st.form(f"obs_form_41_{match.id}_{pid}_{role_id}_{mission_id or 0}"):
+        c1, c2 = st.columns(2)
+        position = c1.selectbox("Posición observada", POSITIONS, index=POSITIONS.index(player.primary_position) if player.primary_position in POSITIONS else 0)
+        rating = c2.number_input("Rendimiento del partido", 0.0, 10.0, 0.0, .5)
+        scores = {}
         if role_id:
             st.markdown("**Criterios del Modelo No Name**")
             for criterion in criteria:
-                scores[criterion.id]=st.number_input(f"{criterion.name} · peso {criterion.weight}",0.0,10.0,0.0,.5,key=f"crit38_{match.id}_{pid}_{criterion.id}_{level}")
-        summary=st.text_area("Conclusión",height=80)
-        recommendation=st.selectbox("Recomendación",["Sin conclusión","Volver a ver","Seguimiento","Prioritario","Descartado"])
-        current=potential=None; strengths=weaknesses=None
-        if level=="dossier":
-            c3,c4=st.columns(2)
-            current=c3.number_input("Nivel actual",0.0,10.0,0.0,.5)
-            potential=c4.number_input("Proyección",0.0,10.0,0.0,.5)
-            strengths=st.text_area("Fortalezas",height=70)
-            weaknesses=st.text_area("Riesgos / dudas",height=70)
-        submit=st.form_submit_button("Guardar observación",type="primary",use_container_width=True)
+                scores[criterion.id] = st.number_input(
+                    f"{criterion.name} · peso {criterion.weight}", 0.0, 10.0, 0.0, .5,
+                    key=f"crit41_{match.id}_{pid}_{criterion.id}",
+                )
+        summary = st.text_area("Conclusión del partido", height=90)
+        recommendation = st.selectbox("Siguiente lectura", ["Sin conclusión", "Volver a ver", "Seguimiento", "Prioritario", "Descartado"])
+        with st.expander("Detalle opcional"):
+            strengths = st.text_area("Fortalezas observadas", height=70)
+            weaknesses = st.text_area("Riesgos / dudas", height=70)
+        submit = st.form_submit_button("Guardar observación", type="primary", use_container_width=True)
     if submit:
         try:
-            clean_scores={cid:score for cid,score in scores.items() if score and score>0}
+            clean_scores = {cid: score for cid, score in scores.items() if score and score > 0}
             with session_scope() as session:
-                fit=planning_repo.weighted_model_fit(planning_repo.list_model_criteria(session,role_id),clean_scores) if role_id else None
-                obs=planning_repo.create_observation(session,player_id=pid,reviewer_id=user["id"],match_id=match.id,source_type="specific",observation_level=level,model_role_id=role_id)
-                planning_repo.save_observation(
-                    session,obs.id,user["id"],observed_position=position,general_rating=rating if rating>0 else None,
-                    model_fit_score=fit,attributes=clean_scores,summary=summary,recommendation=recommendation,
-                    current_level=current if current and current>0 else None,potential_score=potential if potential and potential>0 else None,
-                    strengths=strengths,weaknesses=weaknesses,model_role_id=role_id,observation_level=level,submit=True,
+                fit = planning_repo.weighted_model_fit(planning_repo.list_model_criteria(session, role_id), clean_scores) if role_id else None
+                obs = planning_repo.create_observation(
+                    session, player_id=pid, reviewer_id=user["id"], match_id=match.id,
+                    mission_id=mission_id, source_type="specific", observation_level="observation", model_role_id=role_id,
                 )
-            st.success("Observación guardada.")
+                planning_repo.save_observation(
+                    session, obs.id, user["id"], observed_position=position,
+                    general_rating=rating if rating > 0 else None, model_fit_score=fit,
+                    attributes=clean_scores, summary=summary, recommendation=recommendation,
+                    strengths=strengths, weaknesses=weaknesses, model_role_id=role_id,
+                    observation_level="observation", submit=True,
+                )
+            st.success("Observación guardada y añadida al historial 360 del jugador.")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -519,6 +640,18 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     if not data["is_own_match"]:
         _neutral_match_study(match,user)
 
+    current_roles = roles_for(user)
+    if "admin" in current_roles and "director" not in current_roles and "scout" not in current_roles:
+        st.info("**Flujo 4.1 · Administración**: deja calendario, horario, equipos y plantillas en orden. El seguimiento deportivo lo decide Dirección Deportiva y lo ejecuta Scout.")
+    elif "director" in current_roles:
+        if data.get("missions"):
+            st.info("**Flujo 4.1 · Dirección Deportiva**: revisa el seguimiento ya asignado o crea una nueva tarea para uno o varios Scouts.")
+        else:
+            st.info("**Flujo 4.1 · Dirección Deportiva**: este partido todavía no tiene seguimiento asignado. Si no aporta interés, no hace falta crear ninguna tarea.")
+    elif "scout" in current_roles:
+        own_tasks = [m for m in data.get("my_missions", []) if m.status in {"pending", "in_progress"}]
+        st.info(f"**Flujo 4.1 · Scout**: tienes {len(own_tasks)} encargo{'s' if len(own_tasks) != 1 else ''} activo{'s' if len(own_tasks) != 1 else ''} en este partido. Registra lo observado sin elegir niveles artificiales.")
+
     st.markdown("### Estado del partido")
     c1,c2=st.columns(2)
     with c1:
@@ -534,7 +667,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
 
     _mission_planning(match,user,players)
     _rival_analysis(match,user,data)
-    _scouting_form(match,user,players)
+    _scouting_form(match,user,players,data)
 
 
 def render(user: dict) -> None:

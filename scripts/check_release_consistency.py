@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.0.7"
-HEAD_MIGRATION = "0010_core_workspace_schema_repair_4_0_4"
+EXPECTED = "4.1.1"
+HEAD_MIGRATION = "0011_user_lifecycle_4_1_1"
 
 
 def read_version() -> str:
@@ -94,15 +94,47 @@ def main() -> None:
     if 'items.append("Plantilla")' not in permissions_text or 'items.append("Administración")' not in permissions_text:
         errors.append("Faltan capas de Plantilla/Administración por permiso")
 
-    migration_text = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
+    migration_0008 = (ROOT / "alembic" / "versions" / "0008_match_study_4_0.py").read_text(encoding="utf-8")
     for token in ["video_available", "home_formation_known", "away_formation_known", "study_notes"]:
-        if token not in migration_text:
+        if token not in migration_0008:
             errors.append(f"Migración 0008 incompleta: falta {token}")
+    head_text = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
+    if "deleted_at" not in head_text or "users" not in head_text:
+        errors.append("Migración 0011 incompleta: falta ciclo de vida de usuarios")
 
     jornada_text = (ROOT / "views" / "jornada.py").read_text(encoding="utf-8")
     for token in ["Vídeo disponible", "Formación desconocida", "render_campogram", "Actualizar plantilla desde Federación"]:
         if token not in jornada_text:
             errors.append(f"Jornada 4.0 incompleta: falta {token}")
+    for token in ["Dirección Deportiva · asignar seguimiento", "Scout · registrar lo observado", "dossier 360 se construye automáticamente"]:
+        if token not in jornada_text:
+            errors.append(f"Flujo 4.1 incompleto: falta {token}")
+    if "Dossier completo" in jornada_text or "Tipo de seguimiento" in jornada_text:
+        errors.append("Jornada todavía obliga a elegir Barrido/Observación/Dossier")
+
+    security_text = (ROOT / "core" / "security.py").read_text(encoding="utf-8")
+    if "La contraseña no puede estar vacía" not in security_text or "al menos 10 caracteres" in security_text:
+        errors.append("La política de contraseña 4.1.1 no es simple/opcional")
+    users_text = (ROOT / "repositories" / "users.py").read_text(encoding="utf-8")
+    for token in ["delete_user", "restore_user", "deleted_at", "must_change_password = False"]:
+        if token not in users_text:
+            errors.append(f"Gestión de usuarios 4.1.1 incompleta: falta {token}")
+    admin_text = (ROOT / "views" / "admin.py").read_text(encoding="utf-8")
+    for token in ["Añadir", "Editar / eliminar", "Eliminados", "Eliminar usuario", "Restaurar usuario"]:
+        if token not in admin_text:
+            errors.append(f"Pantalla de usuarios 4.1.1 incompleta: falta {token}")
+    if "if user.get(\"must_change_password\")" in app_text:
+        errors.append("La app todavía bloquea el acceso por cambio obligatorio de contraseña")
+
+    if 'return has_any(user, ROLE_SCOUT)' not in permissions_text:
+        errors.append("Admin/DD siguen heredando capacidad Scout")
+    if 'return has_any(user, ROLE_DIRECTOR)' not in permissions_text:
+        errors.append("Admin sigue heredando capacidad de Dirección Deportiva")
+    planning_text = (ROOT / "repositories" / "planning.py").read_text(encoding="utf-8")
+    if 'assert_role(session, requested_by, "director")' not in planning_text:
+        errors.append("La asignación de scouting no está reservada a Dirección Deportiva")
+    if 'user_has_role(session, assignee.id, "scout")' not in planning_text:
+        errors.append("Las tareas de scouting pueden asignarse a usuarios sin rol Scout")
 
     if errors:
         raise SystemExit("Release inconsistente:\n- " + "\n- ".join(errors))

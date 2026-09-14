@@ -130,7 +130,7 @@ def _technical(user: dict) -> None:
 def render(user: dict) -> None:
     if not can_admin(user):
         st.error("No tienes permiso de administración."); return
-    page_header("Administración","Usuarios, club y datos. Las herramientas técnicas quedan en segundo plano.")
+    page_header("Administración","Usuarios, roles, calendario y datos. Las decisiones deportivas se realizan desde Dirección Deportiva.")
     section=st.segmented_control("Sección",["Usuarios","Club","Datos","Configuración"],default="Usuarios") or "Usuarios"
     from views import admin as legacy_admin
     from views import catalog as legacy_catalog

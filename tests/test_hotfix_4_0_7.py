@@ -31,9 +31,9 @@ def _neutral_match(session):
 
 
 def test_release_407_contract():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.0.7"
-    assert 'APP_VERSION = "4.0.7"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.0.7"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.1.1"
+    assert 'APP_VERSION = "4.1.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.1.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
 
 
 def test_parser_understands_starters_and_substitutes_sections():
@@ -82,12 +82,14 @@ def test_known_formation_can_save_bench_and_reject_overlap(session_factory):
         assert len([p for p in parts if not p.starter]) == 3
 
 
-def test_jornada_labels_squad_status_and_explains_scout_modes():
+def test_jornada_labels_squad_status_and_automatic_scout_flow():
     body = (ROOT / "views/jornada.py").read_text(encoding="utf-8")
     assert "🟢 TIT" in body
     assert "🟡 SUP" in body
     assert "⚪ PLANTILLA" in body
-    assert "Barrido rápido" in body
+    assert "apuntes rápidos" in body
     assert "Observación individual" in body
-    assert "Dossier completo" in body
+    assert "Dossier completo" not in body
+    assert "Tipo de seguimiento" not in body
+    assert "dossier 360 se construye automáticamente" in body
     assert "TITULARES" in body and "SUPLENTES" in body

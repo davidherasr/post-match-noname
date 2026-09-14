@@ -48,7 +48,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name PostMatch se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la release 4.0.7; "
+        "Sustituye **todo el contenido del repositorio** por la release 4.1.1; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -98,7 +98,7 @@ except DatabaseUnavailableError as exc:
 except DatabaseSchemaError as exc:
     st.error("La base de datos necesita completar una actualización de esquema.")
     st.markdown(
-        "No se ha ejecutado ninguna pantalla deportiva. La release 4.0.7 incluye una migración "
+        "No se ha ejecutado ninguna pantalla deportiva. La release 4.1.1 incluye una migración "
         "de reparación **no destructiva** para alinear la estructura física de Supabase con la aplicación."
     )
     if exc.missing:
@@ -145,13 +145,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.0.7"
+    expected_api = "4.1.1"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.0.7 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.1.1 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -164,7 +164,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
         st.error(f"No se encuentra la función requerida: views.reports.{renderer_name}().")
-        st.info("Vuelve a subir el paquete completo No Name PostMatch 4.0.7 y reinicia la aplicación.")
+        st.info("Vuelve a subir el paquete completo No Name PostMatch 4.1.1 y reinicia la aplicación.")
         st.stop()
     renderer(user)
 
@@ -217,26 +217,8 @@ if not user:
     render_login()
     st.stop()
 
-if user.get("must_change_password"):
-    st.warning("Debes cambiar la contraseña inicial antes de utilizar la aplicación.")
-    with st.form("mandatory_password_change"):
-        current = st.text_input("Contraseña actual", type="password")
-        new = st.text_input("Nueva contraseña", type="password")
-        repeat = st.text_input("Repite la nueva contraseña", type="password")
-        change = st.form_submit_button("Cambiar contraseña", type="primary")
-    if change:
-        if new != repeat:
-            st.error("Las nuevas contraseñas no coinciden.")
-        else:
-            try:
-                with session_scope() as session:
-                    repo.change_own_password(session, user["id"], current, new)
-                logout()
-                st.success("Contraseña actualizada. Vuelve a iniciar sesión.")
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
-    st.stop()
+# 4.1.1: password changes are optional. Simple internal passwords are allowed.
+# Legacy must_change_password flags are ignored/cleared on successful login.
 
 # 3.8: roles are cumulative capabilities, never an operating profile selector.
 st.session_state.pop("active_profile_role", None)
@@ -263,6 +245,24 @@ with st.sidebar:
         st.caption(" · ".join(role_labels))
     selected_label = st.radio("Navegación", labels, label_visibility="collapsed", key=nav_key)
     st.divider()
+    with st.expander("Mi cuenta", expanded=False):
+        st.caption("Puedes mantener tu contraseña actual aunque sea simple. Cambiarla es opcional.")
+        with st.form("optional_password_change_sidebar"):
+            current_password = st.text_input("Contraseña actual", type="password", key="sidebar_current_password")
+            new_password = st.text_input("Nueva contraseña", type="password", key="sidebar_new_password", help="Se acepta cualquier contraseña no vacía, por ejemplo 1234.")
+            repeat_password = st.text_input("Repite la nueva", type="password", key="sidebar_repeat_password")
+            change_password_submit = st.form_submit_button("Cambiar contraseña", use_container_width=True)
+        if change_password_submit:
+            if new_password != repeat_password:
+                st.error("Las contraseñas nuevas no coinciden.")
+            else:
+                try:
+                    with session_scope() as session:
+                        repo.change_own_password(session, user["id"], current_password, new_password)
+                    logout()
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
     if st.button("Cerrar sesión", use_container_width=True):
         logout()
         st.rerun()

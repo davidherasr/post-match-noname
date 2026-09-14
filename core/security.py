@@ -10,20 +10,29 @@ _ITERATIONS = 390_000
 
 
 def validate_password(password: str) -> None:
-    if len(password or "") < 10:
-        raise ValueError("La contraseña debe tener al menos 10 caracteres.")
-    if not re.search(r"[A-ZÁÉÍÓÚÜÑ]", password):
-        raise ValueError("La contraseña debe incluir una mayúscula.")
-    if not re.search(r"[a-záéíóúüñ]", password):
-        raise ValueError("La contraseña debe incluir una minúscula.")
-    if not re.search(r"\d", password):
-        raise ValueError("La contraseña debe incluir un número.")
-    if not re.search(r"[^\w\s]", password):
-        raise ValueError("La contraseña debe incluir un símbolo.")
+    """No Name uses intentionally lightweight internal credentials.
+
+    Password complexity is never enforced. Any non-empty value is accepted,
+    including simple PIN-like passwords such as ``1`` or ``1234``. The UI may
+    recommend changing a weak password, but access is never blocked for it.
+    """
+    value = password if password is not None else ""
+    if len(value) < 1:
+        raise ValueError("La contraseña no puede estar vacía.")
+    if len(value) > 128:
+        raise ValueError("La contraseña no puede superar 128 caracteres.")
 
 
-def hash_password(password: str) -> str:
+def validate_temporary_password(password: str) -> None:
+    # Kept as a compatibility alias for older callers/releases. In 4.1.1 there
+    # is no distinction between provisional and definitive credentials.
     validate_password(password)
+
+def hash_password(password: str, *, temporary: bool = False) -> str:
+    if temporary:
+        validate_temporary_password(password)
+    else:
+        validate_password(password)
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _ITERATIONS)
     return "pbkdf2_sha256${}${}${}".format(

@@ -191,7 +191,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
         for m in issues:
             tasks.append({"kind": "schedule", "severity": "action" if (m.match_date-today).days <= 7 else "pending", "title": f"Confirmar horario · {m.home_team.name} - {m.away_team.name}", "match_id": m.id, "due": m.match_date})
 
-    if roles.intersection({"scout", "director", "admin"}):
+    if "scout" in roles:
         missions = planning_repo.list_missions(session, assigned_to=user_id, limit=30)
         for m in missions:
             if m.status not in {"pending", "in_progress"}:
@@ -210,7 +210,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
             tasks.append({"kind": "report", "severity": "action" if a.status == "returned" else "pending", "title": f"Informe · {a.match.home_team.name} - {a.match.away_team.name}", "match_id": a.match_id, "due": a.due_at or a.match.match_date})
 
     director = {"decision_count": 0, "high_needs": 0, "new_scout": 0}
-    if active and roles.intersection({"director", "admin"}):
+    if active and "director" in roles:
         director["decision_count"] = int(session.scalar(
             select(func.count(PlayerSeasonDecision.id)).where(PlayerSeasonDecision.season_id == active.id, PlayerSeasonDecision.status.in_(["Base", "Observado", "Interesante"]))
         ) or 0)
