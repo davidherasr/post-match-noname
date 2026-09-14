@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.1.1"
+EXPECTED = "4.1.2"
 HEAD_MIGRATION = "0011_user_lifecycle_4_1_1"
 
 
@@ -114,17 +114,21 @@ def main() -> None:
 
     security_text = (ROOT / "core" / "security.py").read_text(encoding="utf-8")
     if "La contraseña no puede estar vacía" not in security_text or "al menos 10 caracteres" in security_text:
-        errors.append("La política de contraseña 4.1.1 no es simple/opcional")
+        errors.append("La política de contraseña 4.1.2 no es simple/opcional")
     users_text = (ROOT / "repositories" / "users.py").read_text(encoding="utf-8")
     for token in ["delete_user", "restore_user", "deleted_at", "must_change_password = False"]:
         if token not in users_text:
-            errors.append(f"Gestión de usuarios 4.1.1 incompleta: falta {token}")
+            errors.append(f"Gestión de usuarios 4.1.2 incompleta: falta {token}")
     admin_text = (ROOT / "views" / "admin.py").read_text(encoding="utf-8")
     for token in ["Añadir", "Editar / eliminar", "Eliminados", "Eliminar usuario", "Restaurar usuario"]:
         if token not in admin_text:
-            errors.append(f"Pantalla de usuarios 4.1.1 incompleta: falta {token}")
+            errors.append(f"Pantalla de usuarios 4.1.2 incompleta: falta {token}")
     if "if user.get(\"must_change_password\")" in app_text:
         errors.append("La app todavía bloquea el acceso por cambio obligatorio de contraseña")
+    if 'selectbox("Rol principal"' in admin_text or '"Rol principal":' in admin_text:
+        errors.append("Administración todavía expone un rol principal; 4.1.2 debe trabajar solo con roles acumulativos")
+    if "compatibility_role_for" not in users_text:
+        errors.append("Falta la selección interna automática del rol de compatibilidad")
 
     if 'return has_any(user, ROLE_SCOUT)' not in permissions_text:
         errors.append("Admin/DD siguen heredando capacidad Scout")

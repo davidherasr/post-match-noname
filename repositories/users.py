@@ -22,6 +22,26 @@ from models.entities import (
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
+ROLE_COMPATIBILITY_PRIORITY = ("admin", "director", "scout", "reporter")
+
+
+def compatibility_role_for(roles: Sequence[str] | None, fallback: str = "reporter") -> str:
+    """Choose the legacy ``users.role`` value without exposing a primary-role concept.
+
+    Real authorization is based on ``UserRole``. ``users.role`` is retained only for
+    backwards compatibility with old screens/exports, so the choice must never remove
+    or add capabilities. A deterministic precedence avoids accidental ``reporter``
+    classification for a multi-role sporting user.
+    """
+    clean = list(dict.fromkeys(str(r) for r in (roles or []) if str(r)))
+    for candidate in ROLE_COMPATIBILITY_PRIORITY:
+        if candidate in clean:
+            return candidate
+    if clean:
+        return clean[0]
+    return fallback or "reporter"
+
+
 def count_users(session: Session) -> int:
     return int(session.scalar(select(func.count(User.id)).where(User.deleted_at.is_(None))) or 0)
 

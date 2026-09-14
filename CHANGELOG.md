@@ -1,3 +1,11 @@
+## 4.1.2 · Roles sin principal visible
+
+- Se elimina **Rol principal** de Listado, alta y edición de usuarios.
+- Administración asigna únicamente **Roles y accesos**; todos los roles seleccionados son capacidades simultáneas.
+- La compatibilidad con el campo histórico `users.role` se resuelve automáticamente con una prioridad interna determinista; no concede ni retira permisos.
+- Se exige al menos un rol al crear o editar una cuenta para evitar usuarios sin acceso definido.
+- Sin cambios de esquema: Alembic continúa en `0011_user_lifecycle_4_1_1`.
+
 ## 4.1.1 · Contraseñas libres y gestión completa de usuarios
 
 - Se elimina toda exigencia de complejidad de contraseña: cualquier valor no vacío es válido.

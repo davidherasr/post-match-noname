@@ -6,8 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_404_contract():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.1.1"
-    assert 'APP_VERSION = "4.1.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.1.2"
+    assert 'APP_VERSION = "4.1.2"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
     assert (ROOT / "alembic/versions/0010_core_workspace_schema_repair_4_0_4.py").exists()
 
 

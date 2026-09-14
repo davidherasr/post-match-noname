@@ -41,6 +41,7 @@ def _section_users(user: dict) -> None:
     r2.info("**Dirección Deportiva**\n\nDecide qué seguir y asigna trabajo a Scout.")
     r3.info("**Scout**\n\nEjecuta visionados y registra observaciones.")
     r4.info("**Informador**\n\nCompleta informes de partidos asignados.")
+    st.caption("Asigna todos los roles que necesite cada persona. No existe un rol principal: los permisos se calculan con el conjunto completo de roles.")
 
     with session_scope() as session:
         all_users = repo.list_users(session, include_deleted=True)
@@ -66,7 +67,6 @@ def _section_users(user: dict) -> None:
                 "Nombre": u.full_name,
                 "Correo": u.email,
                 "Roles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
-                "Rol principal": ROLES.get(u.role, u.role),
                 "Estado": "Activo" if u.active else "Desactivado",
                 "Último acceso": u.last_login_at,
             })
@@ -88,8 +88,6 @@ def _section_users(user: dict) -> None:
                 format_func=lambda r: ROLES[r],
                 help="Los roles son independientes. Si una persona hace dos funciones, asigna ambos.",
             )
-            primary_options = roles or ["reporter"]
-            primary = c3.selectbox("Rol principal", primary_options, format_func=lambda r: ROLES[r])
             password = c4.text_input(
                 "Contraseña",
                 type="password",
@@ -98,23 +96,26 @@ def _section_users(user: dict) -> None:
             active = c4.checkbox("Cuenta activa", value=True)
             create = st.form_submit_button("Crear usuario", type="primary", use_container_width=True)
         if create:
-            try:
-                with session_scope() as session:
-                    repo.create_user(
-                        session,
-                        name,
-                        email,
-                        password,
-                        role=primary,
-                        roles=roles or [primary],
-                        active=active,
-                        actor_id=user["id"],
-                        must_change_password=False,
-                    )
-                st.success("Usuario creado. Puede mantener esa contraseña indefinidamente si quiere.")
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            if not roles:
+                st.error("Selecciona al menos un rol y acceso para el usuario.")
+            else:
+                try:
+                    with session_scope() as session:
+                        repo.create_user(
+                            session,
+                            name,
+                            email,
+                            password,
+                            role=repo.compatibility_role_for(roles),
+                            roles=roles,
+                            active=active,
+                            actor_id=user["id"],
+                            must_change_password=False,
+                        )
+                    st.success("Usuario creado. Puede mantener esa contraseña indefinidamente si quiere.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
         return
 
     if mode == "Editar / eliminar":
@@ -141,13 +142,7 @@ def _section_users(user: dict) -> None:
                 format_func=lambda r: ROLES[r],
             )
             c3, c4 = st.columns(2)
-            primary_options = roles_new or [selected_user.role]
-            role_new = c3.selectbox(
-                "Rol principal",
-                primary_options,
-                index=primary_options.index(selected_user.role) if selected_user.role in primary_options else 0,
-                format_func=lambda r: ROLES[r],
-            )
+            c3.caption("Los accesos dependen únicamente de los roles seleccionados; no existe un rol principal.")
             active = c4.checkbox("Cuenta activa", value=selected_user.active)
             password_new = st.text_input(
                 "Nueva contraseña (opcional)",
@@ -156,7 +151,9 @@ def _section_users(user: dict) -> None:
             )
             save = st.form_submit_button("Guardar cambios", type="primary", use_container_width=True)
         if save:
-            if selected == user["id"] and not active:
+            if not roles_new:
+                st.error("Selecciona al menos un rol y acceso para el usuario.")
+            elif selected == user["id"] and not active:
                 st.error("No puedes desactivar tu propia cuenta durante la sesión.")
             else:
                 try:
@@ -164,13 +161,13 @@ def _section_users(user: dict) -> None:
                         repo.update_user(
                             session,
                             selected,
-                            role_new,
+                            repo.compatibility_role_for(roles_new),
                             active,
                             password_new or None,
                             user["id"],
                             full_name=full_name,
                             email=email,
-                            roles=roles_new or [role_new],
+                            roles=roles_new,
                             force_password_change=False,
                         )
                     st.success("Usuario actualizado.")

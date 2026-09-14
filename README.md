@@ -1,4 +1,4 @@
-# No Name PostMatch 4.1.1
+# No Name PostMatch 4.1.2
 
 Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
 
@@ -22,6 +22,8 @@ En Jornada desaparece el selector manual **Barrido / Observación / Dossier**. E
 Desde 4.1.1 las contraseñas son deliberadamente simples para este entorno interno: se acepta cualquier valor no vacío, incluido `1` o `1234`. Cambiarla es una opción del usuario, nunca una obligación. Administración dispone además de una gestión completa de cuentas: alta, edición de nombre/correo/roles/estado/contraseña, eliminación segura y restauración.
 
 4.1.1 añade la migración no destructiva `0011_user_lifecycle_4_1_1` para soportar borrado lógico de usuarios sin romper el historial.
+
+Desde 4.1.2 Administración ya no muestra ni solicita **Rol principal**. Solo se asignan **Roles y accesos**; todos son efectivos simultáneamente. El campo histórico `users.role` se mantiene únicamente por compatibilidad interna y la aplicación lo calcula automáticamente, sin afectar permisos. 4.1.2 no añade migraciones.
 
 
 ## 4.0.7 · XI observado reactivo

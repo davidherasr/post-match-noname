@@ -18,9 +18,9 @@ def _user_dict(*roles: str) -> dict:
 
 
 def test_release_411_contract_and_user_lifecycle_head():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.1.1"
-    assert 'APP_VERSION = "4.1.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.1.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.1.2"
+    assert 'APP_VERSION = "4.1.2"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.1.2"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
     migration = ROOT / "alembic/versions/0011_user_lifecycle_4_1_1.py"
     assert migration.exists()
     assert 'down_revision = "0010_core_workspace_schema_repair_4_0_4"' in migration.read_text(encoding="utf-8")
@@ -161,3 +161,18 @@ def test_admin_user_screen_has_full_crud_and_optional_password_copy():
     assert 'if user.get("must_change_password")' not in app
     assert "Cambiar contraseña" in app
     assert "Cambiarla es opcional" in app
+
+
+def test_admin_does_not_expose_primary_role_selector():
+    body = (ROOT / "views/admin.py").read_text(encoding="utf-8")
+    assert 'selectbox("Rol principal"' not in body
+    assert '"Rol principal":' not in body
+    assert "no existe un rol principal" in body
+
+
+def test_compatibility_role_is_automatic_and_permissions_stay_multirole():
+    assert repo.compatibility_role_for(["reporter"]) == "reporter"
+    assert repo.compatibility_role_for(["reporter", "scout"]) == "scout"
+    assert repo.compatibility_role_for(["reporter", "director"]) == "director"
+    assert repo.compatibility_role_for(["scout", "director"]) == "director"
+    assert repo.compatibility_role_for(["reporter", "admin"]) == "admin"
