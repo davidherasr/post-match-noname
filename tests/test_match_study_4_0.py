@@ -95,7 +95,7 @@ def test_known_formation_lineup_is_saved_in_slot_order(session_factory):
 
 
 def test_match_hub_contains_independent_study_controls():
-    source = Path("pages/jornada.py").read_text(encoding="utf-8")
+    source = Path("views/jornada.py").read_text(encoding="utf-8")
     assert "Vídeo disponible" in source
     assert "home_formation_known" in source
     assert "away_formation_known" in source

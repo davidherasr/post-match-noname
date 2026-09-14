@@ -361,13 +361,13 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     if mode=="postmatch":
         if st.button("← Volver a la ficha del partido",key=f"back_post_38_{match_id}"):
             st.session_state.pop("match_hub_mode",None); st.rerun()
-        from pages import postmatch
+        from views import postmatch
         postmatch.render(user)
         return
     if mode=="report":
         if st.button("← Volver a la ficha del partido",key=f"back_report_38_{match_id}"):
             st.session_state.pop("match_hub_mode",None); st.rerun()
-        from pages import reports
+        from views import reports
         reports.render_match_report(user,match_id)
         return
 
@@ -428,7 +428,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
 def render(user: dict) -> None:
     team_opened=st.session_state.get("workspace_team_id")
     if team_opened:
-        from pages import team_hub
+        from views import team_hub
         team_hub.render(user,int(team_opened)); return
     opened=st.session_state.get("workspace_match_id")
     if opened:
@@ -480,7 +480,7 @@ def render(user: dict) -> None:
     if can_admin(user):
         with st.expander("Importar calendario / mantenimiento excepcional"):
             st.caption("Estas herramientas quedan fuera del flujo diario.")
-            from pages import calendar as legacy_calendar
+            from views import calendar as legacy_calendar
             # Import/schedule tools remain available, but not as primary navigation.
             if st.button("Abrir herramientas de calendario",use_container_width=True,key="legacy_calendar_39"):
                 st.session_state["calendar_tools_39"]=not st.session_state.get("calendar_tools_39",False)

@@ -243,3 +243,13 @@
 
 ## 2.0.0
 - PostgreSQL/Supabase, Alembic, seguridad, snapshots, seguimiento, backups y analítica robusta.
+## 4.0.1 · Hotfix de despliegue y arranque
+
+- Se elimina físicamente el directorio especial `pages/` de Streamlit. Las vistas internas pasan a `views/`, por lo que ya no puede reaparecer la navegación automática con `admin`, `calendar`, `scout`, etc.
+- Arranque PostgreSQL/Supabase robustecido: prueba de conectividad con reintentos, TLS obligatorio para hosts Supabase y timeout finito.
+- Alembic reutiliza la conexión ya validada durante el arranque, evitando abrir una segunda conexión en frío.
+- Los fallos de conexión ya no derriban la aplicación con un traceback rojo: se muestra un diagnóstico seguro sin exponer contraseña.
+- Se detectan `DATABASE_URL` incompletas o con placeholders antes de intentar migrar.
+- Aviso específico cuando se usa el host directo `db.<project>.supabase.co`, recomendando Session pooler en despliegues sin IPv6.
+- Suite de pruebas estabilizada cerrando correctamente los engines SQLite de cada test.
+- No cambia el esquema respecto a 4.0.0: Alembic continúa en `0008_match_study_4_0`.

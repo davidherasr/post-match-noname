@@ -100,19 +100,19 @@ def test_matchday_clock_returns_a_date():
 
 
 def test_calendar_ui_has_no_fabricated_1700_default():
-    source = Path("pages/calendar.py").read_text(encoding="utf-8")
+    source = Path("views/calendar.py").read_text(encoding="utf-8")
     assert "time(17, 0)" not in source
     assert "Hora definitiva (HH:MM)" in source
 
 
 def test_calendar_ui_no_longer_navigates_to_legacy_modules():
-    source = Path("pages/calendar.py").read_text(encoding="utf-8")
+    source = Path("views/calendar.py").read_text(encoding="utf-8")
     assert 'main_navigation"] = "Nuevo postpartido"' not in source
     assert 'main_navigation"] = "Misiones"' not in source
     assert 'main_navigation"] = "Jornada"' in source
 
 
 def test_reports_use_cumulative_capabilities_not_primary_role():
-    source = Path("pages/reports.py").read_text(encoding="utf-8")
+    source = Path("views/reports.py").read_text(encoding="utf-8")
     assert 'user["role"]' not in source
     assert "can_direct(user)" in source

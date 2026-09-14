@@ -3,18 +3,14 @@ from __future__ import annotations
 import streamlit as st
 
 from core.auth import current_user, login, logout
-from core.config import APP_NAME, APP_VERSION, settings, validate_production_settings
+from core.config import APP_NAME, APP_VERSION, database_target, settings, validate_production_settings
 from core.constants import ROLES
 from core.permissions import navigation_for, roles_for
-from core.database import init_db, session_scope
+from core.database import DatabaseUnavailableError, init_db, session_scope
 from core.utils import safe_html
 from repositories import scouting as repo
 from services.bootstrap import bootstrap_application
 from ui.styles import apply_global_styles
-
-validate_production_settings()
-
-st.set_option("client.showSidebarNavigation", False)
 
 st.set_page_config(
     page_title=f"{APP_NAME} {APP_VERSION}",
@@ -22,16 +18,68 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+st.set_option("client.showSidebarNavigation", False)
 
-init_db()
-bootstrap_application()
+
+def _render_database_startup_error(exc: Exception) -> None:
+    target = database_target()
+    st.error("No Name PostMatch no puede conectar con la base de datos.")
+    st.markdown(
+        "La aplicación se ha detenido **antes de modificar ningún dato**. "
+        "Revisa la conexión PostgreSQL/Supabase en los Secrets de Streamlit Cloud."
+    )
+    host = target.get("host") or "No reconocido"
+    port = target.get("port") or "—"
+    st.code(f"Host: {host}\nPuerto: {port}\nVersión: {APP_VERSION}", language="text")
+    if target.get("is_direct_supabase"):
+        st.warning(
+            "La URL apunta al host directo de Supabase (`db.<proyecto>.supabase.co`). "
+            "En entornos sin IPv6 puede no ser accesible. Usa en `DATABASE_URL` la "
+            "**Session pooler connection string** de Supabase (Database → Connect), "
+            "manteniendo la misma base y contraseña."
+        )
+    else:
+        st.info(
+            "Si usas Supabase, comprueba que `DATABASE_URL` sea la cadena PostgreSQL "
+            "de **Session pooler**, que la contraseña esté correctamente escapada y que "
+            "no queden valores de ejemplo como `PROJECT_REF`, `PASSWORD` o `REGION`."
+        )
+    st.caption(
+        "La contraseña nunca se muestra ni se registra en esta pantalla. "
+        "Después de corregir el Secret, reinicia la app desde Manage app → Reboot."
+    )
+    st.stop()
+
+
+try:
+    validate_production_settings()
+    init_db()
+    bootstrap_application()
+except DatabaseUnavailableError as exc:
+    _render_database_startup_error(exc)
+except RuntimeError as exc:
+    st.error("Configuración de despliegue incompleta.")
+    st.write(str(exc))
+    st.stop()
+except Exception as exc:
+    st.error("No Name PostMatch no ha podido completar el arranque de la base de datos.")
+    st.markdown(
+        "No se ha continuado con el arranque. Consulta **Manage app → Logs** para el detalle técnico. "
+        "Si acabas de actualizar, verifica primero `DATABASE_URL` y reinicia la aplicación."
+    )
+    st.caption(f"Tipo de error: {type(exc).__name__} · Versión {APP_VERSION}")
+    st.stop()
+
 
 @st.cache_data(ttl=180, show_spinner=False)
 def _load_app_settings() -> dict:
     with session_scope() as session:
         return repo.get_all_settings(session)
 
-app_settings = _load_app_settings()
+try:
+    app_settings = _load_app_settings()
+except Exception as exc:
+    _render_database_startup_error(exc)
 
 apply_global_styles(
     app_settings.get("primary_color") or "#B91C1C",
@@ -41,19 +89,19 @@ apply_global_styles(
 
 def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
-    from pages import reports as reports_page
+    from views import reports as reports_page
 
-    expected_api = "4.0.0"
+    expected_api = "4.0.1"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
-            "`app.py` y `pages/reports.py` no corresponden a la misma versión. "
+            "`app.py` y `views/reports.py` no corresponden a la misma versión. "
             "Sustituye **todo el contenido del repositorio** por el paquete 4.0 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
-            "Archivo que debes comprobar: pages/reports.py",
+            "Archivo que debes comprobar: views/reports.py",
             language="text",
         )
         st.stop()
@@ -61,7 +109,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer_name = "render_archive" if mode == "archive" else "render_work"
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
-        st.error(f"No se encuentra la función requerida: pages.reports.{renderer_name}().")
+        st.error(f"No se encuentra la función requerida: views.reports.{renderer_name}().")
         st.info("Vuelve a subir el paquete completo No Name PostMatch 4.0 y reinicia la aplicación.")
         st.stop()
     renderer(user)
@@ -168,20 +216,20 @@ with st.sidebar:
         st.warning("Modo local")
 
 if selected_label == "Inicio":
-    from pages.home import render
+    from views.home import render
     render(user)
 elif selected_label == "Jornada":
-    from pages.jornada import render
+    from views.jornada import render
     render(user)
 elif selected_label == "Jugadores":
-    from pages.player_hub import render
+    from views.player_hub import render
     render(user)
 elif selected_label == "Plantilla":
-    from pages.squad import render
+    from views.squad import render
     render(user)
 elif selected_label == "Administración":
-    from pages.admin_hub import render
+    from views.admin_hub import render
     render(user)
 else:
-    from pages.home import render
+    from views.home import render
     render(user)

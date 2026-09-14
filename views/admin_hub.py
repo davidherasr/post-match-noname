@@ -115,7 +115,7 @@ def _quality(user: dict) -> None:
 
 
 def _technical(user: dict) -> None:
-    from pages import admin as legacy
+    from views import admin as legacy
     with st.expander("Herramientas técnicas",expanded=False):
         tool=st.selectbox("Herramienta",["Seguridad","Almacenamiento","Auditoría","Backup","Rendimiento"],key="admin_tech39")
         if tool=="Seguridad": legacy._section_security(user)
@@ -130,8 +130,8 @@ def render(user: dict) -> None:
         st.error("No tienes permiso de administración."); return
     page_header("Administración","Usuarios, club y datos. Las herramientas técnicas quedan en segundo plano.")
     section=st.segmented_control("Sección",["Usuarios","Club","Datos","Configuración"],default="Usuarios") or "Usuarios"
-    from pages import admin as legacy_admin
-    from pages import catalog as legacy_catalog
+    from views import admin as legacy_admin
+    from views import catalog as legacy_catalog
     if section=="Usuarios": legacy_admin._section_users(user)
     elif section=="Club": legacy_admin._section_brand(user)
     elif section=="Datos":

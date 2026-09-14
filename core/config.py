@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.engine import make_url
+
 APP_NAME = "No Name PostMatch"
-APP_VERSION = "4.0.0"
+APP_VERSION = "4.0.1"
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -33,11 +35,30 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 def normalized_database_url() -> str:
+    """Return a SQLAlchemy-safe URL without changing the target database.
+
+    Production deployments historically supplied a plain Supabase PostgreSQL URL.
+    For Supabase hosts we enforce TLS and a finite connection timeout.  Parsing and
+    re-rendering through SQLAlchemy also safely preserves percent-escaped passwords.
+    """
     raw = str(env("DATABASE_URL", "")).strip()
     if not raw:
         return f"sqlite:///{BASE_DIR / 'postmatch_scout.db'}"
     if raw.startswith("postgres://"):
         raw = "postgresql://" + raw[len("postgres://"):]
+
+    if raw.startswith("postgresql://") or raw.startswith("postgresql+"):
+        try:
+            url = make_url(raw)
+            query = dict(url.query)
+            host = (url.host or "").lower()
+            if "supabase" in host:
+                query.setdefault("sslmode", "require")
+            query.setdefault("connect_timeout", "10")
+            raw = url.set(query=query).render_as_string(hide_password=False)
+        except Exception:
+            # Validation below will produce a clear startup message if malformed.
+            pass
     return raw
 
 
@@ -61,9 +82,37 @@ class Settings:
 settings = Settings()
 
 
+def database_target() -> dict[str, str | int | bool | None]:
+    """Return non-secret connection metadata for diagnostics."""
+    try:
+        url = make_url(settings.database_url)
+        host = url.host
+        return {
+            "driver": url.drivername,
+            "host": host,
+            "port": url.port,
+            "database": url.database,
+            "is_supabase": bool(host and "supabase" in host.lower()),
+            "is_direct_supabase": bool(host and host.lower().startswith("db.") and host.lower().endswith(".supabase.co")),
+        }
+    except Exception:
+        return {"driver": "desconocido", "host": None, "port": None, "database": None, "is_supabase": False, "is_direct_supabase": False}
+
+
 def validate_production_settings() -> None:
     if settings.demo_mode:
         return
+    raw_db = str(env("DATABASE_URL", "")).strip()
+    if not raw_db:
+        raise RuntimeError("Falta DATABASE_URL en los Secrets de Streamlit Cloud.")
+    try:
+        url = make_url(settings.database_url)
+    except Exception as exc:
+        raise RuntimeError("DATABASE_URL no tiene un formato PostgreSQL válido.") from exc
+    if not url.host or not url.database:
+        raise RuntimeError("DATABASE_URL está incompleta: falta host o base de datos.")
+    if any(token in raw_db for token in ("PROJECT_REF", "PASSWORD", "REGION")):
+        raise RuntimeError("DATABASE_URL todavía contiene valores de ejemplo (PROJECT_REF/PASSWORD/REGION).")
     if not str(env("BOOTSTRAP_ADMIN_PASSWORD", "")).strip():
         raise RuntimeError("Define BOOTSTRAP_ADMIN_PASSWORD antes del primer despliegue.")
     if settings.bootstrap_admin_password in {"Admin123!", "DemoAdmin2026!"}:

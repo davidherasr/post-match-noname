@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.0.0"
+EXPECTED = "4.0.1"
 HEAD_MIGRATION = "0008_match_study_4_0"
 
 
@@ -22,7 +22,7 @@ def read_config_version() -> str:
 
 
 def reports_contract() -> tuple[str | None, set[str]]:
-    path = ROOT / "pages" / "reports.py"
+    path = ROOT / "views" / "reports.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     api = None
     functions: set[str] = set()
@@ -43,6 +43,9 @@ def main() -> None:
     if read_config_version() != EXPECTED:
         errors.append(f"APP_VERSION no coincide: {read_config_version()}")
 
+    if (ROOT / "pages").exists():
+        errors.append("Existe el directorio especial pages/: Streamlit mostraría navegación automática")
+
     config_text = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
     if "showSidebarNavigation = false" not in config_text:
         errors.append("Falta showSidebarNavigation=false")
@@ -57,8 +60,8 @@ def main() -> None:
         errors.append("No se limpia el selector de Perfil activo heredado")
 
     required = [
-        "pages/home.py", "pages/jornada.py", "pages/player_hub.py", "pages/squad.py", "pages/admin_hub.py",
-        "pages/reports.py", "pages/postmatch.py", "pages/scout.py", "pages/team_hub.py",
+        "views/home.py", "views/jornada.py", "views/player_hub.py", "views/squad.py", "views/admin_hub.py",
+        "views/reports.py", "views/postmatch.py", "views/scout.py", "views/team_hub.py",
         "repositories/workspaces.py", "repositories/player_report.py", "repositories/planning.py",
         "repositories/scouting.py", "repositories/calendar.py", "repositories/data_quality.py",
         "ui/player_report.py", "ui/match_study.py", "reports/player_report_pdf.py", "core/permissions.py", "core/presentation.py",
@@ -73,15 +76,15 @@ def main() -> None:
         errors.append(f"REPORTS_PAGE_API_VERSION no coincide: {api}")
     for name in {"render_work", "render_archive", "render"}:
         if name not in functions:
-            errors.append(f"Falta pages.reports.{name}()")
+            errors.append(f"Falta views.reports.{name}()")
 
-    calendar_text = (ROOT / "pages" / "calendar.py").read_text(encoding="utf-8")
+    calendar_text = (ROOT / "views" / "calendar.py").read_text(encoding="utf-8")
     if "time(17, 0)" in calendar_text:
         errors.append("El calendario todavía propone 17:00 cuando la hora es desconocida")
     if 'main_navigation"] = "Misiones"' in calendar_text or 'main_navigation"] = "Nuevo postpartido"' in calendar_text:
         errors.append("El calendario mantiene navegación legacy fuera de Jornada")
 
-    reports_text = (ROOT / "pages" / "reports.py").read_text(encoding="utf-8")
+    reports_text = (ROOT / "views" / "reports.py").read_text(encoding="utf-8")
     if 'user["role"]' in reports_text:
         errors.append("Informes todavía depende del perfil principal en lugar de capacidades acumulativas")
 
@@ -96,7 +99,7 @@ def main() -> None:
         if token not in migration_text:
             errors.append(f"Migración 0008 incompleta: falta {token}")
 
-    jornada_text = (ROOT / "pages" / "jornada.py").read_text(encoding="utf-8")
+    jornada_text = (ROOT / "views" / "jornada.py").read_text(encoding="utf-8")
     for token in ["Vídeo disponible", "Formación desconocida", "render_campogram", "Actualizar plantilla desde Federación"]:
         if token not in jornada_text:
             errors.append(f"Jornada 4.0 incompleta: falta {token}")
