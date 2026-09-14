@@ -1,4 +1,4 @@
-# No Name PostMatch 4.0.1
+# No Name PostMatch 4.0.2
 
 Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
 
@@ -18,7 +18,7 @@ La 4.0 convierte los partidos neutrales en una ficha de estudio flexible. El ví
 
 También añade pegado rápido de plantillas federativas, XI observado sobre campograma, filtro Scout por equipo, contexto visible desde Jornada y una migración no destructiva `0008_match_study_4_0`.
 
-**4.0.1** corrige el despliegue real en Streamlit Cloud: elimina físicamente el directorio especial `pages/`, mueve las vistas a `views/`, robusteciendo la conexión PostgreSQL/Supabase y mostrando un diagnóstico seguro si `DATABASE_URL` no es accesible. Consulta `UPGRADE_4_0_1.md`.
+**4.0.2** endurece el despliegue real en Streamlit Cloud: el paquete se entrega con raíz plana y el arranque detecta archivos mezclados antes de importar la aplicación. 4.0.1 ya corrigió: elimina físicamente el directorio especial `pages/`, mueve las vistas a `views/`, robusteciendo la conexión PostgreSQL/Supabase y mostrando un diagnóstico seguro si `DATABASE_URL` no es accesible. Consulta `UPGRADE_4_0_1.md`.
 
 ## 3.9 · Matchday y fiabilidad
 
@@ -30,8 +30,8 @@ Para la prueba de Jornada 1 consulta `PRUEBA_REAL_J1.md`.
 
 ## Datos y Supabase
 
-4.0.1 mantiene el mismo Supabase y el mismo head Alembic `0008_match_study_4_0`. Se conservan `DATABASE_URL`, Secrets y todos los datos existentes. No se incluyen datos demo.
+4.0.2 mantiene el mismo Supabase y el mismo head Alembic `0008_match_study_4_0`. Se conservan `DATABASE_URL`, Secrets y todos los datos existentes. No se incluyen datos demo.
 
 ## Validación
 
-Consulta `VALIDACION_4_0_1.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
+Consulta `VALIDACION_4_0_2.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.

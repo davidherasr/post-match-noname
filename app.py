@@ -2,23 +2,61 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.auth import current_user, login, logout
-from core.config import APP_NAME, APP_VERSION, database_target, settings, validate_production_settings
-from core.constants import ROLES
-from core.permissions import navigation_for, roles_for
-from core.database import DatabaseUnavailableError, init_db, session_scope
-from core.utils import safe_html
-from repositories import scouting as repo
-from services.bootstrap import bootstrap_application
-from ui.styles import apply_global_styles
-
+# Keep the very first Streamlit command independent from project imports.
+# This lets us show a useful diagnosis even when a deployment contains files
+# from different releases (for example a new app.py with an old core/config.py).
 st.set_page_config(
-    page_title=f"{APP_NAME} {APP_VERSION}",
+    page_title="No Name PostMatch",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 st.set_option("client.showSidebarNavigation", False)
+
+try:
+    import core.config as _config
+
+    _required_config = (
+        "APP_NAME",
+        "APP_VERSION",
+        "database_target",
+        "settings",
+        "validate_production_settings",
+    )
+    _missing_config = [name for name in _required_config if not hasattr(_config, name)]
+    if _missing_config:
+        raise ImportError(
+            "core/config.py no corresponde a esta release; faltan: "
+            + ", ".join(_missing_config)
+        )
+
+    APP_NAME = _config.APP_NAME
+    APP_VERSION = _config.APP_VERSION
+    database_target = _config.database_target
+    settings = _config.settings
+    validate_production_settings = _config.validate_production_settings
+
+    from core.auth import current_user, login, logout
+    from core.constants import ROLES
+    from core.permissions import navigation_for, roles_for
+    from core.database import DatabaseUnavailableError, init_db, session_scope
+    from core.utils import safe_html
+    from repositories import scouting as repo
+    from services.bootstrap import bootstrap_application
+    from ui.styles import apply_global_styles
+except ImportError as exc:
+    st.error("El despliegue contiene archivos mezclados de versiones distintas.")
+    st.markdown(
+        "No Name PostMatch se ha detenido antes de acceder a la base de datos. "
+        "Sustituye **todo el contenido del repositorio** por la release 4.0.2; "
+        "no copies archivos sueltos encima de una versión anterior."
+    )
+    st.code(str(exc), language="text")
+    st.info(
+        "Comprueba especialmente que existan `views/` y `core/config.py` de la misma release, "
+        "y que no exista el directorio `pages/`."
+    )
+    st.stop()
 
 
 def _render_database_startup_error(exc: Exception) -> None:
@@ -91,13 +129,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.0.1"
+    expected_api = "4.0.2"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.0 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.0.2 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -110,7 +148,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
         st.error(f"No se encuentra la función requerida: views.reports.{renderer_name}().")
-        st.info("Vuelve a subir el paquete completo No Name PostMatch 4.0 y reinicia la aplicación.")
+        st.info("Vuelve a subir el paquete completo No Name PostMatch 4.0.2 y reinicia la aplicación.")
         st.stop()
     renderer(user)
 

@@ -1,3 +1,10 @@
+## 4.0.2 · Hotfix de integridad de despliegue
+
+- El ZIP se distribuye con **raíz plana**: `app.py`, `core/`, `views/`, etc. quedan directamente al extraerlo.
+- `app.py` detecta un `core/config.py` antiguo o incompleto y muestra un diagnóstico legible en vez de morir con `ImportError`.
+- Se refuerza el contrato interno 4.0.2 entre `app.py`, `core/config.py` y `views/reports.py`.
+- Se mantiene el mismo esquema Alembic `0008_match_study_4_0`; no hay migración nueva ni cambios destructivos.
+
 # Changelog
 
 ## 4.0.0 · Match Study
