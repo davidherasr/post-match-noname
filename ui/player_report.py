@@ -235,3 +235,65 @@ def render_data(payload: dict) -> None:
     ]
     st.dataframe(pd.DataFrame(rows, columns=["Dato", "Valor"]), hide_index=True, use_container_width=True)
     st.caption("La ficha muestra únicamente datos existentes en No Name PostMatch. No completa altura, mercado, estadísticas o comparables externos de forma automática.")
+
+
+def render_monthly_profile(payload: dict) -> None:
+    """Compact Wyscout-inspired trend using only real No Name ratings."""
+    st.markdown("### Rendimiento mensual · últimos 12 meses")
+    rows = payload.get("monthly_ratings") or []
+    if not rows or not any(row.get("rating") is not None for row in rows):
+        st.caption("Todavía no hay suficientes valoraciones postpartido para mostrar una tendencia mensual.")
+        return
+    frame = pd.DataFrame([
+        {"Mes": row["label"], "Rating": row.get("rating"), "Observaciones": row.get("observations", 0)}
+        for row in rows
+    ])
+    st.bar_chart(frame.set_index("Mes")[["Rating"]], height=230)
+    line = " · ".join(
+        f"{row['label']}: {'—' if row.get('rating') is None else f'{row['rating']:.1f}'}"
+        for row in rows
+    )
+    st.caption(line)
+
+
+def render_season_profile(payload: dict) -> None:
+    st.markdown("### Resumen por temporada")
+    rows = payload.get("season_summary") or []
+    if not rows:
+        st.caption("Sin temporadas observadas con información suficiente.")
+        return
+    st.dataframe(pd.DataFrame([{
+        "Temporada": row["season"],
+        "Equipo observado": row.get("team") or "-",
+        "Postpartidos": row.get("postmatch", 0),
+        "Scout": row.get("scout", 0),
+        "Rating medio": row.get("average"),
+    } for row in rows]), hide_index=True, use_container_width=True)
+
+
+def render_decision_block(payload: dict, next_action=None) -> None:
+    st.markdown("### Dirección Deportiva")
+    decision = payload.get("decision")
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.metric("Estado", decision.status if decision else "Sin decisión")
+        if decision:
+            st.caption(f"Prioridad {decision.priority} · actualizado {decision.updated_at.strftime('%d/%m/%Y') if decision.updated_at else '-'}")
+    with c2:
+        if next_action:
+            match = next_action.match
+            when = match.kickoff_at.strftime("%d/%m/%Y · %H:%M") if match.kickoff_at else f"{match.match_date.strftime('%d/%m/%Y')} · horario pendiente"
+            st.markdown(f"**Próxima acción:** {safe_html(next_action.title)}")
+            st.caption(f"{match.home_team.name} - {match.away_team.name} · {when} · Responsable: {next_action.assignee.full_name}")
+        else:
+            st.caption("No hay una próxima acción programada.")
+
+
+def render_vertical_profile(payload: dict, *, next_action=None) -> None:
+    """3.8 executive player page: important information first, dossier behind it."""
+    render_header(payload)
+    render_summary(payload)
+    render_model(payload)
+    render_monthly_profile(payload)
+    render_season_profile(payload)
+    render_decision_block(payload, next_action=next_action)

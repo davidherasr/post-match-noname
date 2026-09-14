@@ -52,6 +52,10 @@ def analytics_export_xlsx(session: Session) -> bytes:
             "jornada": m.round_name, "fecha": m.match_date, "local": m.home_team.name,
             "visitante": m.away_team.name,
             "resultado": f"{m.home_score}-{m.away_score}" if m.home_score is not None and m.away_score is not None else "",
+            "video_disponible": m.video_available, "referencia_video": m.video_reference,
+            "formacion_local_conocida": m.home_formation_known, "formacion_local": m.home_formation,
+            "formacion_visitante_conocida": m.away_formation_known, "formacion_visitante": m.away_formation,
+            "notas_estudio": m.study_notes,
             "estado": m.status, "revision": m.revision,
         } for m in matches]).to_excel(writer, sheet_name="partidos", index=False)
         pd.DataFrame([{
@@ -93,5 +97,5 @@ def technical_backup_zip(session: Session) -> bytes:
     output = BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("backup.json", json.dumps(payload, ensure_ascii=False, default=str, indent=2))
-        archive.writestr("README.txt", "Copia técnica completa de No Name PostMatch 3.6. Contiene datos sensibles y hashes de contraseña. Guárdala de forma segura.\n")
+        archive.writestr("README.txt", "Copia técnica completa de No Name PostMatch 4.0. Contiene datos sensibles y hashes de contraseña. Guárdala de forma segura.\n")
     return output.getvalue()

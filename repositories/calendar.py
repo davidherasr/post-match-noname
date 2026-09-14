@@ -6,6 +6,7 @@ from typing import Sequence
 from sqlalchemy import and_, asc, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
+from core.clock import local_today
 from core.utils import normalize_name
 from models.entities import Competition, Match, ScoutMission, Season, Team
 from core.schedule import is_schedule_confirmed, require_schedule_confirmed
@@ -131,7 +132,7 @@ def schedule_label(match: Match) -> str:
 
 
 def schedule_issues(session: Session, *, season_id: int | None = None, today: date | None = None, horizon_days: int = 21) -> list[dict]:
-    today = today or date.today()
+    today = today or local_today()
     rows = list_calendar(session, season_id=season_id, date_from=today, date_to=today + timedelta(days=horizon_days), limit=300)
     result: list[dict] = []
     for match in rows:
@@ -168,7 +169,7 @@ def update_schedule(
         match.window_end = None
         match.schedule_status = "confirmed"
     elif definitive_date is not None:
-        # A date without a kickoff is still provisional in 3.7.
+        # A date without a kickoff is still provisional: no invented hour is allowed.
         match.match_date = definitive_date
         match.window_start = None
         match.window_end = None
@@ -202,4 +203,4 @@ def update_schedule(
 
 
 def own_matches(session: Session, own_team_id: int, *, season_id: int | None = None, future_only: bool = False) -> list[Match]:
-    return list_calendar(session, season_id=season_id, team_id=own_team_id, date_from=date.today() if future_only else None)
+    return list_calendar(session, season_id=season_id, team_id=own_team_id, date_from=local_today() if future_only else None)

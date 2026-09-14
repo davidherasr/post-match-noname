@@ -15,6 +15,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from core.config import settings
 from core.security import hash_password, verify_password
 from core.utils import json_dumps, normalize_name
+from core.federation_roster import parse_federation_roster
+from core.formations import slots_for
 from models.entities import (
     AppSetting, AuditLog, Competition, ConsolidatedPlayerEvaluation, ConsolidatedReport, Document, FollowUp, FollowUpHistory, LoginAttempt,
     LeaguePlayerProfile, Match, Participation, Player, PlayerAlias, PlayerEvaluation, PlayerMergeLog, PostMatchDraft, Report, ReportAssignment,
@@ -22,14 +24,14 @@ from models.entities import (
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
-from repositories.users import assert_role, user_has_role
+from repositories.users import assert_role, get_setting, user_has_role
 from repositories.players import get_own_team
 
-def create_match(session: Session, *, season_id: int, competition_id: int, round_name: str, match_date: date, home_team_id: int, away_team_id: int, created_by: int, home_score: int | None = None, away_score: int | None = None, venue: str | None = None, home_formation: str | None = None, away_formation: str | None = None, status: str = "draft", report_due_at: datetime | None = None, kickoff_at: datetime | None = None, schedule_status: str | None = None) -> Match:
+def create_match(session: Session, *, season_id: int, competition_id: int, round_name: str, match_date: date, home_team_id: int, away_team_id: int, created_by: int, home_score: int | None = None, away_score: int | None = None, venue: str | None = None, home_formation: str | None = None, away_formation: str | None = None, status: str = "draft", report_due_at: datetime | None = None, kickoff_at: datetime | None = None, schedule_status: str | None = None, video_available: bool = False, video_reference: str | None = None, study_notes: str | None = None) -> Match:
     assert_role(session, created_by, "admin")
     if home_team_id == away_team_id:
         raise ValueError("Los equipos local y visitante deben ser diferentes.")
-    item = Match(season_id=season_id, competition_id=competition_id, round_name=round_name.strip(), match_date=match_date, kickoff_at=kickoff_at, schedule_status=schedule_status or ("confirmed" if kickoff_at else "provisional"), window_start=None, window_end=None, home_team_id=home_team_id, away_team_id=away_team_id, home_score=home_score, away_score=away_score, venue=venue, home_formation=home_formation, away_formation=away_formation, status=status, report_due_at=report_due_at, created_by=created_by)
+    item = Match(season_id=season_id, competition_id=competition_id, round_name=round_name.strip(), match_date=match_date, kickoff_at=kickoff_at, schedule_status=schedule_status or ("confirmed" if kickoff_at else "provisional"), window_start=None, window_end=None, home_team_id=home_team_id, away_team_id=away_team_id, home_score=home_score, away_score=away_score, venue=venue, home_formation=home_formation, away_formation=away_formation, home_formation_known=bool(home_formation), away_formation_known=bool(away_formation), video_available=bool(video_available), video_reference=video_reference, study_notes=study_notes, status=status, report_due_at=report_due_at, created_by=created_by)
     session.add(item)
     session.flush()
     audit(session, created_by, "create_match", "match", item.id, after=_snapshot(item, ["round_name", "match_date", "kickoff_at", "schedule_status", "home_team_id", "away_team_id", "status"]))
@@ -44,13 +46,22 @@ def update_match(session: Session, match_id: int, actor_id: int | None = None, e
         raise ValueError("Partido no encontrado.")
     if expected_revision is not None and item.revision != expected_revision:
         raise RuntimeError("El partido ha cambiado en otra sesión. Recarga antes de guardar.")
-    before = _snapshot(item, ["season_id", "competition_id", "round_name", "match_date", "window_start", "window_end", "kickoff_at", "schedule_status", "home_team_id", "away_team_id", "home_score", "away_score", "venue", "home_formation", "away_formation", "status", "report_due_at", "revision"])
+    before = _snapshot(item, ["season_id", "competition_id", "round_name", "match_date", "window_start", "window_end", "kickoff_at", "schedule_status", "home_team_id", "away_team_id", "home_score", "away_score", "venue", "home_formation", "away_formation", "video_available", "video_reference", "home_formation_known", "away_formation_known", "study_notes", "status", "report_due_at", "revision"])
     allowed = set(before) - {"revision"}
     for key, value in values.items():
         if key in allowed:
             setattr(item, key, value)
     if item.home_team_id == item.away_team_id:
         raise ValueError("Los equipos deben ser diferentes.")
+    # Formation presence and explicit knowledge must never drift apart.
+    if "home_formation" in values and "home_formation_known" not in values:
+        item.home_formation_known = bool(item.home_formation)
+    if "away_formation" in values and "away_formation_known" not in values:
+        item.away_formation_known = bool(item.away_formation)
+    if not item.home_formation_known:
+        item.home_formation = None
+    if not item.away_formation_known:
+        item.away_formation = None
     item.revision = (item.revision or 0) + 1
     audit(session, actor_id, "update_match", "match", item.id, before=before, after=_snapshot(item, before.keys()))
     return item
@@ -97,10 +108,16 @@ def get_participations(session: Session, match_id: int, team_id: int | None = No
 
 
 def replace_participations(session: Session, match_id: int, team_id: int, rows: Iterable[dict], actor_id: int) -> list[Participation]:
-    assert_role(session, actor_id, "admin")
+    # Admin/DD can edit any lineup. A Scout can capture a neutral-match lineup,
+    # but cannot alter No Name's own match participants.
+    assert_role(session, actor_id, "admin", "director", "scout")
     match = session.get(Match, match_id)
     if not match:
         raise ValueError("Partido no encontrado.")
+    if user_has_role(session, actor_id, "scout") and not user_has_role(session, actor_id, "admin", "director"):
+        own = get_own_team(session)
+        if own and own.id in {match.home_team_id, match.away_team_id}:
+            raise PermissionError("Un Scout no puede modificar la alineación de un partido de No Name.")
     locked = int(session.scalar(select(func.count(Report.id)).where(and_(Report.match_id == match_id, Report.status.in_(LOCKED_REPORT_STATUSES)))) or 0)
     if locked:
         raise ValueError("No se puede cambiar la alineación: existen informes entregados o aprobados.")
@@ -131,7 +148,7 @@ def replace_participations(session: Session, match_id: int, team_id: int, rows: 
         item.minute_in = int(row.get("minute_in", 0) or 0)
         item.minute_out = int(row.get("minute_out", 90) or 90)
         item.captain = bool(row.get("captain"))
-        item.order_index = index
+        item.order_index = int(row.get("order_index", index) if row.get("order_index") is not None else index)
         item.revision = (item.revision or 0) + 1
         session.flush()
         result.append(item)
@@ -155,6 +172,104 @@ def _own_team_id_for_match(session: Session, match: Match) -> int:
     configured = get_setting(session, "own_team_id")
     return int(configured) if configured else match.home_team_id
 
+
+
+def update_match_study_context(
+    session: Session, match_id: int, actor_id: int, *,
+    video_available: bool, video_reference: str | None = None,
+    home_formation_known: bool, away_formation_known: bool,
+    home_formation: str | None = None, away_formation: str | None = None,
+    study_notes: str | None = None,
+) -> Match:
+    """Persist the neutral-match study context without requiring Admin mode."""
+    assert_role(session, actor_id, "scout", "director", "admin")
+    match = session.get(Match, int(match_id))
+    if not match:
+        raise ValueError("Partido no encontrado.")
+    own = get_own_team(session)
+    if own and own.id in {match.home_team_id, match.away_team_id}:
+        raise ValueError("La configuración de estudio 4.0 es para partidos neutrales; los partidos de No Name usan Preparar partido.")
+    before = _snapshot(match, ["video_available", "video_reference", "home_formation_known", "away_formation_known", "home_formation", "away_formation", "study_notes", "revision"])
+    match.video_available = bool(video_available)
+    match.video_reference = (video_reference or "").strip() or None
+    match.home_formation_known = bool(home_formation_known)
+    match.away_formation_known = bool(away_formation_known)
+    match.home_formation = (home_formation or "").strip() or None if match.home_formation_known else None
+    match.away_formation = (away_formation or "").strip() or None if match.away_formation_known else None
+    match.study_notes = (study_notes or "").strip() or None
+    if match.home_formation_known and not match.home_formation:
+        raise ValueError("Si conoces la formación local, indica el sistema.")
+    if match.away_formation_known and not match.away_formation:
+        raise ValueError("Si conoces la formación visitante, indica el sistema.")
+    match.revision = (match.revision or 0) + 1
+    audit(session, actor_id, "update_match_study", "match", match.id, before=before, after=_snapshot(match, before.keys()))
+    return match
+
+
+def import_federation_roster_text(session: Session, *, team_id: int, season_id: int, actor_id: int, text: str) -> dict:
+    """Import/update a team-season roster from pasted federation text."""
+    assert_role(session, actor_id, "scout", "director", "admin")
+    from repositories import players as players_repo
+    parsed = parse_federation_roster(text)
+    if not parsed:
+        raise ValueError("No se ha reconocido ningún jugador.")
+    existing = players_repo.get_roster(session, int(team_id), int(season_id), active_only=False)
+    by_name = {normalize_name(r.player.full_name): r.player for r in existing}
+    created = linked = 0
+    ambiguous: list[str] = []
+    for row in parsed:
+        norm = normalize_name(row.name)
+        player = by_name.get(norm)
+        if player is None:
+            candidates = [p for p in players_repo.find_player_candidates(session, row.name) if p.active and not p.merged_into_id]
+            if len(candidates) == 1:
+                player = candidates[0]
+            elif len(candidates) > 1:
+                ambiguous.append(row.name)
+                continue
+            else:
+                player = players_repo.find_or_create_player(session, row.name, primary_position=row.position, actor_id=actor_id)
+                created += 1
+        if row.position and not player.primary_position:
+            player.primary_position = row.position
+        players_repo.assign_player_to_roster(session, int(team_id), int(season_id), player.id, row.shirt_number, actor_id)
+        by_name[norm] = player
+        linked += 1
+    if ambiguous:
+        raise ValueError("Hay nombres ambiguos que no se han importado: " + ", ".join(ambiguous) + ". Revísalos en Jugadores/Datos antes de repetir.")
+    audit(session, actor_id, "import_federation_roster", "team", int(team_id), detail=f"season={season_id}; rows={linked}; created={created}")
+    return {"rows": linked, "created_players": created}
+
+
+def save_known_formation_lineup(session: Session, *, match_id: int, team_id: int, actor_id: int, formation: str, player_ids: Sequence[int | None]) -> list[Participation]:
+    """Save a (possibly partial) observed XI against formation slots."""
+    slots = slots_for(formation)
+    if not slots:
+        raise ValueError("Formación no soportada para campograma.")
+    if len(player_ids) != len(slots):
+        raise ValueError("El número de huecos no coincide con la formación.")
+    chosen = [int(pid) for pid in player_ids if pid]
+    if len(chosen) != len(set(chosen)):
+        raise ValueError("Un jugador no puede ocupar dos posiciones del mismo XI.")
+    from repositories import players as players_repo
+    match = session.get(Match, int(match_id))
+    if not match or int(team_id) not in {match.home_team_id, match.away_team_id}:
+        raise ValueError("Equipo/partido no válido.")
+    roster = {r.player_id: r for r in players_repo.get_roster(session, int(team_id), match.season_id)}
+    rows = []
+    for idx, (slot, pid) in enumerate(zip(slots, player_ids)):
+        if not pid:
+            continue
+        item = roster.get(int(pid))
+        rows.append({
+            "player_id": int(pid), "shirt_number": item.shirt_number if item else None,
+            "starter": True, "position": slot.code, "minute_in": 0, "minute_out": 90,
+            "captain": False, "selected": True, "order_index": idx,
+        })
+    if not rows:
+        # Clear an accidental/obsolete observed XI while retaining the team roster.
+        return replace_participations(session, int(match_id), int(team_id), [], int(actor_id))
+    return replace_participations(session, int(match_id), int(team_id), rows, int(actor_id))
 
 def assign_reporters(session: Session, match_id: int, user_ids: Sequence[int], actor_id: int, due_at: datetime | None = None, required: bool = True) -> list[ReportAssignment]:
     assert_role(session, actor_id, "admin")

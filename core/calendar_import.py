@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, time
 
-CALENDAR_PARSER_VERSION = "3.7.0"
+CALENDAR_PARSER_VERSION = "3.9.0"
 
 SPANISH_MONTHS = {
     "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
@@ -16,7 +16,7 @@ def _parse_date(value: str, default_year: int | None = None) -> date:
     value = value.strip()
     if re.search(r"\d\s*[/.-]\s*\d{1,2}/\d{1,2}/\d{2,4}", value) and value.count("/") >= 3:
         raise ValueError(
-            f"Fecha no reconocida: {value}. En 3.7 no uses rangos: indica solo la fecha de jornada publicada (por ejemplo 13/09/2026)."
+            f"Fecha no reconocida: {value}. En 3.9 no uses rangos: indica solo la fecha de jornada publicada (por ejemplo 13/09/2026)."
         )
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y"):
         try:
@@ -45,7 +45,7 @@ def _parse_time(value: str) -> time | None:
 def parse_calendar_text(text: str, *, default_year: int | None = None) -> tuple[list[dict], list[str]]:
     """Parse a semicolon-separated fixture list.
 
-    Normal 3.7 format (recommended):
+    Formato normal 3.9 (recomendado):
       1;13/09/2026;La Cistérniga;C.D. Noname
 
     The date is the federation/reference date for the round and is explicitly

@@ -13,6 +13,7 @@ from models.entities import (
     TeamRoster, User,
 )
 from core.schedule import require_schedule_confirmed
+from core.presentation import normalize_need_state, normalize_player_state
 from repositories.common import UTC_NOW, audit
 from repositories.users import assert_role, user_has_role
 
@@ -136,6 +137,8 @@ def create_observation(
     match_id: int | None = None,
     mission_id: int | None = None,
     source_type: str = "specific",
+    observation_level: str = "observation",
+    model_role_id: int | None = None,
 ) -> ScoutObservation:
     assert_role(session, reviewer_id, "scout", "director", "admin")
     profile = ensure_scout_profile(session, int(player_id), reviewer_id)
@@ -149,9 +152,15 @@ def create_observation(
     if mission_id:
         mission.status = "in_progress"
         mission.updated_at = UTC_NOW()
+    level = str(observation_level or "observation").strip().casefold()
+    if level not in {"scan", "observation", "dossier"}:
+        raise ValueError("Nivel de observación no válido.")
+    if model_role_id is not None and not session.get(GameModelRole, int(model_role_id)):
+        raise ValueError("Rol del Modelo No Name no encontrado.")
     item = ScoutObservation(
         profile_id=profile.id, reviewer_id=int(reviewer_id), match_id=match_id, mission_id=mission_id,
-        source_type=source_type, status="draft", observed_at=UTC_NOW(), created_at=UTC_NOW(), updated_at=UTC_NOW(),
+        model_role_id=int(model_role_id) if model_role_id else None, source_type=source_type, observation_level=level,
+        status="draft", observed_at=UTC_NOW(), created_at=UTC_NOW(), updated_at=UTC_NOW(),
     )
     session.add(item)
     session.flush()
@@ -178,6 +187,8 @@ def save_observation(
     weaknesses: str | None = None,
     summary: str | None = None,
     recommendation: str | None = None,
+    model_role_id: int | None = None,
+    observation_level: str | None = None,
     submit: bool = False,
 ) -> ScoutObservation:
     item = session.get(ScoutObservation, int(observation_id))
@@ -186,6 +197,15 @@ def save_observation(
     if item.reviewer_id != int(actor_id):
         assert_role(session, actor_id, "director", "admin")
     item.observed_position = observed_position
+    if model_role_id is not None:
+        if not session.get(GameModelRole, int(model_role_id)):
+            raise ValueError("Rol del Modelo No Name no encontrado.")
+        item.model_role_id = int(model_role_id)
+    if observation_level is not None:
+        level = str(observation_level).strip().casefold()
+        if level not in {"scan", "observation", "dossier"}:
+            raise ValueError("Nivel de observación no válido.")
+        item.observation_level = level
     item.general_rating = general_rating
     item.technical_rating = technical_rating
     item.tactical_rating = tactical_rating
@@ -194,7 +214,11 @@ def save_observation(
     item.current_level = current_level
     item.potential_score = potential_score
     item.model_fit_score = model_fit_score
-    item.attributes_json = json.dumps(attributes or {}, ensure_ascii=False)
+    clean_attributes = dict(attributes or {})
+    # Compatibility with 3.5/3.6 readers while model_role_id is now a proper column.
+    if item.model_role_id and "model_role_id" not in clean_attributes:
+        clean_attributes["model_role_id"] = item.model_role_id
+    item.attributes_json = json.dumps(clean_attributes, ensure_ascii=False)
     item.strengths = (strengths or "").strip() or None
     item.weaknesses = (weaknesses or "").strip() or None
     item.summary = (summary or "").strip() or None
@@ -254,7 +278,7 @@ def save_quick_match_observations(session: Session, *, match_id: int, reviewer_i
         profile = ensure_scout_profile(session, player_id, reviewer_id)
         item = ScoutObservation(
             profile_id=profile.id, reviewer_id=int(reviewer_id), match_id=match.id, mission_id=None,
-            source_type="match_scan", status="submitted", observed_at=UTC_NOW(),
+            source_type="match_scan", observation_level="scan", status="submitted", observed_at=UTC_NOW(),
             observed_position=row.get("observed_position"), general_rating=float(rating),
             summary=(row.get("summary") or "").strip() or None, recommendation=row.get("recommendation") or "Sin conclusión",
             submitted_at=UTC_NOW(), created_at=UTC_NOW(), updated_at=UTC_NOW(),
@@ -293,14 +317,20 @@ def list_model_criteria(session: Session, role_id: int) -> list[GameModelCriteri
     return list(session.scalars(select(GameModelCriterion).where(GameModelCriterion.role_id == int(role_id)).order_by(GameModelCriterion.order_index, GameModelCriterion.id)).all())
 
 
-def upsert_squad_need(session: Session, actor_id: int, *, season_id: int, model_role_id: int, need_level: str, status: str = "Abierta", note: str | None = None) -> SquadNeed:
+def upsert_squad_need(session: Session, actor_id: int, *, season_id: int, model_role_id: int, need_level: str, status: str | None = None, note: str | None = None) -> SquadNeed:
     assert_role(session, actor_id, "director", "admin")
     item = session.scalar(select(SquadNeed).where(SquadNeed.season_id == int(season_id), SquadNeed.model_role_id == int(model_role_id)))
     if not item:
         item = SquadNeed(season_id=int(season_id), model_role_id=int(model_role_id), updated_by=int(actor_id), updated_at=UTC_NOW())
         session.add(item)
-    item.need_level = need_level; item.status = status; item.note = (note or "").strip() or None; item.updated_by = int(actor_id); item.updated_at = UTC_NOW()
-    session.flush(); audit(session, actor_id, "upsert_squad_need", "squad_need", item.id, detail=need_level)
+    canonical = normalize_need_state(need_level or status)
+    item.need_level = canonical
+    # status is kept only for backwards DB compatibility and mirrors the one
+    # canonical user-visible value.
+    item.status = canonical
+    item.note = (note or "").strip() or None
+    item.updated_by = int(actor_id); item.updated_at = UTC_NOW()
+    session.flush(); audit(session, actor_id, "upsert_squad_need", "squad_need", item.id, detail=canonical)
     return item
 
 
@@ -314,7 +344,7 @@ def upsert_season_decision(session: Session, actor_id: int, *, season_id: int, p
     if not item:
         item = PlayerSeasonDecision(season_id=int(season_id), player_id=int(player_id), updated_by=int(actor_id), created_at=UTC_NOW(), updated_at=UTC_NOW())
         session.add(item)
-    item.status = status; item.priority = int(priority); item.model_role_id = model_role_id; item.director_note = (director_note or "").strip() or None; item.fit_score = fit_score
+    item.status = normalize_player_state(status); item.priority = int(priority); item.model_role_id = model_role_id; item.director_note = (director_note or "").strip() or None; item.fit_score = fit_score
     item.current_level = current_level; item.potential_score = potential_score
     if criteria_scores is not None:
         item.criteria_json = json.dumps({str(k): float(v) for k, v in criteria_scores.items() if v is not None and float(v) > 0}, ensure_ascii=False)
@@ -474,7 +504,7 @@ def scouting_opportunities(session: Session, *, season_id: int, days_ahead: int 
     opportunities = []
     for block in shadow:
         need = block["need"]
-        if not need or need.status != "Abierta" or need.need_level not in {"Alta", "Media"}:
+        if not need or normalize_need_state(need.need_level or need.status) not in {"Alta", "Media"}:
             continue
         for decision in block["candidates"]:
             team_id = team_map.get(int(decision.player_id), {}).get("team_id")

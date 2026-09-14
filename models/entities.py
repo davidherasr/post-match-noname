@@ -191,6 +191,13 @@ class Match(Base):
     venue: Mapped[str | None] = mapped_column(String(160))
     home_formation: Mapped[str | None] = mapped_column(String(40))
     away_formation: Mapped[str | None] = mapped_column(String(40))
+    # 4.0 · Match Study context. Formation knowledge is independent per team:
+    # one side can have a known XI/shape while the other is intentionally roster-only.
+    video_available: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    video_reference: Mapped[str | None] = mapped_column(Text)
+    home_formation_known: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    away_formation_known: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    study_notes: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
     report_due_at: Mapped[datetime | None] = mapped_column(DateTime)
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
@@ -604,11 +611,16 @@ class ScoutObservation(Base):
     __tablename__ = "scout_observations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # profile_id is retained as a compatibility/identity bridge. New scouting flows
+    # use ScoutObservation as the only observation event source of truth.
     profile_id: Mapped[int] = mapped_column(ForeignKey("scouted_player_profiles.id", ondelete="CASCADE"), nullable=False)
     reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"))
     mission_id: Mapped[int | None] = mapped_column(ForeignKey("scout_missions.id", ondelete="SET NULL"))
+    model_role_id: Mapped[int | None] = mapped_column(ForeignKey("game_model_roles.id", ondelete="SET NULL"))
+    legacy_review_id: Mapped[int | None] = mapped_column(ForeignKey("scout_reviews.id", ondelete="SET NULL"), unique=True)
     source_type: Mapped[str] = mapped_column(String(30), default="specific", nullable=False)
+    observation_level: Mapped[str] = mapped_column(String(20), default="observation", nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     observed_position: Mapped[str | None] = mapped_column(String(20))
@@ -633,6 +645,8 @@ class ScoutObservation(Base):
     reviewer: Mapped[User] = relationship()
     match: Mapped[Match | None] = relationship()
     mission: Mapped[ScoutMission | None] = relationship()
+    model_role: Mapped["GameModelRole | None"] = relationship(foreign_keys=[model_role_id])
+    legacy_review: Mapped[ScoutReview | None] = relationship(foreign_keys=[legacy_review_id])
 
 
 class GameModelRole(Base):

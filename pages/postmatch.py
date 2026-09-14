@@ -6,12 +6,14 @@ from datetime import date, datetime, time, timedelta
 
 import streamlit as st
 
+from core.clock import local_today
 from core.constants import FORMATIONS, POSITIONS, ROLES
 from models.entities import Competition, Team
 from core.database import session_scope
 from core.formations import slots_for
 from core.workflow_defaults import recent_match_defaults
 from core.performance import measure
+from core.permissions import can_admin
 from core.postmatch_validation import validate_postmatch_draft
 from core.schedule import require_schedule_confirmed
 from repositories import scouting as repo
@@ -37,7 +39,7 @@ def _invalidate_context() -> None:
 
 
 def _default_season_name(today: date | None = None) -> str:
-    today = today or date.today()
+    today = today or local_today()
     start = today.year if today.month >= 7 else today.year - 1
     return f"{start}/{str(start + 1)[-2:]}"
 
@@ -50,7 +52,7 @@ def _new_draft(active_season_id: int | None = None) -> dict:
         "rival_id": None,
         "new_rival": "",
         "round_name": "",
-        "match_date": date.today().isoformat(),
+        "match_date": local_today().isoformat(),
         "kickoff_time": "",
         "own_location": "Local",
         "own_score": 0,
@@ -59,7 +61,7 @@ def _new_draft(active_season_id: int | None = None) -> dict:
         "rival_formation": "4-3-3",
         "venue": "",
         "due_enabled": False,
-        "due_date": (date.today() + timedelta(days=1)).isoformat(),
+        "due_date": (local_today() + timedelta(days=1)).isoformat(),
         "due_time": "20:00",
         "reporter_ids": [],
         "existing_match_id": None,
@@ -67,6 +69,7 @@ def _new_draft(active_season_id: int | None = None) -> dict:
         "own_subs": [],
         "rival_xi": [],
         "rival_subs": [],
+        "ui_step": "match",
     }
 
 
@@ -121,7 +124,7 @@ def _clear_draft() -> None:
 
 
 def _to_date(value, fallback: date | None = None) -> date:
-    fallback = fallback or date.today()
+    fallback = fallback or local_today()
     if isinstance(value, date):
         return value
     try:
@@ -161,8 +164,8 @@ def _setup_season(user: dict) -> None:
     with st.form("season_setup_32"):
         name = st.text_input("Temporada", value=_default_season_name())
         c1, c2 = st.columns(2)
-        start = c1.date_input("Inicio", value=date(date.today().year, 7, 1))
-        end = c2.date_input("Fin", value=date(date.today().year + 1, 6, 30))
+        start = c1.date_input("Inicio", value=date(local_today().year, 7, 1))
+        end = c2.date_input("Fin", value=date(local_today().year + 1, 6, 30))
         save = st.form_submit_button("Crear temporada", type="primary", use_container_width=True)
     if save and name.strip():
         with session_scope() as session:
@@ -203,32 +206,78 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         with session_scope() as session:
             count = len(repo.list_matches(session, season_id=active.id if active else None, limit=500))
         d["round_name"] = f"Jornada {count + 1}"
+
     st.markdown("### 1 · Partido")
-    st.caption("Preparar estos datos no escribe en Supabase. Solo se guardará cuando tú decidas.")
+    user_ids = [u.id for u in users]
+
+    # Normal 3.9 flow: the calendar already owns fixture identity. The user only
+    # completes what happened; season/competition/rival/date/kickoff are read-only.
     if d.get("existing_match_id"):
-        st.success("Este partido ya estaba en el calendario. No se creará otro: completarás el partido programado.")
-    elif d.get("defaults_source_match_id"):
-        st.info(
-            f"He precargado competición, sistema de No Name e informadores desde {d.get('defaults_source_round') or 'el último partido'}. "
-            "Cambia únicamente lo que sea diferente."
+        rival = next((t for t in teams if t.id == d.get("rival_id")), None)
+        comp = next((c for c in competitions if c.id == d.get("competition_id")), None)
+        season = next((x for x in seasons if x.id == d.get("season_id")), None)
+        own_first = d.get("own_location") == "Local"
+        home_name = own.name if own_first else (rival.name if rival else "Rival")
+        away_name = (rival.name if rival else "Rival") if own_first else own.name
+        st.markdown(f"**{d.get('round_name') or 'Partido'} · {comp.name if comp else 'Competición'}**")
+        st.caption(
+            f"{_to_date(d.get('match_date')).strftime('%d/%m/%Y')} · {d.get('kickoff_time')} · "
+            f"{season.name if season else 'Temporada'}"
         )
+        st.markdown(f"### {home_name} — {away_name}")
+        with st.form("postmatch_38_context_header", border=True):
+            a, b = st.columns(2)
+            own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
+            rival_score = b.number_input(f"Goles {rival.name if rival else 'rival'}", 0, 30, int(d.get("rival_score", 0)))
+            a, b = st.columns(2)
+            own_formation = a.selectbox("Sistema No Name", FORMATIONS, index=FORMATIONS.index(d.get("own_formation")) if d.get("own_formation") in FORMATIONS else 0)
+            rival_formation = b.selectbox("Sistema rival", FORMATIONS, index=FORMATIONS.index(d.get("rival_formation")) if d.get("rival_formation") in FORMATIONS else 0)
+            reporter_ids = st.multiselect(
+                "Informadores", user_ids,
+                default=[uid for uid in d.get("reporter_ids", []) if uid in user_ids],
+                format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in users if u.id == uid),
+            )
+            with st.expander("Datos opcionales"):
+                venue = st.text_input("Campo / ubicación", value=d.get("venue", ""))
+                due_enabled = st.checkbox("Fecha límite para informes", value=bool(d.get("due_enabled", False)))
+                pcol, qcol = st.columns(2)
+                base_date = _to_date(d.get("match_date"))
+                due_date = pcol.date_input("Día límite", value=_to_date(d.get("due_date"), base_date + timedelta(days=1)), disabled=not due_enabled)
+                due_time = qcol.time_input("Hora límite", value=_to_time(d.get("due_time")), disabled=not due_enabled)
+            prepare = st.form_submit_button("CONTINUAR", type="primary", use_container_width=True)
+        if prepare:
+            d.update({
+                "own_score": int(own_score), "rival_score": int(rival_score),
+                "own_formation": own_formation, "rival_formation": rival_formation,
+                "reporter_ids": reporter_ids, "venue": venue.strip(),
+                "due_enabled": due_enabled, "due_date": due_date.isoformat(),
+                "due_time": due_time.isoformat(timespec="minutes"), "ui_step": "own",
+            })
+            if d.get("own_xi_formation") != own_formation:
+                d["own_xi"] = []; d["own_subs"] = []; d["own_xi_formation"] = own_formation
+            if d.get("rival_xi_formation") != rival_formation:
+                d["rival_xi"] = []; d["rival_subs"] = []; d["rival_xi_formation"] = rival_formation
+            st.rerun()
+        return
+
+    # Exceptional admin flow for a fixture that genuinely does not exist in the
+    # imported calendar. It remains available, but it is no longer navigation.
+    st.info("Alta excepcional de partido. El flujo habitual empieza en Jornada.")
     season_ids = [s.id for s in seasons]
     comp_ids = [None] + [c.id for c in competitions]
     team_ids = [None] + [t.id for t in teams]
-    user_ids = [u.id for u in users]
-    with st.form("postmatch_32_header", border=True):
+    with st.form("postmatch_38_exception_header", border=True):
         a, b, c = st.columns(3)
-        season_id = a.selectbox("Temporada", season_ids, index=season_ids.index(d["season_id"]) if d.get("season_id") in season_ids else 0, format_func=lambda sid: next(s.name for s in seasons if s.id == sid))
+        season_id = a.selectbox("Temporada", season_ids, index=season_ids.index(d["season_id"]) if d.get("season_id") in season_ids else 0, format_func=lambda sid: next(x.name for x in seasons if x.id == sid))
         competition_id = b.selectbox("Competición", comp_ids, index=comp_ids.index(d.get("competition_id")) if d.get("competition_id") in comp_ids else 0, format_func=lambda cid: "＋ Nueva" if cid is None else next(x.name for x in competitions if x.id == cid))
         rival_id = c.selectbox("Rival", team_ids, index=team_ids.index(d.get("rival_id")) if d.get("rival_id") in team_ids else 0, format_func=lambda tid: "＋ Nuevo rival" if tid is None else next(x.name for x in teams if x.id == tid))
         x, y = st.columns(2)
-        new_competition = x.text_input("Nueva competición", value=d.get("new_competition", ""), disabled=competition_id is not None, placeholder="Liga")
-        new_rival = y.text_input("Nuevo rival", value=d.get("new_rival", ""), disabled=rival_id is not None, placeholder="Nombre del equipo")
-
+        new_competition = x.text_input("Nueva competición", value=d.get("new_competition", ""), disabled=competition_id is not None)
+        new_rival = y.text_input("Nuevo rival", value=d.get("new_rival", ""), disabled=rival_id is not None)
         a, b, c, e = st.columns([1.2, 1, .8, 1])
         round_name = a.text_input("Jornada / partido", value=d.get("round_name", ""))
         match_date = b.date_input("Fecha definitiva", value=_to_date(d.get("match_date")))
-        kickoff_text = c.text_input("Hora", value=str(d.get("kickoff_time") or ""), placeholder="17:00", help="Obligatoria para publicar y generar informes.")
+        kickoff_text = c.text_input("Hora", value=str(d.get("kickoff_time") or ""), placeholder="HH:MM", help="No se propone ninguna hora: debe ser la hora real confirmada.")
         own_location = e.radio("No Name", ["Local", "Visitante"], horizontal=True, index=0 if d.get("own_location") == "Local" else 1)
         a, b = st.columns(2)
         own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
@@ -236,55 +285,29 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         a, b = st.columns(2)
         own_formation = a.selectbox("Sistema No Name", FORMATIONS, index=FORMATIONS.index(d.get("own_formation")) if d.get("own_formation") in FORMATIONS else 0)
         rival_formation = b.selectbox("Sistema rival", FORMATIONS, index=FORMATIONS.index(d.get("rival_formation")) if d.get("rival_formation") in FORMATIONS else 0)
-        venue = st.text_input("Campo / ubicación (opcional)", value=d.get("venue", ""))
         reporter_ids = st.multiselect("Informadores", user_ids, default=[uid for uid in d.get("reporter_ids", []) if uid in user_ids], format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in users if u.id == uid))
-        due_enabled = st.checkbox("Fecha límite", value=bool(d.get("due_enabled", False)))
-        p, q = st.columns(2)
-        due_date = p.date_input("Día límite", value=_to_date(d.get("due_date"), match_date + timedelta(days=1)), disabled=not due_enabled)
-        due_time = q.time_input("Hora límite", value=_to_time(d.get("due_time")), disabled=not due_enabled)
-        prepare = st.form_submit_button("Preparar alineaciones", type="primary", use_container_width=True)
+        prepare = st.form_submit_button("CONTINUAR", type="primary", use_container_width=True)
     if prepare:
         if competition_id is None and not new_competition.strip():
-            st.error("Selecciona o escribe una competición.")
-            return
+            st.error("Selecciona o escribe una competición."); return
         if rival_id is None and not new_rival.strip():
-            st.error("Selecciona o escribe el rival.")
-            return
+            st.error("Selecciona o escribe el rival."); return
         try:
             parsed_kickoff = time.fromisoformat(kickoff_text.strip())
         except Exception:
-            st.error("Indica la hora definitiva del partido en formato HH:MM, por ejemplo 17:00.")
-            return
+            st.error("Indica la hora real confirmada en formato HH:MM."); return
         d.update({
-            "season_id": season_id,
-            "competition_id": competition_id,
-            "new_competition": new_competition.strip(),
-            "rival_id": rival_id,
-            "new_rival": new_rival.strip(),
-            "round_name": round_name.strip(),
-            "match_date": match_date.isoformat(),
-            "kickoff_time": parsed_kickoff.isoformat(timespec="minutes"),
-            "own_location": own_location,
-            "own_score": int(own_score),
-            "rival_score": int(rival_score),
-            "own_formation": own_formation,
-            "rival_formation": rival_formation,
-            "venue": venue.strip(),
-            "reporter_ids": reporter_ids,
-            "due_enabled": due_enabled,
-            "due_date": due_date.isoformat(),
-            "due_time": due_time.isoformat(timespec="minutes"),
+            "season_id": season_id, "competition_id": competition_id, "new_competition": new_competition.strip(),
+            "rival_id": rival_id, "new_rival": new_rival.strip(), "round_name": round_name.strip(),
+            "match_date": match_date.isoformat(), "kickoff_time": parsed_kickoff.isoformat(timespec="minutes"),
+            "own_location": own_location, "own_score": int(own_score), "rival_score": int(rival_score),
+            "own_formation": own_formation, "rival_formation": rival_formation, "reporter_ids": reporter_ids,
+            "due_enabled": False, "ui_step": "own",
         })
-        # Regenerate only if the tactical structure changed.
         if d.get("own_xi_formation") != own_formation:
-            d["own_xi"] = []
-            d["own_subs"] = []
-            d["own_xi_formation"] = own_formation
+            d["own_xi"] = []; d["own_subs"] = []; d["own_xi_formation"] = own_formation
         if d.get("rival_xi_formation") != rival_formation:
-            d["rival_xi"] = []
-            d["rival_subs"] = []
-            d["rival_xi_formation"] = rival_formation
-        st.success("Estructura preparada. A partir de aquí solo eliges nombres y cambios.")
+            d["rival_xi"] = []; d["rival_subs"] = []; d["rival_xi_formation"] = rival_formation
         st.rerun()
 
 
@@ -400,7 +423,7 @@ def _own_lineup(user: dict, own, d: dict) -> None:
         d["own_xi_source"] = "Último XI" if previous_parts else "Posición principal"
     slots = slots_for(d.get("own_formation"))
     if not slots:
-        st.warning("La formación personalizada requiere usar Base de datos/Partidos en esta versión.")
+        st.warning("Para una formación personalizada, utiliza la edición avanzada del partido desde Administración.")
         return
     st.caption(f"XI propuesto automáticamente · {d.get('own_xi_source','Plantilla')}. Solo corrige los nombres que cambien.")
     with st.form("own_xi_32", border=True):
@@ -421,7 +444,7 @@ def _own_lineup(user: dict, own, d: dict) -> None:
             st.error("Selecciona 11 jugadores distintos.")
         else:
             d["own_xi"] = selected_rows
-            st.success("XI preparado localmente. No se ha escrito en Supabase.")
+            st.success("XI preparado. Puedes continuar al siguiente paso cuando esté correcto.")
 
     if len([x for x in d.get("own_xi", []) if x.get("player_id")]) == 11:
         xi_ids = [x["player_id"] for x in d["own_xi"]]
@@ -616,7 +639,7 @@ def _save_cloud_draft(user: dict, d: dict) -> None:
         item = repo.save_postmatch_draft(session, actor_id=user["id"], payload=d, draft_id=st.session_state.get(CLOUD_DRAFT_KEY), season_id=d.get("season_id"), title=title)
     st.session_state[CLOUD_DRAFT_KEY] = item.id
     st.session_state.pop(CLOUD_DRAFT_LIST_KEY, None)
-    st.success("Borrador guardado en la nube en una sola escritura.")
+    st.success("Borrador guardado.")
 
 
 def _validate_draft_for_publish(d: dict) -> tuple[list[str], list[str]]:
@@ -668,10 +691,10 @@ def _publish(user: dict, own, d: dict) -> None:
     if warnings:
         st.warning(" · ".join(warnings))
     identity_resolutions = _identity_resolution_panel()
-    left, right = st.columns(2)
-    if left.button("Guardar borrador en nube", use_container_width=True):
-        _save_cloud_draft(user, d)
-    if right.button("PUBLICAR POSTPARTIDO", type="primary", use_container_width=True, disabled=bool(errors)):
+    with st.expander("Guardar para continuar después", expanded=False):
+        if st.button("Guardar borrador", use_container_width=True):
+            _save_cloud_draft(user, d)
+    if st.button("PUBLICAR POSTPARTIDO", type="primary", use_container_width=True, disabled=bool(errors)):
         try:
             rival_rows = _rival_rows_for_publish(d)
             with session_scope() as session:
@@ -683,7 +706,7 @@ def _publish(user: dict, own, d: dict) -> None:
             if conflicts and (unresolved or not st.session_state.get("postmatch_identity_conflicts_34")):
                 st.session_state["postmatch_identity_conflicts_34"] = conflicts
                 st.rerun()
-            with st.spinner("Guardando partido, alineaciones y asignaciones en una sola transacción..."):
+            with st.spinner("Guardando postpartido..."):
                 with measure("Publicar postpartido", "postmatch"):
                     with session_scope() as session:
                         season_id = int(d["season_id"])
@@ -702,7 +725,7 @@ def _publish(user: dict, own, d: dict) -> None:
                             home_score, away_score = d["rival_score"], d["own_score"]
                             home_formation, away_formation = d["rival_formation"], d["own_formation"]
                         due_at = datetime.combine(_to_date(d["due_date"]), _to_time(d["due_time"])) if d.get("due_enabled") else None
-                        kickoff_at = datetime.combine(_to_date(d["match_date"]), _to_time(d.get("kickoff_time"), time(17, 0)))
+                        kickoff_at = datetime.combine(_to_date(d["match_date"]), time.fromisoformat(str(d["kickoff_time"])))
                         if d.get("existing_match_id"):
                             match = repo.update_match(
                                 session, int(d["existing_match_id"]), user["id"],
@@ -748,10 +771,10 @@ def _cloud_drafts(user: dict) -> None:
 
 
 def render(user: dict) -> None:
-    if user["role"] != "admin":
+    if not can_admin(user):
         st.error("Solo administración puede preparar postpartidos.")
         return
-    page_header("Nuevo postpartido", "Prepara casi todo en memoria y sincroniza solo al guardar o publicar.")
+    page_header("Preparar partido", "Completa el partido existente del calendario y publica el postpartido.")
     if st.session_state.pop("postmatch_33_published", False):
         st.success("Postpartido publicado. Ya está disponible para los informadores.")
     own, active, seasons, competitions, teams, users = _load_context()
@@ -759,6 +782,7 @@ def render(user: dict) -> None:
         _setup_own_team(user); return
     if not active or not seasons:
         _setup_season(user); return
+
     requested_draft_id = st.session_state.pop("postmatch_open_cloud_draft_id", None)
     if requested_draft_id:
         try:
@@ -767,25 +791,55 @@ def render(user: dict) -> None:
             st.session_state[DRAFT_KEY] = payload
             st.session_state[CLOUD_DRAFT_KEY] = int(requested_draft_id)
             st.session_state.pop(CLOUD_DRAFT_LIST_KEY, None)
-            st.success("Borrador recuperado. Continúa exactamente donde lo dejaste.")
+            st.success("Borrador recuperado.")
         except Exception as exc:
             st.warning(f"No se pudo recuperar el borrador: {exc}")
+
     existing_match_id = st.session_state.pop("postmatch_existing_match_id", None)
     if existing_match_id:
         try:
             _clear_draft()
             st.session_state[DRAFT_KEY] = _draft_from_existing_match(int(existing_match_id), own.id)
-            st.success("Partido recuperado del calendario. Completa resultado y alineaciones.")
         except Exception as exc:
             st.warning(f"No se pudo preparar el partido programado: {exc}")
+
     if DRAFT_KEY not in st.session_state:
-        st.session_state[DRAFT_KEY] = _new_draft_with_recent_defaults(own.id, active.id)
-    _cloud_drafts(user)
-    if st.button("Empezar un postpartido limpio", use_container_width=True):
-        _clear_draft(); st.session_state[DRAFT_KEY] = _new_draft_with_recent_defaults(own.id, active.id); st.rerun()
+        st.info("El flujo normal empieza en Jornada → partido de No Name → Preparar partido.")
+        with st.expander("Alta excepcional de un partido fuera del calendario", expanded=False):
+            if st.button("Crear contexto excepcional", use_container_width=True):
+                st.session_state[DRAFT_KEY] = _new_draft_with_recent_defaults(own.id, active.id)
+                st.rerun()
+        _cloud_drafts(user)
+        return
+
     d = _draft()
-    _header(user, own, active, seasons, competitions, teams, users)
-    if d.get("competition_id") is not None or d.get("new_competition"):
+    step = d.get("ui_step") or "match"
+    step_names = {"match": "1 Partido", "own": "2 No Name", "rival": "3 Rival", "publish": "4 Publicar"}
+    st.caption("  →  ".join((f"**{label}**" if key == step else label) for key, label in step_names.items()))
+
+    if step == "match":
+        _header(user, own, active, seasons, competitions, teams, users)
+        return
+
+    if step == "own":
+        if st.button("← Partido"):
+            d["ui_step"] = "match"; st.rerun()
         _own_lineup(user, own, d)
+        own_ok = len([x for x in d.get("own_xi", []) if x.get("player_id")]) == 11
+        if st.button("CONTINUAR AL RIVAL", type="primary", use_container_width=True, disabled=not own_ok):
+            d["ui_step"] = "rival"; st.rerun()
+        return
+
+    if step == "rival":
+        if st.button("← No Name"):
+            d["ui_step"] = "own"; st.rerun()
         _rival_lineup(own, d)
-        _publish(user, own, d)
+        rival_ok = len([x for x in d.get("rival_xi", []) if x.get("name")]) == 11
+        if st.button("CONTINUAR A PUBLICAR", type="primary", use_container_width=True, disabled=not rival_ok):
+            d["ui_step"] = "publish"; st.rerun()
+        return
+
+    if st.button("← Rival"):
+        d["ui_step"] = "rival"; st.rerun()
+    _publish(user, own, d)
+

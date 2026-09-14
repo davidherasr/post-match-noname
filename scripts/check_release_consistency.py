@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "3.7.0"
-HEAD_MIGRATION = "0006_player_report_360_3_6"
+EXPECTED = "4.0.0"
+HEAD_MIGRATION = "0008_match_study_4_0"
 
 
 def read_version() -> str:
@@ -42,28 +42,31 @@ def main() -> None:
         errors.append(f"VERSION no coincide: {read_version()}")
     if read_config_version() != EXPECTED:
         errors.append(f"APP_VERSION no coincide: {read_config_version()}")
+
     config_text = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
     if "showSidebarNavigation = false" not in config_text:
         errors.append("Falta showSidebarNavigation=false")
+
     app_text = (ROOT / "app.py").read_text(encoding="utf-8")
     if 'st.set_option("client.showSidebarNavigation", False)' not in app_text:
         errors.append("Falta defensa runtime de navegación")
-    for token in ['"scout"', '"calendar"', '"model"']:
-        if token not in app_text:
-            errors.append(f"Falta navegación heredada: {token}")
+    for label in ["Inicio", "Jornada", "Jugadores", "Plantilla", "Administración"]:
+        if f'"{label}"' not in app_text:
+            errors.append(f"Falta navegación 4.0: {label}")
+    if "active_profile_role" not in app_text or ".pop(" not in app_text:
+        errors.append("No se limpia el selector de Perfil activo heredado")
 
     required = [
-        "pages/calendar.py", "pages/scout.py", "pages/model.py", "pages/scouted.py",
-        "repositories/calendar.py", "repositories/planning.py", "repositories/data_quality.py",
-        "repositories/player_report.py", "ui/player_report.py", "reports/player_report_pdf.py",
-        "core/calendar_import.py", "repositories/advanced_scouting.py", "repositories/league_intelligence.py",
-        "repositories/users.py", "repositories/players.py", "repositories/matches.py", "repositories/reports.py",
-        "reports/payload.py", "reports/summary_pdf.py", "reports/full_pdf.py", "services/health_service.py",
-        "scripts/live_acceptance.py", f"alembic/versions/{HEAD_MIGRATION}.py",
+        "pages/home.py", "pages/jornada.py", "pages/player_hub.py", "pages/squad.py", "pages/admin_hub.py",
+        "pages/reports.py", "pages/postmatch.py", "pages/scout.py", "pages/team_hub.py",
+        "repositories/workspaces.py", "repositories/player_report.py", "repositories/planning.py",
+        "repositories/scouting.py", "repositories/calendar.py", "repositories/data_quality.py",
+        "ui/player_report.py", "ui/match_study.py", "reports/player_report_pdf.py", "core/permissions.py", "core/presentation.py",
+        "core/calendar_import.py", "core/clock.py", "scripts/live_acceptance.py", "scripts/check_matchday_readiness.py", f"alembic/versions/{HEAD_MIGRATION}.py",
     ]
     for rel in required:
         if not (ROOT / rel).exists():
-            errors.append(f"Falta archivo 3.6: {rel}")
+            errors.append(f"Falta archivo 4.0: {rel}")
 
     api, functions = reports_contract()
     if api != EXPECTED:
@@ -72,17 +75,31 @@ def main() -> None:
         if name not in functions:
             errors.append(f"Falta pages.reports.{name}()")
 
-    report_text = (ROOT / "pages" / "reports.py").read_text(encoding="utf-8")
-    if "@st.fragment" not in report_text or "eval_dirty_34" not in report_text:
-        errors.append("Falta modo rápido/dirty state heredado 3.4")
+    calendar_text = (ROOT / "pages" / "calendar.py").read_text(encoding="utf-8")
+    if "time(17, 0)" in calendar_text:
+        errors.append("El calendario todavía propone 17:00 cuando la hora es desconocida")
+    if 'main_navigation"] = "Misiones"' in calendar_text or 'main_navigation"] = "Nuevo postpartido"' in calendar_text:
+        errors.append("El calendario mantiene navegación legacy fuera de Jornada")
 
-    scouted_text = (ROOT / "pages" / "scouted.py").read_text(encoding="utf-8")
-    for required_text in ["Player Report 360", "Preparar ficha Scout ejecutiva", "Preparar dossier Player Report 360", "Evaluación DD por criterios"]:
-        if required_text not in scouted_text:
-            errors.append(f"Falta Player Report 360: {required_text}")
-    model_text = (ROOT / "pages" / "model.py").read_text(encoding="utf-8")
-    if "Mapear nuestra plantilla al modelo" not in model_text or "Plantilla No Name" not in model_text:
-        errors.append("Falta comparación interna de plantilla para Player Report 360")
+    reports_text = (ROOT / "pages" / "reports.py").read_text(encoding="utf-8")
+    if 'user["role"]' in reports_text:
+        errors.append("Informes todavía depende del perfil principal en lugar de capacidades acumulativas")
+
+    permissions_text = (ROOT / "core" / "permissions.py").read_text(encoding="utf-8")
+    if 'items = ["Inicio", "Jornada", "Jugadores"]' not in permissions_text:
+        errors.append("La navegación base no coincide con Inicio/Jornada/Jugadores")
+    if 'items.append("Plantilla")' not in permissions_text or 'items.append("Administración")' not in permissions_text:
+        errors.append("Faltan capas de Plantilla/Administración por permiso")
+
+    migration_text = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
+    for token in ["video_available", "home_formation_known", "away_formation_known", "study_notes"]:
+        if token not in migration_text:
+            errors.append(f"Migración 0008 incompleta: falta {token}")
+
+    jornada_text = (ROOT / "pages" / "jornada.py").read_text(encoding="utf-8")
+    for token in ["Vídeo disponible", "Formación desconocida", "render_campogram", "Actualizar plantilla desde Federación"]:
+        if token not in jornada_text:
+            errors.append(f"Jornada 4.0 incompleta: falta {token}")
 
     if errors:
         raise SystemExit("Release inconsistente:\n- " + "\n- ".join(errors))

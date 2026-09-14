@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date
 
 from sqlalchemy import select
@@ -45,6 +45,10 @@ def _json_scores(value: str | None) -> dict[int, float]:
 
 
 def _observation_role_id(observation: ScoutObservation) -> int | None:
+    # 3.8 stores the model role explicitly. attributes_json remains readable only
+    # for observations created before the migration.
+    if getattr(observation, "model_role_id", None):
+        return int(observation.model_role_id)
     if not observation.attributes_json:
         return None
     try:
@@ -169,11 +173,10 @@ def _timeline(history: list[dict], observations: list[ScoutObservation]) -> list
 
 
 def _role_for_player(session: Session, profile: ScoutedPlayerProfile | None, decision: PlayerSeasonDecision | None) -> GameModelRole | None:
-    if decision and decision.model_role:
-        return decision.model_role
-    if not profile or not profile.model_role:
-        return None
-    return session.scalar(select(GameModelRole).where(GameModelRole.name == profile.model_role, GameModelRole.position == profile.model_position))
+    # PlayerSeasonDecision is the only operational DD truth in 3.8. Legacy
+    # ScoutedPlayerProfile remains available for audit/migration but cannot
+    # override the current season decision.
+    return decision.model_role if decision and decision.model_role else None
 
 
 def _criteria_for_decision(decision: PlayerSeasonDecision | None, observations: list[ScoutObservation], role_id: int | None) -> dict[int, float]:
@@ -182,6 +185,68 @@ def _criteria_for_decision(decision: PlayerSeasonDecision | None, observations: 
         if scores:
             return scores
     return _aggregate_criteria(observations, role_id)
+
+
+
+def _month_start(year: int, month: int) -> date:
+    return date(year, month, 1)
+
+
+def _shift_month(value: date, offset: int) -> date:
+    total = value.year * 12 + (value.month - 1) + offset
+    return date(total // 12, total % 12 + 1, 1)
+
+
+def _monthly_postmatch(history: list[dict], months: int = 12) -> list[dict]:
+    end = _month_start(date.today().year, date.today().month)
+    starts = [_shift_month(end, -(months - 1 - i)) for i in range(months)]
+    buckets: dict[tuple[int, int], list[float]] = defaultdict(list)
+    for item in history:
+        ev = item["evaluation"]
+        if ev.observation_status != "evaluated" or ev.general_rating is None or float(ev.general_rating) <= 0:
+            continue
+        d = item["match"].match_date
+        buckets[(d.year, d.month)].append(float(ev.general_rating))
+    labels = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
+    result = []
+    for start in starts:
+        values = buckets.get((start.year, start.month), [])
+        result.append({
+            "month": start,
+            "label": f"{labels[start.month-1]} {str(start.year)[2:]}",
+            "rating": round(sum(values) / len(values), 2) if values else None,
+            "observations": len(values),
+        })
+    return result
+
+
+def _season_summary(session: Session, history: list[dict], observations: list[ScoutObservation]) -> list[dict]:
+    buckets: dict[int, dict] = {}
+    for item in history:
+        match = item["match"]
+        ev = item["evaluation"]
+        if ev.observation_status != "evaluated" or ev.general_rating is None or float(ev.general_rating) <= 0:
+            continue
+        row = buckets.setdefault(match.season_id, {"ratings": [], "postmatch": 0, "scout": 0, "teams": Counter()})
+        row["ratings"].append(float(ev.general_rating)); row["postmatch"] += 1
+        if item.get("team"):
+            row["teams"][item["team"].name] += 1
+    for obs in observations:
+        if obs.status != "submitted" or not obs.match:
+            continue
+        row = buckets.setdefault(obs.match.season_id, {"ratings": [], "postmatch": 0, "scout": 0, "teams": Counter()})
+        row["scout"] += 1
+    result = []
+    from models.entities import Season
+    for season_id, row in buckets.items():
+        season = session.get(Season, int(season_id))
+        team_name = row["teams"].most_common(1)[0][0] if row["teams"] else None
+        result.append({
+            "season_id": season_id, "season": season.name if season else str(season_id), "team": team_name,
+            "postmatch": row["postmatch"], "scout": row["scout"], "average": _mean(row["ratings"]),
+        })
+    result.sort(key=lambda r: r["season"], reverse=True)
+    return result
 
 
 def _comparison_pool(session: Session, *, season_id: int | None, player_id: int, role: GameModelRole | None, target_scores: dict[int, float], target_fit: float | None) -> tuple[list[dict], list[dict]]:
@@ -288,16 +353,16 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
     }
     scout_general = _mean(o.general_rating for o in submitted)
     latest = next((o for o in submitted if any([o.summary, o.strengths, o.weaknesses, o.recommendation])), submitted[0] if submitted else None)
-    fit = (decision.fit_score if decision and decision.fit_score is not None else (profile.fit_score if profile and profile.fit_score is not None else _mean(o.model_fit_score for o in submitted)))
-    current_level = (decision.current_level if decision and decision.current_level is not None else (profile.current_level if profile and profile.current_level is not None else _mean(o.current_level for o in submitted)))
-    potential = (decision.potential_score if decision and decision.potential_score is not None else (profile.potential_score if profile and profile.potential_score is not None else _mean(o.potential_score for o in submitted)))
+    fit = decision.fit_score if decision and decision.fit_score is not None else _mean(o.model_fit_score for o in submitted)
+    current_level = decision.current_level if decision and decision.current_level is not None else _mean(o.current_level for o in submitted)
+    potential = decision.potential_score if decision and decision.potential_score is not None else _mean(o.potential_score for o in submitted)
     evidence = planning_repo.scouting_evidence_summary(session, player.id, season_id=season_id)
     internal, comparables = _comparison_pool(session, season_id=season_id, player_id=player.id, role=role, target_scores=criteria_scores, target_fit=fit)
     timeline = _timeline(history, submitted)
     strengths = _text_points(submitted, "strengths")
     weaknesses = _text_points(submitted, "weaknesses")
-    summary = (profile.director_summary if profile and profile.director_summary else (latest.summary if latest else None))
-    recommendation = (profile.final_decision if profile and profile.final_decision else (latest.recommendation if latest else None))
+    summary = decision.director_note if decision and decision.director_note else (latest.summary if latest else None)
+    recommendation = decision.status if decision else (latest.recommendation if latest else None)
 
     return {
         "player": player,
@@ -324,4 +389,6 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
         "recommendation": recommendation,
         "own_comparison": internal,
         "comparables": comparables,
+        "monthly_ratings": _monthly_postmatch(history),
+        "season_summary": _season_summary(session, history, submitted),
     }

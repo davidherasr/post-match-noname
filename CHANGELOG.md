@@ -1,5 +1,33 @@
 # Changelog
 
+## 4.0.0 · Match Study
+
+- Vídeo disponible Sí/No para partidos neutrales, con referencia opcional.
+- Formación conocida Sí/No independiente para local y visitante.
+- Campograma visual cuando existe formación real.
+- Modo plantilla/dorsal cuando la formación es desconocida.
+- Pegado rápido de plantilla Federación sin crear participaciones ficticias.
+- XI observado por slots del sistema y campograma responsive.
+- Filtro Scout por equipo en partidos neutrales.
+- Contexto visible desde Jornada: vídeo y formaciones conocidas X/2.
+- Scout puede capturar alineaciones neutrales sin poder alterar partidos de No Name.
+- Exportación analítica incluye contexto de estudio.
+- Migración no destructiva `0008_match_study_4_0`, preservando formaciones existentes.
+- 5 pruebas específicas nuevas; suite completa: 64 tests.
+
+## 3.9.0 · Matchday y fiabilidad
+
+- Día operativo en zona `Europe/Madrid`.
+- Inicio distingue Partido de hoy y Próximo partido.
+- Jornada prioriza la ronda real de No Name y marca partidos de hoy.
+- Panel de estado operativo de datos reales.
+- Comprobación read-only de matchday por script.
+- Informes y calendario secundario corregidos para permisos multirol acumulativos.
+- Eliminada la hora ficticia 17:00 del último flujo de horarios que todavía la conservaba.
+- Navegación heredada de Calendario redirigida a Jornada.
+- Parser/contratos actualizados a 3.9.0.
+- 10 pruebas nuevas con la J1 real La Cistérniga C.F. - C.D. Noname.
+
 ## 3.7.0 · Calendario operativo
 
 - El calendario usa una sola fecha federativa orientativa; se eliminan rangos del flujo normal.
