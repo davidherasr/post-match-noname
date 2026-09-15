@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session, joinedload, load_only
 from core.clock import local_today
 
 from models.entities import (
-    Match, Player, PlayerEvaluation, PlayerSeasonDecision, Report, ReportAssignment,
-    ScoutMission, ScoutMissionTarget, ScoutObservation, Season, SquadNeed, Team,
+    Match, MatchOpinion, MatchOpinionPlayer, Player, PlayerEvaluation, PlayerSeasonDecision, Report, ReportAssignment,
+    ScoutObservation, Season, SquadNeed, Team,
     TeamRoster,
 )
 from repositories import planning as planning_repo
@@ -64,19 +64,8 @@ def load_round_workspace(session: Session, *, season_id: int, round_name: str, u
         ).order_by(Match.match_date, Match.kickoff_at.nullslast(), Match.id)
     ).unique().all())
     match_ids = [m.id for m in matches]
-    mission_counts: dict[int, int] = defaultdict(int)
-    my_mission_counts: dict[int, int] = defaultdict(int)
     assignment_counts: dict[int, dict] = defaultdict(lambda: {"total": 0, "pending": 0, "submitted": 0, "approved": 0})
     if match_ids:
-        mission_rows = session.execute(
-            select(ScoutMission.match_id, ScoutMission.assigned_to, func.count(ScoutMission.id))
-            .where(ScoutMission.match_id.in_(match_ids), ScoutMission.status.in_(["pending", "in_progress"]))
-            .group_by(ScoutMission.match_id, ScoutMission.assigned_to)
-        ).all()
-        for match_id, assignee, count in mission_rows:
-            mission_counts[int(match_id)] += int(count or 0)
-            if user_id and int(assignee) == int(user_id):
-                my_mission_counts[int(match_id)] += int(count or 0)
         for match_id, status, required in session.execute(
             select(ReportAssignment.match_id, ReportAssignment.status, ReportAssignment.required)
             .where(ReportAssignment.match_id.in_(match_ids))
@@ -92,11 +81,8 @@ def load_round_workspace(session: Session, *, season_id: int, round_name: str, u
     return {
         "own_team": own,
         "matches": ordered,
-        "mission_counts": dict(mission_counts),
-        "my_mission_counts": dict(my_mission_counts),
         "assignment_counts": dict(assignment_counts),
     }
-
 
 def load_match_workspace(session: Session, *, match_id: int, user_id: int | None = None) -> dict:
     match = session.scalar(
@@ -107,14 +93,6 @@ def load_match_workspace(session: Session, *, match_id: int, user_id: int | None
     if not match:
         raise ValueError("Partido no encontrado.")
     own = players_repo.get_own_team(session)
-    missions = planning_repo.list_missions(session, match_id=match.id, limit=100)
-    target_rows = list(session.scalars(
-        select(ScoutMissionTarget).options(joinedload(ScoutMissionTarget.player))
-        .where(ScoutMissionTarget.mission_id.in_([m.id for m in missions] or [-1]))
-    ).unique().all())
-    targets_by_mission: dict[int, list] = defaultdict(list)
-    for target in target_rows:
-        targets_by_mission[target.mission_id].append(target)
     assignments = list(session.scalars(
         select(ReportAssignment).options(joinedload(ReportAssignment.user))
         .where(ReportAssignment.match_id == match.id).order_by(ReportAssignment.id)
@@ -123,7 +101,6 @@ def load_match_workspace(session: Session, *, match_id: int, user_id: int | None
         select(Report).options(joinedload(Report.reporter)).where(Report.match_id == match.id).order_by(Report.id)
     ).unique().all())
     report_by_user = {r.reporter_id: r for r in reports}
-    participations = []
     from models.entities import Participation
     participations = list(session.scalars(
         select(Participation).options(joinedload(Participation.player), joinedload(Participation.team))
@@ -134,16 +111,12 @@ def load_match_workspace(session: Session, *, match_id: int, user_id: int | None
         "match": match,
         "own_team": own,
         "is_own_match": bool(own and own.id in {match.home_team_id, match.away_team_id}),
-        "missions": missions,
-        "targets_by_mission": dict(targets_by_mission),
         "assignments": assignments,
         "reports": reports,
         "report_by_user": report_by_user,
         "participations": participations,
-        "my_missions": [m for m in missions if user_id and m.assigned_to == int(user_id)],
         "my_assignment": next((a for a in assignments if user_id and a.user_id == int(user_id)), None),
     }
-
 
 def _next_own_match(session: Session, own_team_id: int, season_id: int) -> Match | None:
     today = local_today()
@@ -191,16 +164,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
         for m in issues:
             tasks.append({"kind": "schedule", "severity": "action" if (m.match_date-today).days <= 7 else "pending", "title": f"Confirmar horario · {m.home_team.name} - {m.away_team.name}", "match_id": m.id, "due": m.match_date})
 
-    if "scout" in roles:
-        missions = planning_repo.list_missions(session, assigned_to=user_id, limit=30)
-        for m in missions:
-            if m.status not in {"pending", "in_progress"}:
-                continue
-            targets = planning_repo.mission_targets(session, m.id)
-            target_name = targets[0].player.full_name if len(targets) == 1 else (f"{len(targets)} jugadores" if targets else m.target_team.name if m.target_team else "partido")
-            tasks.append({"kind": "scout", "severity": "action" if m.status == "in_progress" else "pending", "title": f"Observar · {target_name}", "match_id": m.match_id, "mission_id": m.id, "due": m.due_at or m.match.match_date})
-
-    if roles.intersection({"reporter", "director", "admin"}):
+    if "reporter" in roles:
         assignments = list(session.scalars(
             select(ReportAssignment).options(joinedload(ReportAssignment.match).joinedload(Match.home_team), joinedload(ReportAssignment.match).joinedload(Match.away_team))
             .where(ReportAssignment.user_id == int(user_id), ReportAssignment.status.in_(["pending", "in_progress", "returned"]))
@@ -209,7 +173,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
         for a in assignments:
             tasks.append({"kind": "report", "severity": "action" if a.status == "returned" else "pending", "title": f"Informe · {a.match.home_team.name} - {a.match.away_team.name}", "match_id": a.match_id, "due": a.due_at or a.match.match_date})
 
-    director = {"decision_count": 0, "high_needs": 0, "new_scout": 0}
+    director = {"decision_count": 0, "high_needs": 0, "neutral_signals": 0}
     if active and "director" in roles:
         director["decision_count"] = int(session.scalar(
             select(func.count(PlayerSeasonDecision.id)).where(PlayerSeasonDecision.season_id == active.id, PlayerSeasonDecision.status.in_(["Base", "Observado", "Interesante"]))
@@ -217,9 +181,11 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
         director["high_needs"] = int(session.scalar(
             select(func.count(SquadNeed.id)).where(SquadNeed.season_id == active.id, SquadNeed.need_level == "Alta")
         ) or 0)
-        director["new_scout"] = int(session.scalar(
-            select(func.count(ScoutObservation.id)).join(Match, ScoutObservation.match_id == Match.id, isouter=True)
-            .where(ScoutObservation.status == "submitted", or_(Match.season_id == active.id, ScoutObservation.match_id.is_(None)))
+        director["neutral_signals"] = int(session.scalar(
+            select(func.count(func.distinct(MatchOpinionPlayer.player_id)))
+            .join(MatchOpinion, MatchOpinionPlayer.opinion_id == MatchOpinion.id)
+            .join(Match, MatchOpinion.match_id == Match.id)
+            .where(Match.season_id == active.id)
         ) or 0)
 
     def due_key(row: dict):
@@ -236,20 +202,9 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
 
 def load_player_workspace(session: Session, *, player_id: int, season_id: int | None) -> dict:
     payload = player_report_repo.build_player_report_360(session, int(player_id), season_id=season_id)
-    missions = []
-    if season_id:
-        missions = list(session.scalars(
-            select(ScoutMission).options(
-                joinedload(ScoutMission.match).joinedload(Match.home_team),
-                joinedload(ScoutMission.match).joinedload(Match.away_team),
-                joinedload(ScoutMission.assignee),
-            ).join(ScoutMissionTarget, ScoutMissionTarget.mission_id == ScoutMission.id)
-            .where(ScoutMissionTarget.player_id == int(player_id), ScoutMission.status.in_(["pending", "in_progress"]))
-            .order_by(ScoutMission.due_at.nullslast(), ScoutMission.id)
-        ).unique().all())
-    payload["next_action"] = missions[0] if missions else None
+    # 4.2.1: the old assigned Scout-mission concept is no longer part of the active product.
+    payload["next_action"] = None
     return payload
-
 
 def candidate_next_matches(session: Session, *, player_id: int, season_id: int, limit: int = 12) -> list[Match]:
     roster = session.scalar(
@@ -300,15 +255,15 @@ def list_player_cards(
     for roster in session.scalars(roster_stmt.order_by(desc(TeamRoster.updated_at))).unique().all():
         roster_map.setdefault(roster.player_id, roster)
 
-    scout_counts: dict[int, int] = defaultdict(int)
-    scout_rows = session.execute(
+    tracking_counts: dict[int, int] = defaultdict(int)
+    tracking_rows = session.execute(
         select(ScoutedPlayerProfile.player_id, func.count(ScoutObservation.id))
         .join(ScoutObservation, ScoutObservation.profile_id == ScoutedPlayerProfile.id)
         .where(ScoutedPlayerProfile.player_id.in_(ids), ScoutObservation.status == "submitted")
         .group_by(ScoutedPlayerProfile.player_id)
     ).all()
-    for pid, count in scout_rows:
-        scout_counts[int(pid)] = int(count or 0)
+    for pid, count in tracking_rows:
+        tracking_counts[int(pid)] = int(count or 0)
 
     rating_map: dict[int, tuple[float | None, int, int]] = {}
     rating_rows = session.execute(
@@ -335,12 +290,12 @@ def list_player_cards(
         decision = decisions.get(player.id)
         state = normalize_player_state(decision.status if decision else None)
         avg, obs_count, standout_count = rating_map.get(player.id, (None, 0, 0))
-        scouts = scout_counts.get(player.id, 0)
+        tracking = tracking_counts.get(player.id, 0)
         if state_filter == "Destacados" and standout_count <= 0:
             continue
         if state_filter == "Seguimiento" and state != "Seguimiento":
             continue
-        if state_filter == "Scout" and scouts <= 0:
+        if state_filter == "Con observaciones" and tracking <= 0:
             continue
         if state_filter == "Prioritarios" and state != "Prioritario":
             continue
@@ -350,7 +305,7 @@ def list_player_cards(
         rows.append({
             "player": player, "decision": decision, "state": state,
             "team": roster.team if roster else None, "rating": avg,
-            "postmatch_count": obs_count, "scout_count": scouts,
+            "postmatch_count": obs_count, "scout_count": tracking, "tracking_observation_count": tracking,
             "standouts": standout_count,
         })
         if len(rows) >= int(limit):
@@ -413,14 +368,9 @@ def load_team_workspace(session: Session, *, team_id: int, season_id: int | None
             select(Participation).options(joinedload(Participation.player)).where(Participation.match_id==last_match.id,Participation.team_id==team.id)
             .order_by(Participation.starter.desc(),Participation.order_index)
         ).unique().all())
-    analyses=list(session.scalars(
-        select(ScoutMission).options(joinedload(ScoutMission.assignee),joinedload(ScoutMission.match).joinedload(Match.home_team),joinedload(ScoutMission.match).joinedload(Match.away_team))
-        .where(ScoutMission.status=="completed",ScoutMission.mission_type.in_(["team","rival_analysis"]),
-               or_(ScoutMission.target_team_id==team.id,
-                   ScoutMission.match_id.in_(select(Match.id).where(or_(Match.home_team_id==team.id,Match.away_team_id==team.id)))))
-        .order_by(desc(ScoutMission.completed_at),desc(ScoutMission.id)).limit(10)
-    ).unique().all())
-    return {"team":team,"own_team":own,"roster":roster,"decisions":decisions,"next_vs_own":next_vs_own,"last_match":last_match,"last_lineup":last_lineup,"analyses":analyses}
+    from repositories import sporting_reading as sporting_repo
+    readings = sporting_repo.team_reading_history(session, int(season_id), team.id) if season_id else []
+    return {"team":team,"own_team":own,"roster":roster,"decisions":decisions,"next_vs_own":next_vs_own,"last_match":last_match,"last_lineup":last_lineup,"readings":readings}
 
 
 def load_operational_readiness(session: Session) -> dict:

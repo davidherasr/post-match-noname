@@ -108,16 +108,12 @@ def get_participations(session: Session, match_id: int, team_id: int | None = No
 
 
 def replace_participations(session: Session, match_id: int, team_id: int, rows: Iterable[dict], actor_id: int) -> list[Participation]:
-    # Admin/DD can edit any lineup. A Scout can capture a neutral-match lineup,
-    # but cannot alter No Name's own match participants.
-    assert_role(session, actor_id, "admin", "director", "scout")
+    # Administración prepara datos; Informador puede corregir lo observado en el partido.
+    # Dirección Deportiva no obtiene este permiso automáticamente.
+    assert_role(session, actor_id, "admin", "reporter")
     match = session.get(Match, match_id)
     if not match:
         raise ValueError("Partido no encontrado.")
-    if user_has_role(session, actor_id, "scout") and not user_has_role(session, actor_id, "admin", "director"):
-        own = get_own_team(session)
-        if own and own.id in {match.home_team_id, match.away_team_id}:
-            raise PermissionError("Un Scout no puede modificar la alineación de un partido de No Name.")
     locked = int(session.scalar(select(func.count(Report.id)).where(and_(Report.match_id == match_id, Report.status.in_(LOCKED_REPORT_STATUSES)))) or 0)
     if locked:
         raise ValueError("No se puede cambiar la alineación: existen informes entregados o aprobados.")
@@ -182,7 +178,7 @@ def update_match_study_context(
     study_notes: str | None = None,
 ) -> Match:
     """Persist the neutral-match study context without requiring Admin mode."""
-    assert_role(session, actor_id, "scout", "director", "admin")
+    assert_role(session, actor_id, "reporter", "admin")
     match = session.get(Match, int(match_id))
     if not match:
         raise ValueError("Partido no encontrado.")
@@ -213,7 +209,7 @@ def import_federation_roster_text(session: Session, *, team_id: int, season_id: 
     supplied, those labels are also stored as match participations. Plain lists
     without headings remain roster-only: order never implies starter status.
     """
-    assert_role(session, actor_id, "scout", "director", "admin")
+    assert_role(session, actor_id, "reporter", "admin")
     from repositories import players as players_repo
     parsed = parse_federation_roster(text)
     if not parsed:
@@ -319,7 +315,7 @@ def assign_reporters(session: Session, match_id: int, user_ids: Sequence[int], a
     result = []
     for uid in user_ids:
         user = session.get(User, int(uid))
-        if not user or not user.active or not user_has_role(session, user.id, "reporter", "admin", "director"):
+        if not user or not user.active or not user_has_role(session, user.id, "reporter"):
             continue
         item = current.pop(user.id, None)
         if item is None:

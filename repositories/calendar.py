@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from core.clock import local_today
 from core.utils import normalize_name
-from models.entities import Competition, Match, ScoutMission, Season, Team
+from models.entities import Competition, Match, Season, Team
 from core.schedule import is_schedule_confirmed, require_schedule_confirmed
 from repositories.common import UTC_NOW, audit
 from repositories.users import assert_role
@@ -183,21 +183,12 @@ def update_schedule(
     if venue is not None:
         match.venue = venue.strip() or None
 
-    # Scouting tasks may be planned before kickoff is known. Once Administration
-    # confirms or changes the hour, their operational due time follows the match.
-    active_missions = list(session.scalars(select(ScoutMission).where(
-        ScoutMission.match_id == match.id, ScoutMission.status.in_(["pending", "in_progress"])
-    )).all())
-    for mission in active_missions:
-        mission.due_at = match.kickoff_at if is_schedule_confirmed(match) else None
-        mission.updated_at = UTC_NOW()
-
     match.revision = int(match.revision or 0) + 1
     match.updated_at = UTC_NOW()
     audit(session, actor_id, "update_fixture_schedule", "match", match.id, before=before, after={
         "match_date": str(match.match_date), "kickoff_at": str(match.kickoff_at),
         "schedule_status": match.schedule_status, "venue": match.venue,
-        "missions_synced": len(active_missions), "previous_kickoff": str(previous_kickoff),
+        "previous_kickoff": str(previous_kickoff),
     })
     return match
 

@@ -10,15 +10,15 @@ from core.clock import local_today
 from core.constants import FORMATIONS, POSITIONS
 from core.formations import available_lineup_player_ids, slots_for
 from core.database import session_scope
-from core.permissions import can_admin, can_direct, can_report, can_scout, roles_for
+from core.permissions import can_admin, can_direct, can_report, can_track_players
 from core.presentation import status_badge
 from core.schedule import is_schedule_confirmed
 from repositories import calendar as calendar_repo
 from repositories import matches as matches_repo
 from repositories import planning as planning_repo
 from repositories import players as players_repo
-from repositories import scouting as base_repo
 from repositories import workspaces
+from repositories import sporting_reading as sporting_repo
 from ui.styles import page_header
 from ui.match_study import render_campogram
 
@@ -74,7 +74,7 @@ def _roster_table(roster: list) -> pd.DataFrame:
 
 
 def _federation_roster_editor(match, team, user: dict, *, side: str) -> None:
-    if not (can_admin(user) or can_scout(user)):
+    if not (can_admin(user) or can_report(user)):
         return
     with st.expander("Actualizar plantilla desde Federación", expanded=False):
         st.caption("Pega la lista de Federación. Si sabes convocatoria, separa con `TITULARES` y `SUPLENTES`. Si no, pega solo `dorsal;nombre` y quedará como plantilla sin inventar quién jugó.")
@@ -153,9 +153,7 @@ def _formation_lineup_editor(match, team, user: dict, *, side: str, formation: s
         pitch_rows.append({"name":_player_name(part.player) if part else "—","shirt_number":part.shirt_number if part else None,"position":slot.code})
     st.markdown(f"#### {team.name} · {formation}")
     render_campogram(formation,pitch_rows)
-    if not can_scout(user):
-        if can_admin(user):
-            _federation_roster_editor(match, team, user, side=side)
+    if not (can_admin(user) or can_report(user)):
         return
     with st.expander("Editar XI observado", expanded=not bool(parts)):
         if not roster:
@@ -242,7 +240,7 @@ def _neutral_match_study(match, user: dict) -> None:
         f"**{match.away_team.short_name or match.away_team.name}:** {away_state}"
     )
     known_formations=[f for f in FORMATIONS if slots_for(f)]
-    can_edit=can_scout(user)
+    can_edit=can_admin(user) or can_report(user)
 
     c1,c2,c3=st.columns(3)
     video=c1.toggle("Vídeo disponible",value=bool(match.video_available),disabled=not can_edit,key=f"video40_{match.id}")
@@ -282,272 +280,268 @@ def _neutral_match_study(match, user: dict) -> None:
             _render_roster_only(match,match.away_team,user,side="away")
 
 
-def _mission_target_text(mission, targets_by_mission: dict[int, list]) -> str:
-    targets = targets_by_mission.get(mission.id, [])
-    if targets:
-        names = [t.player.display_name or t.player.full_name for t in targets]
-        return ", ".join(names)
-    if mission.target_team:
-        return mission.target_team.name
-    return "Partido completo"
-
-
-def _mission_planning(match, user: dict, players: list) -> None:
-    """DD decides what is worth following and assigns it to explicit Scout roles."""
-    if not can_direct(user):
-        return
-    st.markdown("### Dirección Deportiva · asignar seguimiento")
-    st.caption("Administración deja el partido y los datos preparados. Dirección Deportiva decide si hay algo que seguir y quién lo observa.")
-    with session_scope() as session:
-        scouts = planning_repo.list_scout_users(session)
-    if not scouts:
-        st.warning("No hay ningún usuario con rol Scout. Administración debe asignar ese rol antes de poder repartir trabajo.")
-        return
-
+def _player_context_for_match(match, players: list):
     player_map = {p.id: p for p in players}
-    with st.form(f"mission_41_{match.id}"):
-        scope = st.segmented_control(
-            "Qué quieres seguir",
-            ["Partido completo", "Equipo", "Jugador(es)"],
-            default="Jugador(es)",
-            key=f"mission_scope_41_{match.id}",
-        ) or "Jugador(es)"
-        target_ids: list[int] = []
-        target_team_id = None
-        if scope == "Equipo":
-            target_team_id = st.selectbox(
-                "Equipo objetivo",
-                [match.home_team_id, match.away_team_id],
-                format_func=lambda tid: match.home_team.name if tid == match.home_team_id else match.away_team.name,
-            )
-        elif scope == "Jugador(es)":
-            target_ids = st.multiselect(
-                "Jugadores objetivo",
-                list(player_map),
-                format_func=lambda pid: player_map[pid].display_name or player_map[pid].full_name,
-                help="Selecciona uno o varios. Si todavía no sabes a quién seguir, usa Partido completo o Equipo.",
-            )
-        assignees = st.multiselect(
-            "Asignar a Scout",
-            [u.id for u in scouts],
-            format_func=lambda uid: next(u.full_name for u in scouts if u.id == uid),
-            help="Puedes asignar el mismo encargo a varios scouts; se crea una tarea individual para cada uno.",
-        )
-        c1, c2 = st.columns([1, 2])
-        priority = c1.selectbox("Prioridad", [3, 2, 1], index=1, format_func=lambda x: {3: "Alta", 2: "Media", 1: "Baja"}[x])
-        purpose = c2.text_input("Qué queremos resolver", placeholder="Ej. valorar al 9 en ataques al espacio / entender salida de balón")
-        create = st.form_submit_button("Asignar trabajo de scouting", type="primary", use_container_width=True)
+    with session_scope() as session:
+        home_roster = list(players_repo.get_roster(session, match.home_team_id, match.season_id))
+        away_roster = list(players_repo.get_roster(session, match.away_team_id, match.season_id))
+        parts = matches_repo.get_participations(session, match.id)
+    player_team: dict[int, int] = {}
+    shirts: dict[int, int | None] = {}
+    status: dict[int, str] = {}
+    for row in home_roster:
+        player_team[row.player_id] = match.home_team_id
+        shirts[row.player_id] = row.shirt_number
+    for row in away_roster:
+        player_team[row.player_id] = match.away_team_id
+        shirts[row.player_id] = row.shirt_number
+    for part in parts:
+        player_team[part.player_id] = part.team_id
+        shirts[part.player_id] = part.shirt_number if part.shirt_number is not None else shirts.get(part.player_id)
+        status[part.player_id] = "starter" if part.starter else "substitute"
+    return player_map, player_team, shirts, status
 
-    if create:
+
+def _match_player_label(pid: int, player_map: dict, shirts: dict, status: dict) -> str:
+    player = player_map[pid]
+    badge = "🟢 TIT" if status.get(pid) == "starter" else "🟡 SUP" if status.get(pid) == "substitute" else "⚪ PLANTILLA"
+    shirt = shirts.get(pid)
+    dorsal = f"#{shirt} · " if shirt is not None else ""
+    return f"{badge} · {dorsal}{player.display_name or player.full_name}"
+
+
+def _neutral_staff_opinion(match, user: dict, players: list) -> None:
+    if not can_report(user) or not is_schedule_confirmed(match):
+        return
+    st.markdown("### Tu lectura del partido")
+    st.caption("Partido neutral: valora a los dos equipos y señala únicamente a los jugadores que realmente te hayan llamado la atención. No estás iniciando un seguimiento.")
+    player_map, player_team, shirts, status = _player_context_for_match(match, players)
+    with session_scope() as session:
+        existing = sporting_repo.get_match_opinion(session, match.id, user["id"])
+        existing_players = sporting_repo.opinion_players(session, existing.id) if existing else []
+    existing_by_player = {row.player_id: row for row in existing_players}
+    ordered = sorted(
+        [pid for pid in player_map if pid in player_team],
+        key=lambda pid: (
+            0 if player_team.get(pid) == match.home_team_id else 1,
+            {"starter": 0, "substitute": 1}.get(status.get(pid), 2),
+            shirts.get(pid) if shirts.get(pid) is not None else 999,
+            player_map[pid].display_name or player_map[pid].full_name,
+        ),
+    )
+    default_selected = [pid for pid in existing_by_player if pid in ordered]
+    selected = st.multiselect(
+        "Jugadores destacados (opcional)", ordered, default=default_selected,
+        format_func=lambda pid: _match_player_label(pid, player_map, shirts, status),
+        key=f"neutral_highlights_42_{match.id}_{user['id']}",
+        help="Señalar aquí no abre un seguimiento. Solo crea una señal para la lectura conjunta de Dirección Deportiva.",
+    )
+    with st.form(f"neutral_opinion_42_{match.id}_{user['id']}"):
+        c1, c2 = st.columns(2)
+        home_rating = c1.number_input(
+            f"Nota {match.home_team.name}", 0.0, 10.0,
+            float(existing.home_team_rating or 0.0) if existing else 0.0, .5, help="0 = sin valorar",
+        )
+        away_rating = c2.number_input(
+            f"Nota {match.away_team.name}", 0.0, 10.0,
+            float(existing.away_team_rating or 0.0) if existing else 0.0, .5, help="0 = sin valorar",
+        )
+        summary = st.text_area(
+            "Qué te deja el partido", value=existing.summary or "" if existing else "", height=90,
+            placeholder="Qué equipo te convenció, qué patrones viste, qué merece recordarse...",
+        )
+        player_rows = []
+        if selected:
+            st.markdown("**Jugadores destacados**")
+            for pid in selected:
+                previous = existing_by_player.get(pid)
+                c1, c2 = st.columns([1, 3])
+                rating = c1.number_input(
+                    f"Nota · {player_map[pid].display_name or player_map[pid].full_name}", 0.0, 10.0,
+                    float(previous.rating or 0.0) if previous else 0.0, .5,
+                    key=f"neutral_player_rate_42_{match.id}_{user['id']}_{pid}",
+                )
+                note = c2.text_input(
+                    f"Apunte · {player_map[pid].display_name or player_map[pid].full_name}",
+                    value=previous.note or "" if previous else "",
+                    key=f"neutral_player_note_42_{match.id}_{user['id']}_{pid}",
+                )
+                player_rows.append({"player_id": pid, "team_id": player_team[pid], "rating": rating, "note": note})
+        save = st.form_submit_button("Guardar mi lectura", type="primary", use_container_width=True)
+    if save:
         try:
-            if not assignees:
-                raise ValueError("Selecciona al menos un Scout responsable.")
-            if scope == "Jugador(es)" and not target_ids:
-                raise ValueError("Selecciona al menos un jugador o cambia el alcance a Partido completo / Equipo.")
-            if scope == "Partido completo":
-                mission_type = "spontaneous"
-                title = f"Visionar · {_match_title(match)}"
-            elif scope == "Equipo":
-                mission_type = "team"
-                team_name = match.home_team.name if target_team_id == match.home_team_id else match.away_team.name
-                title = f"Observar equipo · {team_name}"
-            else:
-                mission_type = "player" if len(target_ids) == 1 else "multi_player"
-                title = "Observar · " + (player_map[target_ids[0]].full_name if len(target_ids) == 1 else f"{len(target_ids)} jugadores")
             with session_scope() as session:
-                for assignee in assignees:
-                    planning_repo.create_mission(
-                        session,
-                        match_id=match.id,
-                        mission_type=mission_type,
-                        title=title,
-                        assigned_to=assignee,
-                        requested_by=user["id"],
-                        target_team_id=target_team_id,
-                        player_ids=target_ids,
-                        purpose=purpose,
-                        priority=priority,
-                        due_at=match.kickoff_at if is_schedule_confirmed(match) else None,
-                    )
-            st.success(f"Trabajo asignado a {len(assignees)} Scout{'s' if len(assignees) != 1 else ''}.")
+                sporting_repo.save_neutral_opinion(
+                    session, match_id=match.id, user_id=user["id"],
+                    home_team_rating=home_rating, away_team_rating=away_rating,
+                    summary=summary, player_rows=player_rows,
+                )
+            st.success("Lectura guardada.")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
 
 
-def _scouting_form(match, user: dict, players: list, data: dict) -> None:
-    if not can_scout(user):
+def _start_tracking_button(player_id: int, user: dict, *, key: str) -> None:
+    if not can_track_players(user):
         return
-    st.markdown("### Scout · registrar lo observado")
-    st.caption("No tienes que elegir 'Barrido / Observación / Dossier'. Selecciona jugadores: varios = apuntes rápidos; uno = observación individual. El dossier 360 se construye automáticamente con el historial.")
+    if st.button("Iniciar seguimiento", use_container_width=True, key=key):
+        try:
+            with session_scope() as session:
+                sporting_repo.start_player_tracking(session, player_id=player_id, actor_id=user["id"])
+            st.session_state["workspace_player_id"] = int(player_id)
+            from core.navigation import request_navigation
+            request_navigation("Jugadores")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
-    my_active = [m for m in data.get("my_missions", []) if m.status in {"pending", "in_progress"}]
-    if my_active:
-        st.markdown("#### Tus encargos de Dirección Deportiva")
-        for mission in my_active:
-            target_text = _mission_target_text(mission, data.get("targets_by_mission", {}))
-            with st.container(border=True):
-                a, b = st.columns([4, 1])
-                a.markdown(f"**{mission.title}**")
-                priority_label = {3: "Alta", 2: "Media", 1: "Baja"}.get(mission.priority, "Media")
-                state_label = "En curso" if mission.status == "in_progress" else "Pendiente"
-                a.caption(f"Objetivo: {target_text} · Prioridad: {priority_label} · Estado: {state_label}")
-                if mission.purpose:
-                    a.write(mission.purpose)
-                if mission.status == "pending" and is_schedule_confirmed(match):
-                    if b.button("Empezar", key=f"mission_start_41_{mission.id}", use_container_width=True):
-                        with session_scope() as session:
-                            planning_repo.update_mission_status(session, mission.id, user["id"], status="in_progress")
-                        st.rerun()
+
+def _director_match_reading(match, user: dict, *, is_own_match: bool) -> None:
+    if not can_direct(user):
+        return
+    st.markdown("### Dirección Deportiva · lectura conjunta")
+    if is_own_match:
+        with session_scope() as session:
+            reading = sporting_repo.own_match_reading(session, match.id)
+        reports = reading["reports"]
+        if not reports:
+            st.info("Todavía no hay postpartidos entregados. Dirección Deportiva leerá el consenso cuando empiecen a llegar.")
+            return
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Postpartidos", len(reports))
+        c2.metric("No Name · consenso", "—" if reading["own_weighted"] is None else f"{reading['own_weighted']:.2f}")
+        c3.metric("Rival · consenso", "—" if reading["rival_weighted"] is None else f"{reading['rival_weighted']:.2f}")
+        st.caption(
+            f"No Name: {sporting_repo.consensus_label(reading.get('own_dispersion'), len(reports))} · "
+            f"Rival: {sporting_repo.consensus_label(reading.get('rival_dispersion'), len(reports))}. "
+            "Los jugadores de No Name se leen como rendimiento de plantilla, nunca como candidatos a seguimiento de mercado."
+        )
+        with st.expander("Ver opiniones del staff", expanded=False):
+            for report in reports:
+                weight = reading["weights"].get(report.reporter_id)
+                w = float(weight.own_match_weight if weight else 1.0)
+                st.markdown(
+                    f"**{report.reporter.full_name}** · peso x{w:.2f} · "
+                    f"No Name {'—' if report.own_team_rating is None else f'{report.own_team_rating:.1f}'} · "
+                    f"Rival {'—' if report.rival_team_rating is None else f'{report.rival_team_rating:.1f}'}"
+                )
+                if report.key_takeaways:
+                    st.caption(report.key_takeaways)
+        own_players = [row for row in reading["players"] if row["scope"] == "own"]
+        rival_players = [row for row in reading["players"] if row["scope"] == "rival"]
+        if own_players:
+            st.markdown("#### No Name · rendimiento ponderado")
+            st.dataframe(pd.DataFrame([{
+                "Jugador": row["player"].display_name or row["player"].full_name,
+                "Nota": None if row["weighted_rating"] is None else round(row["weighted_rating"], 2),
+                "Opiniones": row["reporter_count"],
+                "Consenso": sporting_repo.consensus_label(row["dispersion"], row["reporter_count"]),
+            } for row in own_players]), hide_index=True, use_container_width=True)
+        if rival_players:
+            st.markdown("#### Rival · señales del postpartido")
+            st.caption("Que un rival destaque aquí no significa que esté en seguimiento. Es solo una señal nacida de nuestros postpartidos.")
+            for row in rival_players[:8]:
+                with st.container(border=True):
+                    a, b = st.columns([4, 1])
+                    a.markdown(f"**{row['player'].display_name or row['player'].full_name}** · {row['team'].name}")
+                    a.caption(f"Nota {'—' if row['weighted_rating'] is None else f'{row['weighted_rating']:.2f}'} · {row['reporter_count']} opiniones · {sporting_repo.consensus_label(row.get('dispersion'), row['reporter_count'])}")
+                    if can_track_players(user):
+                        with b:
+                            _start_tracking_button(row["player"].id, user, key=f"track_ownmatch_rival_42_{match.id}_{row['player'].id}")
     else:
-        st.info("No tienes un encargo de DD en este partido. Puedes registrar una observación espontánea si has visto algo relevante.")
+        with session_scope() as session:
+            reading = sporting_repo.neutral_match_reading(session, match.id)
+        opinions = reading["opinions"]
+        if not opinions:
+            st.info("Todavía no hay lecturas del staff para este partido neutral.")
+            return
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Lecturas", len(opinions))
+        c2.metric(match.home_team.short_name or match.home_team.name, "—" if reading["home_weighted"] is None else f"{reading['home_weighted']:.2f}")
+        c3.metric(match.away_team.short_name or match.away_team.name, "—" if reading["away_weighted"] is None else f"{reading['away_weighted']:.2f}")
+        st.caption(
+            f"{match.home_team.short_name or match.home_team.name}: {sporting_repo.consensus_label(reading.get('home_dispersion'), len(opinions))} · "
+            f"{match.away_team.short_name or match.away_team.name}: {sporting_repo.consensus_label(reading.get('away_dispersion'), len(opinions))}"
+        )
+        with st.expander("Ver opiniones del staff", expanded=False):
+            for opinion in opinions:
+                weight = reading["weights"].get(opinion.user_id)
+                w = float(weight.neutral_match_weight if weight else 1.0)
+                st.markdown(
+                    f"**{opinion.user.full_name}** · peso x{w:.2f} · "
+                    f"{match.home_team.short_name or match.home_team.name} {'—' if opinion.home_team_rating is None else f'{opinion.home_team_rating:.1f}'} · "
+                    f"{match.away_team.short_name or match.away_team.name} {'—' if opinion.away_team_rating is None else f'{opinion.away_team_rating:.1f}'}"
+                )
+                if opinion.summary:
+                    st.caption(opinion.summary)
+        if reading["players"]:
+            st.markdown("#### Jugadores señalados por el staff")
+            st.caption("Primero aparecen como señales. Solo quien tenga permiso especial puede convertir una señal en seguimiento individual.")
+            for row in reading["players"][:10]:
+                with st.container(border=True):
+                    a, b = st.columns([4, 1])
+                    a.markdown(f"**{row['player'].display_name or row['player'].full_name}** · {row['team'].name}")
+                    rating = "—" if row["weighted_rating"] is None else f"{row['weighted_rating']:.2f}"
+                    a.caption(f"{row['mentions']} persona(s) lo señalaron · nota ponderada {rating} · {sporting_repo.consensus_label(row.get('dispersion'), row['mentions'])}")
+                    if row["notes"]:
+                        a.write(" · ".join(row["notes"][:3]))
+                    if can_track_players(user):
+                        with b:
+                            _start_tracking_button(row["player"].id, user, key=f"track_neutral_42_{match.id}_{row['player'].id}")
 
-    if not is_schedule_confirmed(match):
-        st.caption("El registro de observaciones se habilita cuando exista fecha y hora reales del partido.")
+
+def _individual_tracking_form(match, user: dict, players: list) -> None:
+    if not can_track_players(user) or not is_schedule_confirmed(match):
         return
-    if not players:
-        st.info("No hay jugadores asociados a las plantillas de este partido.")
-        return
-
-    player_map = {p.id: p for p in players}
-    with session_scope() as session:
-        all_parts = matches_repo.get_participations(session, match.id)
-        all_roster = list(players_repo.get_roster(session, match.home_team_id, match.season_id)) + list(players_repo.get_roster(session, match.away_team_id, match.season_id))
-    participant_status = {p.player_id: ("starter" if p.starter else "substitute") for p in all_parts}
-    participant_shirt = {p.player_id: p.shirt_number for p in all_parts}
-    roster_shirt = {r.player_id: r.shirt_number for r in all_roster}
-
-    def scout_player_label(pid: int) -> str:
-        player = player_map[pid]
-        status = participant_status.get(pid)
-        badge = "🟢 TIT" if status == "starter" else "🟡 SUP" if status == "substitute" else "⚪ PLANTILLA"
-        shirt = participant_shirt.get(pid)
-        if shirt is None:
-            shirt = roster_shirt.get(pid)
-        dorsal = f"#{shirt} · " if shirt is not None else ""
-        return f"{badge} · {dorsal}{player.display_name or player.full_name}"
-
     with session_scope() as session:
         own = players_repo.get_own_team(session)
-        neutral = not own or own.id not in {match.home_team_id, match.away_team_id}
-        if neutral:
-            home_ids = {r.player_id for r in players_repo.get_roster(session, match.home_team_id, match.season_id)}
-            away_ids = {r.player_id for r in players_repo.get_roster(session, match.away_team_id, match.season_id)}
-            for part in matches_repo.get_participations(session, match.id, match.home_team_id):
-                home_ids.add(part.player_id)
-            for part in matches_repo.get_participations(session, match.id, match.away_team_id):
-                away_ids.add(part.player_id)
-        else:
-            home_ids = away_ids = set()
-    if neutral:
-        team_scope = st.segmented_control(
-            "Equipo", ["Ambos", match.home_team.name, match.away_team.name], default="Ambos", key=f"scout_team_scope41_{match.id}"
-        ) or "Ambos"
-        if team_scope == match.home_team.name:
-            player_map = {pid: p for pid, p in player_map.items() if pid in home_ids}
-        elif team_scope == match.away_team.name:
-            player_map = {pid: p for pid, p in player_map.items() if pid in away_ids}
-        if not player_map:
-            st.info("No hay jugadores cargados para ese equipo. Añade primero la plantilla / convocatoria disponible.")
-            return
-
-    player_missions = [m for m in my_active if m.mission_type in {"player", "multi_player", "spontaneous"}]
-    mission_options = [None] + [m.id for m in player_missions]
-    mission_id = st.selectbox(
-        "Encargo asociado (opcional)",
-        mission_options,
-        format_func=lambda mid: "Observación espontánea" if mid is None else next(f"{m.title} · {_mission_target_text(m, data.get('targets_by_mission', {}))}" for m in player_missions if m.id == mid),
-        key=f"scout_mission_link_41_{match.id}",
-    )
-    target_defaults: list[int] = []
-    if mission_id is not None:
-        target_defaults = [t.player_id for t in data.get("targets_by_mission", {}).get(mission_id, []) if t.player_id in player_map]
-
-    ordered_ids = sorted(
-        player_map,
-        key=lambda pid: (
-            {"starter": 0, "substitute": 1}.get(participant_status.get(pid), 2),
-            participant_shirt.get(pid) if participant_shirt.get(pid) is not None else roster_shirt.get(pid) if roster_shirt.get(pid) is not None else 999,
-            player_map[pid].display_name or player_map[pid].full_name,
-        ),
-    )
-    selected = st.multiselect(
-        "Jugadores observados",
-        ordered_ids,
-        default=target_defaults,
-        format_func=scout_player_label,
-        key=f"scout_players_41_{match.id}_{mission_id or 0}",
-        help="Selecciona uno para abrir una observación individual. Selecciona varios para un barrido rápido del partido.",
-    )
-    if not selected:
-        st.caption("Selecciona el jugador o jugadores que has observado.")
+        own_ids = set()
+        if own:
+            own_ids = {r.player_id for r in players_repo.get_roster(session, own.id, match.season_id)}
+    external = [p for p in players if p.id not in own_ids]
+    if not external:
         return
-
-    if len(selected) > 1:
-        st.caption(f"⚡ Apuntes rápidos · {len(selected)} jugadores. El sistema los guarda como observaciones de barrido sin pedirte que elijas un nivel.")
-        with st.form(f"scan_form_41_{match.id}_{mission_id or 0}"):
-            rows = []
-            for pid in selected:
-                p = player_map[pid]
-                a, b = st.columns([1, 3])
-                rating = a.number_input(f"{p.display_name or p.full_name} · nota", 0.0, 10.0, 0.0, .5, key=f"scan41_rate_{match.id}_{pid}")
-                note = b.text_input(f"{p.display_name or p.full_name} · apunte", key=f"scan41_note_{match.id}_{pid}")
-                rows.append({"player_id": pid, "general_rating": rating, "observed_position": p.primary_position, "summary": note})
-            save = st.form_submit_button("Guardar apuntes rápidos", type="primary", use_container_width=True)
-        if save:
-            try:
-                with session_scope() as session:
-                    count = planning_repo.save_quick_match_observations(
-                        session, match_id=match.id, reviewer_id=user["id"], rows=rows, mission_id=mission_id,
-                    )
-                if count:
-                    st.success(f"{count} observaciones guardadas.")
-                    st.rerun()
-                else:
-                    st.warning("Asigna una nota superior a 0 al menos a un jugador para guardar.")
-            except Exception as exc:
-                st.error(str(exc))
-        return
-
-    pid = selected[0]
+    st.markdown("### Seguimiento individual")
+    st.caption("Permiso especial. Aquí sí se abre evidencia longitudinal para un jugador externo. Los jugadores de No Name quedan fuera de este flujo.")
+    player_map = {p.id: p for p in external}
+    pid = st.selectbox(
+        "Jugador externo", list(player_map),
+        format_func=lambda x: player_map[x].display_name or player_map[x].full_name,
+        key=f"individual_track_player_42_{match.id}",
+    )
     player = player_map[pid]
-    st.caption("👁 Observación individual · un jugador. El historial de estas observaciones alimenta automáticamente su Player Report 360.")
     with session_scope() as session:
         model_roles = planning_repo.list_model_roles(session)
     role_options = [None] + [r.id for r in model_roles if not player.primary_position or r.position == player.primary_position]
     role_id = st.selectbox(
         "Rol No Name", role_options,
         format_func=lambda rid: "Sin rol todavía" if rid is None else next(f"{r.position} · {r.name}" for r in model_roles if r.id == rid),
-        key=f"scout_role_41_{match.id}_{pid}",
+        key=f"individual_track_role_42_{match.id}_{pid}",
     )
     with session_scope() as session:
         criteria = planning_repo.list_model_criteria(session, role_id) if role_id else []
-    with st.form(f"obs_form_41_{match.id}_{pid}_{role_id}_{mission_id or 0}"):
+    with st.form(f"individual_track_form_42_{match.id}_{pid}_{role_id}"):
         c1, c2 = st.columns(2)
         position = c1.selectbox("Posición observada", POSITIONS, index=POSITIONS.index(player.primary_position) if player.primary_position in POSITIONS else 0)
         rating = c2.number_input("Rendimiento del partido", 0.0, 10.0, 0.0, .5)
         scores = {}
-        if role_id:
-            st.markdown("**Criterios del Modelo No Name**")
-            for criterion in criteria:
-                scores[criterion.id] = st.number_input(
-                    f"{criterion.name} · peso {criterion.weight}", 0.0, 10.0, 0.0, .5,
-                    key=f"crit41_{match.id}_{pid}_{criterion.id}",
-                )
-        summary = st.text_area("Conclusión del partido", height=90)
-        recommendation = st.selectbox("Siguiente lectura", ["Sin conclusión", "Volver a ver", "Seguimiento", "Prioritario", "Descartado"])
-        with st.expander("Detalle opcional"):
-            strengths = st.text_area("Fortalezas observadas", height=70)
-            weaknesses = st.text_area("Riesgos / dudas", height=70)
-        submit = st.form_submit_button("Guardar observación", type="primary", use_container_width=True)
-    if submit:
+        for criterion in criteria:
+            scores[criterion.id] = st.number_input(f"{criterion.name} · peso {criterion.weight}", 0.0, 10.0, 0.0, .5, key=f"track_crit_42_{match.id}_{pid}_{criterion.id}")
+        summary = st.text_area("Conclusión del visionado", height=90)
+        recommendation = st.selectbox("Siguiente acción", ["Sin conclusión", "Volver a ver", "Seguimiento", "Prioritario", "Descartado"])
+        strengths = st.text_area("Fortalezas", height=60)
+        weaknesses = st.text_area("Dudas / riesgos", height=60)
+        save = st.form_submit_button("Guardar en seguimiento", type="primary", use_container_width=True)
+    if save:
         try:
             clean_scores = {cid: score for cid, score in scores.items() if score and score > 0}
             with session_scope() as session:
+                sporting_repo.start_player_tracking(session, player_id=pid, actor_id=user["id"])
                 fit = planning_repo.weighted_model_fit(planning_repo.list_model_criteria(session, role_id), clean_scores) if role_id else None
                 obs = planning_repo.create_observation(
                     session, player_id=pid, reviewer_id=user["id"], match_id=match.id,
-                    mission_id=mission_id, source_type="specific", observation_level="observation", model_role_id=role_id,
+                    mission_id=None, source_type="specific", observation_level="observation", model_role_id=role_id,
                 )
                 planning_repo.save_observation(
                     session, obs.id, user["id"], observed_position=position,
@@ -556,36 +550,10 @@ def _scouting_form(match, user: dict, players: list, data: dict) -> None:
                     strengths=strengths, weaknesses=weaknesses, model_role_id=role_id,
                     observation_level="observation", submit=True,
                 )
-            st.success("Observación guardada y añadida al historial 360 del jugador.")
+            st.success("Observación añadida al seguimiento individual del jugador.")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
-
-
-def _rival_analysis(match, user: dict, data: dict) -> None:
-    if not can_scout(user):
-        return
-    relevant=[m for m in data["my_missions"] if m.mission_type in {"team","rival_analysis"} and m.status in {"pending","in_progress"}]
-    if not relevant or not is_schedule_confirmed(match):
-        return
-    mission=relevant[0]
-    st.markdown("### Análisis rival")
-    with st.form(f"rival_analysis_38_{mission.id}"):
-        structure=st.text_area("Estructura",height=70)
-        behavior=st.text_area("Qué hacen",height=90,placeholder="Con balón / sin balón")
-        danger=st.text_area("Qué nos puede hacer daño",height=80,placeholder="Jugadores o patrones")
-        keys=st.text_area("Claves para No Name",height=80)
-        with st.expander("Añadir detalle"):
-            transitions=st.text_area("Transiciones",height=60)
-            set_pieces=st.text_area("ABP",height=60)
-        save=st.form_submit_button("Entregar análisis",type="primary",use_container_width=True)
-    if save:
-        text="\n\n".join(x for x in [f"ESTRUCTURA\n{structure.strip()}" if structure.strip() else "",f"QUÉ HACEN\n{behavior.strip()}" if behavior.strip() else "",f"QUÉ NOS PUEDE HACER DAÑO\n{danger.strip()}" if danger.strip() else "",f"CLAVES PARA NO NAME\n{keys.strip()}" if keys.strip() else "",f"TRANSICIONES\n{transitions.strip()}" if transitions.strip() else "",f"ABP\n{set_pieces.strip()}" if set_pieces.strip() else ""] if x)
-        with session_scope() as session:
-            planning_repo.update_mission_status(session,mission.id,user["id"],status="completed",result_summary=text)
-        st.success("Análisis entregado.")
-        st.rerun()
-
 
 def _render_match_hub(user: dict, match_id: int) -> None:
     mode=st.session_state.get("match_hub_mode")
@@ -640,34 +608,28 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     if not data["is_own_match"]:
         _neutral_match_study(match,user)
 
-    current_roles = roles_for(user)
-    if "admin" in current_roles and "director" not in current_roles and "scout" not in current_roles:
-        st.info("**Flujo 4.1 · Administración**: deja calendario, horario, equipos y plantillas en orden. El seguimiento deportivo lo decide Dirección Deportiva y lo ejecuta Scout.")
-    elif "director" in current_roles:
-        if data.get("missions"):
-            st.info("**Flujo 4.1 · Dirección Deportiva**: revisa el seguimiento ya asignado o crea una nueva tarea para uno o varios Scouts.")
-        else:
-            st.info("**Flujo 4.1 · Dirección Deportiva**: este partido todavía no tiene seguimiento asignado. Si no aporta interés, no hace falta crear ninguna tarea.")
-    elif "scout" in current_roles:
-        own_tasks = [m for m in data.get("my_missions", []) if m.status in {"pending", "in_progress"}]
-        st.info(f"**Flujo 4.1 · Scout**: tienes {len(own_tasks)} encargo{'s' if len(own_tasks) != 1 else ''} activo{'s' if len(own_tasks) != 1 else ''} en este partido. Registra lo observado sin elegir niveles artificiales.")
+    if data["is_own_match"]:
+        st.info("**Partido No Name · flujo 4.2.1**: el staff completa su postpartido. Dirección Deportiva compara el criterio conjunto. Los jugadores propios se leen como rendimiento de plantilla, nunca como seguimiento de mercado.")
+    else:
+        st.info("**Partido neutral · flujo 4.2.1**: cada miembro deja una lectura ligera del partido y puede señalar jugadores. Señalar no equivale a seguir; el seguimiento individual es un permiso aparte.")
 
-    st.markdown("### Estado del partido")
-    c1,c2=st.columns(2)
-    with c1:
-        st.markdown(f"**Scouting** · {len(data['missions'])} tareas")
-        for mission in data["missions"][:6]:
-            targets=data["targets_by_mission"].get(mission.id,[])
-            names=", ".join(t.player.display_name or t.player.full_name for t in targets) or (mission.target_team.name if mission.target_team else mission.title)
-            st.caption(f"{mission.assignee.full_name}: {names} · {mission.status}")
-    with c2:
+    if data["is_own_match"]:
+        st.markdown("### Estado del postpartido")
         st.markdown(f"**Informes** · {len(data['reports'])}/{len(data['assignments']) or len(data['reports'])}")
-        for report in data["reports"][:6]:
+        for report in data["reports"][:8]:
             st.caption(f"{report.reporter.full_name} · {report.status}")
+    else:
+        with session_scope() as session:
+            neutral_reading = sporting_repo.neutral_match_reading(session, match.id)
+        st.markdown("### Estado de la lectura")
+        st.markdown(f"**Opiniones del staff** · {len(neutral_reading['opinions'])}")
+        if neutral_reading["players"]:
+            st.caption(f"{len(neutral_reading['players'])} jugadores han sido señalados al menos una vez.")
 
-    _mission_planning(match,user,players)
-    _rival_analysis(match,user,data)
-    _scouting_form(match,user,players,data)
+    if not data["is_own_match"]:
+        _neutral_staff_opinion(match, user, players)
+    _director_match_reading(match, user, is_own_match=data["is_own_match"])
+    _individual_tracking_form(match, user, players)
 
 
 def render(user: dict) -> None:
@@ -678,7 +640,7 @@ def render(user: dict) -> None:
     opened=st.session_state.get("workspace_match_id")
     if opened:
         _render_match_hub(user,int(opened)); return
-    page_header("Jornada","Partidos, horarios, scouting e informes desde un único lugar.")
+    page_header("Jornada","Partidos, postpartidos y lectura del staff desde un único lugar.")
     with session_scope() as session:
         active=players_repo.get_active_season(session); own=players_repo.get_own_team(session)
         if not active:
@@ -711,9 +673,7 @@ def render(user: dict) -> None:
             if match.match_date == local_today():
                 bits.append("HOY")
             bits.append(calendar_repo.schedule_label(match))
-            mc=data["mission_counts"].get(match.id,0)
             ac=data["assignment_counts"].get(match.id,{})
-            if mc: bits.append(f"👁 {mc} objetivo{'s' if mc!=1 else ''}")
             if not own_match:
                 bits.append("🎥 vídeo" if match.video_available else "sin vídeo")
                 known_count=int(bool(match.home_formation_known))+int(bool(match.away_formation_known))

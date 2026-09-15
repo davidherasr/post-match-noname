@@ -14,15 +14,15 @@ from repositories import scouting as repo
 def _base(session):
     admin = repo.create_user(
         session, "Admin 37", "admin37@example.com", "ValidPass123!",
-        role="admin", roles=["admin", "director", "scout"], must_change_password=False,
+        role="admin", roles=["admin", "director"], must_change_password=False,
     )
     reporter = repo.create_user(
         session, "Reporter 37", "reporter37@example.com", "ValidPass123!",
         role="reporter", actor_id=admin.id, must_change_password=False,
     )
     scout = repo.create_user(
-        session, "Scout 37", "scout37@example.com", "ValidPass123!",
-        role="scout", actor_id=admin.id, must_change_password=False,
+        session, "Seguimiento 37", "scout37@example.com", "ValidPass123!",
+        role="reporter", roles=["reporter"], actor_id=admin.id, must_change_password=False, can_track_players=True,
     )
     season = repo.create_season(session, "2026/27", date(2026, 7, 1), date(2027, 6, 30), admin.id)
     repo.set_active_season(session, season.id, admin.id)
@@ -63,7 +63,9 @@ def test_provisional_fixture_is_plannable_but_not_observable_until_confirmed(ses
         kickoff = datetime(2026, 10, 18, 17, 30)
         calendar_repo.update_schedule(session, match.id, admin.id, kickoff_at=kickoff)
         assert is_schedule_confirmed(match)
-        assert mission.due_at == kickoff
+        # 4.2.1: historical ScoutMission records are no longer part of the active calendar workflow.
+        # The match confirmation enables the observation, but does not mutate legacy mission deadlines.
+        assert mission.due_at is None
 
         obs = planning_repo.create_observation(
             session, player_id=player.id, reviewer_id=scout.id,
@@ -107,8 +109,8 @@ def test_scheduled_match_cannot_open_new_postmatch_report_without_confirmed_kick
 def test_multirole_director_permission_uses_all_roles_not_only_primary(session_factory):
     with session_factory.begin() as session:
         admin, reporter, scout, season, comp, own, rival, _ = _base(session)
-        # Scout has director as secondary role while keeping scout as primary.
-        repo.set_user_roles(session, scout.id, ["scout", "director"], actor_id=admin.id, primary_role="scout")
+        # A user may combine Informador + Dirección Deportiva while tracking remains an independent capability.
+        repo.set_user_roles(session, scout.id, ["reporter", "director"], actor_id=admin.id, primary_role="reporter")
         match = repo.create_match(
             session, season_id=season.id, competition_id=comp.id, round_name="J2",
             match_date=date(2026, 9, 20), home_team_id=own.id, away_team_id=rival.id,

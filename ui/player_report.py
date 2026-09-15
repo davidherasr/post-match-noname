@@ -95,7 +95,7 @@ def _radar_svg(criteria: list[dict], size: int = 370) -> str | None:
 
 def render_summary(payload: dict) -> None:
     st.markdown("### Resumen ejecutivo")
-    summary = payload.get("summary") or "Todavía no hay una conclusión consolidada del Scout o de Dirección Deportiva."
+    summary = payload.get("summary") or "Todavía no hay una conclusión consolidada del seguimiento individual o de Dirección Deportiva."
     st.markdown(f'<div class="pm360-note"><div class="pm360-note-title">Conclusión</div>{safe_html(summary)}</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -115,7 +115,7 @@ def render_summary(payload: dict) -> None:
     with c3:
         st.markdown("#### Recomendación")
         st.metric("Decisión / recomendación", payload.get("recommendation") or "Sin decidir")
-        st.caption(f"Scouting específico: {payload['evidence']['specific_observations']} · Fuerza de evidencia: {payload['evidence']['specific_strength']}")
+        st.caption(f"Seguimiento individual: {payload['evidence']['specific_observations']} · Fuerza de evidencia: {payload['evidence']['specific_strength']}")
 
     st.markdown("### Perfil observado")
     cols = st.columns(4)
@@ -124,7 +124,7 @@ def render_summary(payload: dict) -> None:
     c1, c2, c3 = st.columns(3)
     c1.metric("Nivel actual", _fmt(payload.get("current_level")))
     c2.metric("Proyección", _fmt(payload.get("potential_score")))
-    c3.metric("Media Scout", _fmt(payload.get("scout_average")))
+    c3.metric("Media seguimiento", _fmt(payload.get("scout_average")))
 
 
 def render_model(payload: dict) -> None:
@@ -179,16 +179,16 @@ def render_observations(payload: dict) -> None:
     ev = payload["evidence"]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Postpartidos", post["observations"])
-    c2.metric("Scouting específico", ev["specific_observations"])
-    c3.metric("Scouts distintos", ev["specific_scouts"])
+    c2.metric("Seguimientos", ev["specific_observations"])
+    c3.metric("Observadores distintos", ev["specific_scouts"])
     c4.metric("Destacados", post["standouts"])
     conf = post["confidence"]
     st.markdown("#### Por qué confiamos en la muestra")
     st.dataframe(pd.DataFrame([{"Componente": name, "Puntos": f"{item['score']}/{item['max']}", "Detalle": item["detail"]} for name, item in conf["components"].items()]), hide_index=True, use_container_width=True)
     if payload["observations"]:
-        st.markdown("#### Scouting específico")
+        st.markdown("#### Seguimiento individual")
         st.dataframe(pd.DataFrame([{
-            "Fecha": o.observed_at.date(), "Scout": o.reviewer.full_name,
+            "Fecha": o.observed_at.date(), "Observador": o.reviewer.full_name,
             "Partido": "-" if not o.match else f"{o.match.home_team.name} - {o.match.away_team.name}",
             "Tipo": o.source_type, "POS": o.observed_position or "-", "Nota": o.general_rating,
             "Encaje": o.model_fit_score, "Recomendación": o.recommendation or "", "Resumen": o.summary or "",
@@ -266,7 +266,7 @@ def render_season_profile(payload: dict) -> None:
         "Temporada": row["season"],
         "Equipo observado": row.get("team") or "-",
         "Postpartidos": row.get("postmatch", 0),
-        "Scout": row.get("scout", 0),
+        "Seguimientos": row.get("scout", 0),
         "Rating medio": row.get("average"),
     } for row in rows]), hide_index=True, use_container_width=True)
 

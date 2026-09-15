@@ -27,6 +27,11 @@ from repositories.matches import _own_team_id_for_match, get_match, get_particip
 
 def _assert_report_owner_or_privileged(session: Session, report: Report, actor_id: int) -> User:
     actor = assert_role(session, actor_id)
+    # 4.2.1: writing/rating a postmatch is an Informador capability. Admin and
+    # Dirección Deportiva may review/approve through their dedicated actions,
+    # but they do not inherit report-writing rights merely from those roles.
+    if not user_has_role(session, actor_id, "reporter"):
+        raise PermissionError("Para valorar o editar un postpartido necesitas el rol Informador.")
     if actor.id != report.reporter_id and not user_has_role(session, actor_id, "admin", "director"):
         raise PermissionError("No puedes modificar un informe de otro usuario.")
     return actor
@@ -37,12 +42,16 @@ def report_for_user(session: Session, match_id: int, reporter_id: int) -> Report
 
 
 def get_or_create_report(session: Session, match_id: int, reporter_id: int, actor_role: str | None = None) -> Report:
+    user = session.get(User, reporter_id)
+    if not user or not user.active:
+        raise ValueError("Partido o usuario no válido.")
+    if not user_has_role(session, reporter_id, "reporter"):
+        raise PermissionError("Para crear o completar un postpartido necesitas el rol Informador.")
     existing = report_for_user(session, match_id, reporter_id)
     if existing:
         return existing
     match = get_match(session, match_id)
-    user = session.get(User, reporter_id)
-    if not match or not user or not user.active:
+    if not match:
         raise ValueError("Partido o usuario no válido.")
     # New 3.7 workflows cannot start an evaluation from a merely provisional fixture.
     # Historical/published legacy reports remain readable because existing reports
@@ -68,7 +77,7 @@ def get_report(session: Session, report_id: int) -> Report | None:
     return session.scalar(select(Report).options(joinedload(Report.match).joinedload(Match.home_team), joinedload(Report.match).joinedload(Match.away_team), joinedload(Report.match).joinedload(Match.season), joinedload(Report.match).joinedload(Match.competition), joinedload(Report.reporter), joinedload(Report.reviewer), joinedload(Report.own_team), joinedload(Report.rival_team)).where(Report.id == report_id))
 
 
-def save_report_summary(session: Session, report_id: int, *, rival_level: str | None, opponent_overview: str | None, own_team_note: str | None, key_takeaways: str | None, standout_player_id: int | None, actor_id: int | None = None, expected_revision: int | None = None) -> Report:
+def save_report_summary(session: Session, report_id: int, *, rival_level: str | None, opponent_overview: str | None, own_team_note: str | None, key_takeaways: str | None, standout_player_id: int | None, actor_id: int | None = None, expected_revision: int | None = None, own_team_rating: float | None = None, rival_team_rating: float | None = None) -> Report:
     report = session.get(Report, report_id)
     if not report:
         raise ValueError("Informe no encontrado.")
@@ -78,8 +87,10 @@ def save_report_summary(session: Session, report_id: int, *, rival_level: str | 
         raise ValueError("El informe está bloqueado.")
     if expected_revision is not None and report.revision != expected_revision:
         raise RuntimeError("El informe se ha modificado en otra pestaña. Recarga antes de guardar.")
-    before = _snapshot(report, ["rival_level", "opponent_overview", "own_team_note", "key_takeaways", "standout_player_id", "revision"])
+    before = _snapshot(report, ["rival_level", "own_team_rating", "rival_team_rating", "opponent_overview", "own_team_note", "key_takeaways", "standout_player_id", "revision"])
     report.rival_level = rival_level
+    report.own_team_rating = float(own_team_rating) if own_team_rating is not None and float(own_team_rating) > 0 else None
+    report.rival_team_rating = float(rival_team_rating) if rival_team_rating is not None and float(rival_team_rating) > 0 else None
     report.opponent_overview = opponent_overview
     report.own_team_note = own_team_note
     report.key_takeaways = key_takeaways
@@ -302,7 +313,7 @@ def _report_snapshot_data(session: Session, report_id: int) -> dict:
     participations = get_participations(session, report.match_id)
     evaluations = list_evaluations(session, report.id)
     return {
-        "report": {k: getattr(report, k) for k in ["id", "match_id", "reporter_id", "own_team_id", "rival_team_id", "status", "rival_level", "opponent_overview", "own_team_note", "key_takeaways", "standout_player_id", "version", "created_at", "updated_at", "submitted_at", "approved_at"]},
+        "report": {k: getattr(report, k) for k in ["id", "match_id", "reporter_id", "own_team_id", "rival_team_id", "status", "rival_level", "own_team_rating", "rival_team_rating", "opponent_overview", "own_team_note", "key_takeaways", "standout_player_id", "version", "created_at", "updated_at", "submitted_at", "approved_at"]},
         "reporter": {"id": report.reporter.id, "full_name": report.reporter.full_name, "email": report.reporter.email},
         "match": {"id": report.match.id, "round_name": report.match.round_name, "match_date": report.match.match_date, "home_team_id": report.match.home_team_id, "away_team_id": report.match.away_team_id, "home_score": report.match.home_score, "away_score": report.match.away_score, "venue": report.match.venue, "home_formation": report.match.home_formation, "away_formation": report.match.away_formation, "competition": report.match.competition.name, "season": report.match.season.name, "home_team": {"id": report.match.home_team.id, "name": report.match.home_team.name, "short_name": report.match.home_team.short_name, "logo_b64": report.match.home_team.logo_b64, "logo_mime": report.match.home_team.logo_mime}, "away_team": {"id": report.match.away_team.id, "name": report.match.away_team.name, "short_name": report.match.away_team.short_name, "logo_b64": report.match.away_team.logo_b64, "logo_mime": report.match.away_team.logo_mime}},
         "participations": [{"id": p.id, "team_id": p.team_id, "player_id": p.player_id, "player_name": p.player.display_name or p.player.full_name, "shirt_number": p.shirt_number, "starter": p.starter, "position": p.position or p.player.primary_position, "minute_in": p.minute_in, "minute_out": p.minute_out, "captain": p.captain, "photo_b64": p.player.photo_b64, "photo_mime": p.player.photo_mime} for p in participations],

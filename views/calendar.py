@@ -9,12 +9,11 @@ from core.navigation import request_navigation
 
 from core.calendar_import import CALENDAR_PARSER_VERSION, parse_calendar_text
 from core.clock import local_today
-from core.constants import ROLES, SCOUT_MISSION_TYPES, SCHEDULE_STATUSES
+from core.constants import SCHEDULE_STATUSES
 from core.database import session_scope
 from core.schedule import is_schedule_confirmed
-from core.permissions import can_admin, can_direct, can_scout, roles_for
+from core.permissions import can_admin, roles_for
 from repositories import calendar as calendar_repo
-from repositories import planning as planning_repo
 from repositories import scouting as repo
 from ui.styles import page_header
 
@@ -116,76 +115,27 @@ def _admin_schedule(user: dict, season) -> None:
                             session, m.id, user["id"],
                             kickoff_at=datetime.combine(definitive_date, parsed_time), venue=venue,
                         )
-                    st.success("Fecha y hora confirmadas. El partido ya está operativo para informes y scouting.")
+                    st.success("Fecha y hora confirmadas. El partido ya está operativo para informes y lecturas.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
 
 
-def _mission_form(user: dict, match) -> None:
-    with session_scope() as session:
-        scouts = planning_repo.list_scout_users(session)
-        roster_home = repo.get_roster(session, match.home_team_id, match.season_id)
-        roster_away = repo.get_roster(session, match.away_team_id, match.season_id)
-    if not scouts:
-        st.warning("No hay usuarios con perfil Scout.")
-        return
-    players = {r.player.id: r.player for r in roster_home + roster_away}
-    with st.form(f"mission_{match.id}"):
-        mission_type = st.selectbox("Tipo de tarea", list(SCOUT_MISSION_TYPES), format_func=lambda x: SCOUT_MISSION_TYPES[x])
-        assigned = st.selectbox("Scout", [u.id for u in scouts], format_func=lambda uid: next(u.full_name for u in scouts if u.id == uid))
-        target_team = st.selectbox("Equipo foco", [None, match.home_team_id, match.away_team_id], format_func=lambda tid: "Sin equipo único" if tid is None else (match.home_team.name if tid == match.home_team_id else match.away_team.name))
-        player_ids = st.multiselect("Jugadores objetivo", list(players), format_func=lambda pid: players[pid].display_name or players[pid].full_name, help="Opcional para análisis de equipo/rival.")
-        title = st.text_input("Título", value=f"{SCOUT_MISSION_TYPES[mission_type]} · {match.home_team.name} - {match.away_team.name}")
-        purpose = st.text_area("Motivo / qué queremos resolver", height=80)
-        focus_text = st.text_input("Focos", placeholder="juego de espaldas; profundidad; presión")
-        priority = st.select_slider("Prioridad", options=[3, 2, 1], value=2, format_func=lambda x: {1:"Alta",2:"Media",3:"Normal"}[x])
-        save = st.form_submit_button("Asignar observación", type="primary")
-    if save:
-        focus = [x.strip() for x in focus_text.split(";") if x.strip()]
-        with session_scope() as session:
-            planning_repo.create_mission(
-                session, match_id=match.id, mission_type=mission_type, title=title, assigned_to=assigned,
-                requested_by=user["id"], target_team_id=target_team, player_ids=player_ids, purpose=purpose,
-                focus=focus, priority=priority, due_at=match.kickoff_at,
-            )
-        st.success("Tarea de scouting creada y vinculada a este partido.")
-        st.rerun()
-
-
 def _calendar_actions(user: dict, match, own_id: int | None) -> None:
     with st.expander(f"Abrir · {_match_title(match)}", expanded=False):
         st.caption(calendar_repo.schedule_label(match))
-        if can_admin(user) and _is_own(match, own_id):
-            ready = is_schedule_confirmed(match)
-            if not ready:
-                st.warning("Horario pendiente: primero confirma fecha y hora para preparar el postpartido.")
-            if st.button("Preparar postpartido desde este partido", key=f"prepare_{match.id}", use_container_width=True, disabled=not ready):
-                st.session_state["workspace_match_id"] = match.id
-                request_navigation("Jornada")
-                st.rerun()
-        if can_direct(user):
-            with session_scope() as session:
-                existing_missions = planning_repo.list_missions(session, match_id=match.id, limit=50)
-            if existing_missions:
-                st.markdown("**Tareas ya vinculadas**")
-                st.dataframe(pd.DataFrame([{
-                    "Scout": m.assignee.full_name, "Tipo": SCOUT_MISSION_TYPES.get(m.mission_type,m.mission_type),
-                    "Estado": m.status, "Objetivo": m.title, "Resultado": m.result_summary or "",
-                } for m in existing_missions]), hide_index=True, use_container_width=True)
-            _mission_form(user, match)
-        if can_scout(user):
-            ready = is_schedule_confirmed(match)
-            if st.button("Observar este partido", key=f"observe_{match.id}", type="primary", use_container_width=True, disabled=not ready):
-                st.session_state["workspace_match_id"] = match.id
-                request_navigation("Jornada")
-                st.rerun()
-            if not ready:
-                st.caption("Disponible para planificar, pero la observación se activa cuando Administración confirme el horario.")
+        own_match = _is_own(match, own_id)
+        if own_match and not is_schedule_confirmed(match):
+            st.warning("Horario pendiente: Administración debe confirmar fecha y hora antes del trabajo operativo.")
+        label = "Abrir postpartido" if own_match else "Abrir lectura del partido"
+        if st.button(label, key=f"open_calendar_{match.id}", use_container_width=True):
+            st.session_state["workspace_match_id"] = match.id
+            request_navigation("Jornada")
+            st.rerun()
 
 
 def render(user: dict) -> None:
-    page_header("Calendario de la liga", "Toda la competición en un único lugar: horarios, partidos de No Name y planificación de scouting.")
+    page_header("Calendario de la liga", "Toda la competición en un único lugar: horarios, partidos de No Name y partidos neutrales.")
     with session_scope() as session:
         active = repo.get_active_season(session)
         seasons = repo.list_seasons(session, active_only=True)

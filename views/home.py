@@ -18,6 +18,13 @@ def _open_match(match_id: int) -> None:
     st.rerun()
 
 
+
+def _open_director_reading() -> None:
+    st.session_state["dd_area_42"] = "Lectura deportiva"
+    st.session_state["dd_reading_area_421"] = "Jugadores señalados"
+    request_navigation("Dirección Deportiva")
+    st.rerun()
+
 def render(user: dict) -> None:
     page_header("Inicio", "Lo que requiere tu atención ahora.")
     with session_scope() as session:
@@ -67,13 +74,12 @@ def render(user: dict) -> None:
             actionable.append(f"{dd['decision_count']} jugadores requieren decisión")
         if dd.get("high_needs"):
             actionable.append(f"{dd['high_needs']} necesidades altas")
-        if dd.get("new_scout"):
-            actionable.append(f"{dd['new_scout']} observaciones Scout disponibles")
+        if dd.get("neutral_signals"):
+            actionable.append(f"{dd['neutral_signals']} jugadores señalados en partidos neutrales")
         if actionable:
             st.markdown("### Dirección Deportiva")
             with st.container(border=True):
                 for text in actionable:
                     st.markdown(f"- {text}")
-                if st.button("Abrir jugadores", use_container_width=True, key="home_to_players"):
-                    request_navigation("Jugadores")
-                    st.rerun()
+                if st.button("Abrir lectura deportiva", use_container_width=True, key="home_to_dd_reading"):
+                    _open_director_reading()

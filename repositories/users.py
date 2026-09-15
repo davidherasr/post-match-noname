@@ -22,7 +22,7 @@ from models.entities import (
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
-ROLE_COMPATIBILITY_PRIORITY = ("admin", "director", "scout", "reporter")
+ROLE_COMPATIBILITY_PRIORITY = ("admin", "director", "reporter")
 
 
 def compatibility_role_for(roles: Sequence[str] | None, fallback: str = "reporter") -> str:
@@ -56,6 +56,7 @@ def create_user(
     actor_id: int | None = None,
     must_change_password: bool = False,
     roles: Sequence[str] | None = None,
+    can_track_players: bool = False,
 ) -> User:
     if actor_id is not None:
         assert_role(session, actor_id, "admin")
@@ -77,6 +78,7 @@ def create_user(
         active=active,
         must_change_password=False,
         deleted_at=None,
+        can_track_players=bool(can_track_players),
     )
     session.add(user)
     session.flush()
@@ -180,13 +182,14 @@ def update_user(
     email: str | None = None,
     roles: Sequence[str] | None = None,
     force_password_change: bool = False,
+    can_track_players: bool | None = None,
 ) -> User:
     if actor_id is not None:
         assert_role(session, actor_id, "admin")
     user = session.get(User, user_id)
     if not user or user.deleted_at is not None:
         raise ValueError("Usuario no encontrado.")
-    before = _snapshot(user, ["full_name", "email", "role", "active", "session_revision", "must_change_password"])
+    before = _snapshot(user, ["full_name", "email", "role", "active", "session_revision", "must_change_password", "can_track_players"])
     current_roles = set(get_user_roles(session, user.id))
     requested_roles = set(str(r) for r in roles if str(r)) if roles is not None else current_roles
     requested_active = user.active if active is None else bool(active)
@@ -213,6 +216,8 @@ def update_user(
         user.email = clean_email
     if password is not None and password != "":
         user.password_hash = hash_password(password)
+    if can_track_players is not None:
+        user.can_track_players = bool(can_track_players)
     # 4.1.1: changing a password is always optional; no forced-change state.
     user.must_change_password = False
     if roles is not None:

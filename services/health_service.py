@@ -47,7 +47,19 @@ def live_acceptance_rollback(session: Session, actor_id: int) -> dict:
         competition = repo.create_competition(session, f"__ACCEPT_{token}", actor_id=actor_id)
         rival = repo.create_team(session, f"__RIVAL_{token}", actor_id=actor_id)
         player = repo.find_or_create_player(session, f"__PLAYER_{token}", primary_position="DC", actor_id=actor_id)
-        reporter = session.get(type(repo.assert_role(session, actor_id)), actor_id)
+        # 4.2.1: Admin no longer inherits reporting rights. The live acceptance
+        # test creates a disposable Informador inside the SAVEPOINT so the real
+        # production permission model is exercised without leaving data behind.
+        reporter = repo.create_user(
+            session,
+            f"__REPORTER_{token}",
+            f"__reporter_{token}@acceptance.invalid",
+            "1",
+            role="reporter",
+            roles=["reporter"],
+            actor_id=actor_id,
+            must_change_password=False,
+        )
         match = repo.create_match(
             session, season_id=season.id, competition_id=competition.id, round_name=f"ACCEPT-{token}", match_date=date.today(),
             home_team_id=own.id, away_team_id=rival.id, created_by=actor_id, home_score=1, away_score=0,
@@ -57,17 +69,17 @@ def live_acceptance_rollback(session: Session, actor_id: int) -> dict:
             "selected": True, "player_id": player.id, "shirt_number": 9, "starter": True,
             "position": "DC", "minute_in": 0, "minute_out": 90, "captain": False,
         }], actor_id)
-        report = repo.get_or_create_report(session, match.id, reporter.id, actor_role="admin")
+        report = repo.get_or_create_report(session, match.id, reporter.id, actor_role="reporter")
         repo.bulk_upsert_evaluations_fast(session, report.id, [{
             "player_id": player.id, "team_id": rival.id, "participation_id": rival_parts[0].id,
             "expected_revision": None, "observation_status": "evaluated", "general_rating": 8.2,
             "short_note": "Prueba de aceptación con rollback", "standout": True, "pdf_include": True,
             "recommendation": None, "confidence": None,
-        }], actor_id=actor_id)
+        }], actor_id=reporter.id)
         fresh = repo.get_evaluation(session, report.id, player.id)
         if not fresh or float(fresh.general_rating or 0) != 8.2:
             raise AssertionError("La evaluación masiva no se ha recuperado correctamente.")
-        submitted, _ = repo.submit_report(session, report.id, actor_id)
+        submitted, _ = repo.submit_report(session, report.id, reporter.id)
         if submitted.status == "submitted":
             repo.approve_report(session, report.id, actor_id, "Aceptación automática con rollback")
         pool = league_repo.ranking_for_observed_position(session, "DC", season_id=season.id, min_observations=1)

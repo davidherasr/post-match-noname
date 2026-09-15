@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.1.2"
-HEAD_MIGRATION = "0011_user_lifecycle_4_1_1"
+EXPECTED = "4.2.1"
+HEAD_MIGRATION = "0012_sporting_reading_4_2"
 
 
 def read_version() -> str:
@@ -44,32 +44,31 @@ def main() -> None:
         errors.append(f"APP_VERSION no coincide: {read_config_version()}")
 
     if (ROOT / "pages").exists():
-        errors.append("Existe el directorio especial pages/: Streamlit mostraría navegación automática")
+        errors.append("Existe pages/: Streamlit mostraría navegación automática")
 
     config_text = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
     if "showSidebarNavigation = false" not in config_text:
         errors.append("Falta showSidebarNavigation=false")
 
     app_text = (ROOT / "app.py").read_text(encoding="utf-8")
+    for label in ["Inicio", "Jornada", "Jugadores", "Dirección Deportiva", "Administración"]:
+        if f'"{label}"' not in app_text:
+            errors.append(f"Falta navegación 4.2: {label}")
     if 'st.set_option("client.showSidebarNavigation", False)' not in app_text:
         errors.append("Falta defensa runtime de navegación")
-    for label in ["Inicio", "Jornada", "Jugadores", "Plantilla", "Administración"]:
-        if f'"{label}"' not in app_text:
-            errors.append(f"Falta navegación 4.0: {label}")
-    if "active_profile_role" not in app_text or ".pop(" not in app_text:
-        errors.append("No se limpia el selector de Perfil activo heredado")
 
     required = [
         "views/home.py", "views/jornada.py", "views/player_hub.py", "views/squad.py", "views/admin_hub.py",
-        "views/reports.py", "views/postmatch.py", "views/scout.py", "views/team_hub.py",
+        "views/reports.py", "views/postmatch.py", "views/team_hub.py",
         "repositories/workspaces.py", "repositories/player_report.py", "repositories/planning.py",
-        "repositories/scouting.py", "repositories/calendar.py", "repositories/data_quality.py",
-        "ui/player_report.py", "ui/match_study.py", "reports/player_report_pdf.py", "core/permissions.py", "core/presentation.py",
-        "core/calendar_import.py", "core/clock.py", "scripts/live_acceptance.py", "scripts/check_matchday_readiness.py", f"alembic/versions/{HEAD_MIGRATION}.py",
+        "repositories/sporting_reading.py", "repositories/scouting.py", "repositories/calendar.py",
+        "ui/player_report.py", "ui/match_study.py", "reports/player_report_pdf.py",
+        "core/permissions.py", "core/presentation.py", "core/calendar_import.py", "core/clock.py",
+        f"alembic/versions/{HEAD_MIGRATION}.py",
     ]
     for rel in required:
         if not (ROOT / rel).exists():
-            errors.append(f"Falta archivo 4.0: {rel}")
+            errors.append(f"Falta archivo 4.2: {rel}")
 
     api, functions = reports_contract()
     if api != EXPECTED:
@@ -78,67 +77,82 @@ def main() -> None:
         if name not in functions:
             errors.append(f"Falta views.reports.{name}()")
 
-    calendar_text = (ROOT / "views" / "calendar.py").read_text(encoding="utf-8")
-    if "time(17, 0)" in calendar_text:
-        errors.append("El calendario todavía propone 17:00 cuando la hora es desconocida")
-    if 'main_navigation"] = "Misiones"' in calendar_text or 'main_navigation"] = "Nuevo postpartido"' in calendar_text:
-        errors.append("El calendario mantiene navegación legacy fuera de Jornada")
-
-    reports_text = (ROOT / "views" / "reports.py").read_text(encoding="utf-8")
-    if 'user["role"]' in reports_text:
-        errors.append("Informes todavía depende del perfil principal en lugar de capacidades acumulativas")
-
     permissions_text = (ROOT / "core" / "permissions.py").read_text(encoding="utf-8")
-    if 'items = ["Inicio", "Jornada", "Jugadores"]' not in permissions_text:
-        errors.append("La navegación base no coincide con Inicio/Jornada/Jugadores")
-    if 'items.append("Plantilla")' not in permissions_text or 'items.append("Administración")' not in permissions_text:
-        errors.append("Faltan capas de Plantilla/Administración por permiso")
+    if 'items.append("Dirección Deportiva")' not in permissions_text:
+        errors.append("Dirección Deportiva no está expuesta por permiso explícito")
+    if 'return bool(user.get("can_track_players"))' not in permissions_text:
+        errors.append("El seguimiento individual no depende del permiso can_track_players")
+    if 'return has_any(user, ROLE_DIRECTOR)' not in permissions_text:
+        errors.append("Dirección Deportiva no es un rol explícito")
+    if 'return has_any(user, ROLE_REPORTER)' not in permissions_text:
+        errors.append("Informador no es el único permiso de valoración/postpartido")
+    if 'ROLE_SCOUT' in permissions_text:
+        errors.append("Permisos conserva Scout como rol activo")
 
-    migration_0008 = (ROOT / "alembic" / "versions" / "0008_match_study_4_0.py").read_text(encoding="utf-8")
-    for token in ["video_available", "home_formation_known", "away_formation_known", "study_notes"]:
-        if token not in migration_0008:
-            errors.append(f"Migración 0008 incompleta: falta {token}")
-    head_text = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
-    if "deleted_at" not in head_text or "users" not in head_text:
-        errors.append("Migración 0011 incompleta: falta ciclo de vida de usuarios")
+    migration = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
+    for token in ["can_track_players", "staff_sporting_weights", "match_opinions", "match_opinion_players", "own_team_rating", "rival_team_rating"]:
+        if token not in migration:
+            errors.append(f"Migración 0012 incompleta: falta {token}")
 
     jornada_text = (ROOT / "views" / "jornada.py").read_text(encoding="utf-8")
-    for token in ["Vídeo disponible", "Formación desconocida", "render_campogram", "Actualizar plantilla desde Federación"]:
+    for token in [
+        "Partido No Name · flujo 4.2.1", "Partido neutral · flujo 4.2.1",
+        "Dirección Deportiva · lectura conjunta", "Tu lectura del partido",
+        "Seguimiento individual", "Iniciar seguimiento", "TITULARES", "SUPLENTES",
+    ]:
         if token not in jornada_text:
-            errors.append(f"Jornada 4.0 incompleta: falta {token}")
-    for token in ["Dirección Deportiva · asignar seguimiento", "Scout · registrar lo observado", "dossier 360 se construye automáticamente"]:
-        if token not in jornada_text:
-            errors.append(f"Flujo 4.1 incompleto: falta {token}")
-    if "Dossier completo" in jornada_text or "Tipo de seguimiento" in jornada_text:
-        errors.append("Jornada todavía obliga a elegir Barrido/Observación/Dossier")
+            errors.append(f"Jornada 4.2 incompleta: falta {token}")
+    for obsolete in ["Dirección Deportiva · asignar seguimiento", "Asignar trabajo de scouting", "Scout · registrar lo observado"]:
+        if obsolete in jornada_text:
+            errors.append(f"Jornada conserva flujo Scout obsoleto: {obsolete}")
+
+    squad_text = (ROOT / "views" / "squad.py").read_text(encoding="utf-8")
+    for token in [
+        "Lectura deportiva", "Plantilla y modelo", "Criterio del staff",
+        "Jugadores señalados", "Equipos", "Discrepancias", "Partidos recientes",
+        "Se repiten en 2+ partidos", "Iniciar seguimiento",
+    ]:
+        if token not in squad_text:
+            errors.append(f"Centro DD 4.2.1 incompleto: falta {token}")
+
+    sporting_text = (ROOT / "repositories" / "sporting_reading.py").read_text(encoding="utf-8")
+    for token in ["def league_intelligence", "def consensus_label", "def trend_label", "def team_reading_history"]:
+        if token not in sporting_text:
+            errors.append(f"Inteligencia transversal 4.2.1 incompleta: falta {token}")
+
+    home_text = (ROOT / "views" / "home.py").read_text(encoding="utf-8")
+    if "Abrir lectura deportiva" not in home_text or 'request_navigation("Dirección Deportiva")' not in home_text:
+        errors.append("Inicio no enlaza directamente con la lectura deportiva de DD")
+
+    for legacy_view in ["views/scout.py", "views/director.py", "views/scouted.py", "views/model.py", "views/dashboard.py"]:
+        if (ROOT / legacy_view).exists():
+            errors.append(f"Sigue empaquetada una vista Scout/DD obsoleta: {legacy_view}")
+
+    calendar_text = (ROOT / "views" / "calendar.py").read_text(encoding="utf-8")
+    for obsolete in ["Asignar observación", "No hay usuarios con perfil Scout", "Tarea de scouting"]:
+        if obsolete in calendar_text:
+            errors.append(f"Calendario conserva asignación Scout obsoleta: {obsolete}")
+
+    workspaces_text = (ROOT / "repositories" / "workspaces.py").read_text(encoding="utf-8")
+    for obsolete in ["ScoutMission", "ScoutMissionTarget", "my_missions", "mission_counts", "targets_by_mission"]:
+        if obsolete in workspaces_text:
+            errors.append(f"Workspace activo conserva misiones Scout: {obsolete}")
+
+    player_hub = (ROOT / "views" / "player_hub.py").read_text(encoding="utf-8")
+    if "Asignar próxima acción" in player_hub or "Scout disponible" in player_hub:
+        errors.append("Jugadores conserva asignación a Scout")
+    if "Con observaciones" not in player_hub:
+        errors.append("Jugadores no expone el filtro de observaciones de seguimiento")
 
     security_text = (ROOT / "core" / "security.py").read_text(encoding="utf-8")
     if "La contraseña no puede estar vacía" not in security_text or "al menos 10 caracteres" in security_text:
-        errors.append("La política de contraseña 4.1.2 no es simple/opcional")
-    users_text = (ROOT / "repositories" / "users.py").read_text(encoding="utf-8")
-    for token in ["delete_user", "restore_user", "deleted_at", "must_change_password = False"]:
-        if token not in users_text:
-            errors.append(f"Gestión de usuarios 4.1.2 incompleta: falta {token}")
+        errors.append("La política de contraseña ya no es simple/opcional")
     admin_text = (ROOT / "views" / "admin.py").read_text(encoding="utf-8")
-    for token in ["Añadir", "Editar / eliminar", "Eliminados", "Eliminar usuario", "Restaurar usuario"]:
+    for token in ["Añadir", "Editar / eliminar", "Eliminados", "Puede realizar seguimiento individual de jugadores"]:
         if token not in admin_text:
-            errors.append(f"Pantalla de usuarios 4.1.2 incompleta: falta {token}")
-    if "if user.get(\"must_change_password\")" in app_text:
-        errors.append("La app todavía bloquea el acceso por cambio obligatorio de contraseña")
-    if 'selectbox("Rol principal"' in admin_text or '"Rol principal":' in admin_text:
-        errors.append("Administración todavía expone un rol principal; 4.1.2 debe trabajar solo con roles acumulativos")
-    if "compatibility_role_for" not in users_text:
-        errors.append("Falta la selección interna automática del rol de compatibilidad")
-
-    if 'return has_any(user, ROLE_SCOUT)' not in permissions_text:
-        errors.append("Admin/DD siguen heredando capacidad Scout")
-    if 'return has_any(user, ROLE_DIRECTOR)' not in permissions_text:
-        errors.append("Admin sigue heredando capacidad de Dirección Deportiva")
-    planning_text = (ROOT / "repositories" / "planning.py").read_text(encoding="utf-8")
-    if 'assert_role(session, requested_by, "director")' not in planning_text:
-        errors.append("La asignación de scouting no está reservada a Dirección Deportiva")
-    if 'user_has_role(session, assignee.id, "scout")' not in planning_text:
-        errors.append("Las tareas de scouting pueden asignarse a usuarios sin rol Scout")
+            errors.append(f"Administración 4.2 incompleta: falta {token}")
+    if '["admin", "director", "reporter", "scout"]' in admin_text:
+        errors.append("Administración sigue exponiendo Scout como rol organizativo")
 
     if errors:
         raise SystemExit("Release inconsistente:\n- " + "\n- ".join(errors))

@@ -36,12 +36,11 @@ def _section_users(user: dict) -> None:
         "Las contraseñas pueden ser tan simples como 1, 1234 o cualquier otro valor no vacío. Cambiarlas es siempre opcional."
     )
 
-    r1, r2, r3, r4 = st.columns(4)
+    r1, r2, r3 = st.columns(3)
     r1.info("**Administrador**\n\nUsuarios, calendario, equipos y calidad de datos.")
-    r2.info("**Dirección Deportiva**\n\nDecide qué seguir y asigna trabajo a Scout.")
-    r3.info("**Scout**\n\nEjecuta visionados y registra observaciones.")
-    r4.info("**Informador**\n\nCompleta informes de partidos asignados.")
-    st.caption("Asigna todos los roles que necesite cada persona. No existe un rol principal: los permisos se calculan con el conjunto completo de roles.")
+    r2.info("**Dirección Deportiva**\n\nLee el criterio del staff, pondera opiniones y toma decisiones deportivas.")
+    r3.info("**Informador**\n\nValora partidos y jugadores dentro del flujo que corresponda.")
+    st.caption("El seguimiento individual de jugadores no es un rol: es un permiso adicional que se activa solo a quien realmente lo haga.")
 
     with session_scope() as session:
         all_users = repo.list_users(session, include_deleted=True)
@@ -83,7 +82,7 @@ def _section_users(user: dict) -> None:
             c3, c4 = st.columns(2)
             roles = c3.multiselect(
                 "Roles y accesos",
-                list(ROLES.keys()),
+                ["admin", "director", "reporter"],
                 default=["reporter"],
                 format_func=lambda r: ROLES[r],
                 help="Los roles son independientes. Si una persona hace dos funciones, asigna ambos.",
@@ -94,6 +93,7 @@ def _section_users(user: dict) -> None:
                 help="Sin requisitos de complejidad. Puede ser 1, 1234, nombre+numero, etc. Solo no puede estar vacía.",
             )
             active = c4.checkbox("Cuenta activa", value=True)
+            track_players = st.checkbox("Puede realizar seguimiento individual de jugadores", value=False, help="Permiso especial para abrir seguimientos de jugadores externos y alimentar su Player Report 360.")
             create = st.form_submit_button("Crear usuario", type="primary", use_container_width=True)
         if create:
             if not roles:
@@ -111,6 +111,7 @@ def _section_users(user: dict) -> None:
                             active=active,
                             actor_id=user["id"],
                             must_change_password=False,
+                            can_track_players=track_players,
                         )
                     st.success("Usuario creado. Puede mantener esa contraseña indefinidamente si quiere.")
                     st.rerun()
@@ -137,13 +138,14 @@ def _section_users(user: dict) -> None:
             email = c2.text_input("Correo", value=selected_user.email)
             roles_new = st.multiselect(
                 "Roles y accesos",
-                list(ROLES.keys()),
-                default=current_roles,
+                ["admin", "director", "reporter"],
+                default=[r for r in current_roles if r in {"admin", "director", "reporter"}],
                 format_func=lambda r: ROLES[r],
             )
             c3, c4 = st.columns(2)
             c3.caption("Los accesos dependen únicamente de los roles seleccionados; no existe un rol principal.")
             active = c4.checkbox("Cuenta activa", value=selected_user.active)
+            track_players = st.checkbox("Puede realizar seguimiento individual de jugadores", value=bool(getattr(selected_user, "can_track_players", False)), help="Habilita el seguimiento individual de jugadores externos de forma independiente a los roles del usuario.")
             password_new = st.text_input(
                 "Nueva contraseña (opcional)",
                 type="password",
@@ -169,6 +171,7 @@ def _section_users(user: dict) -> None:
                             email=email,
                             roles=roles_new,
                             force_password_change=False,
+                            can_track_players=track_players,
                         )
                     st.success("Usuario actualizado.")
                     st.rerun()
@@ -176,7 +179,7 @@ def _section_users(user: dict) -> None:
                     st.error(str(exc))
 
         st.markdown("#### Eliminar usuario")
-        st.caption("La eliminación bloquea el acceso y oculta la cuenta sin romper informes, scouting, asignaciones o auditoría anteriores.")
+        st.caption("La eliminación bloquea el acceso y oculta la cuenta sin romper informes, seguimientos, asignaciones o auditoría anteriores.")
         if selected == user["id"]:
             st.info("Tu propia cuenta no se puede eliminar mientras estás conectado con ella.")
         else:

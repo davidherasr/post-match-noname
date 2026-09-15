@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from core.permissions import can_admin, can_direct, can_scout, navigation_for
+from core.permissions import can_admin, can_direct, can_scout, can_track_players, navigation_for
 from core.security import verify_password
 from repositories import planning as planning_repo
 from repositories import scouting as repo
@@ -13,37 +13,36 @@ from repositories import scouting as repo
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _user_dict(*roles: str) -> dict:
-    return {"id": 1, "role": roles[0] if roles else "reporter", "roles": list(roles)}
+def _user_dict(*roles: str, track: bool = False) -> dict:
+    return {"id": 1, "role": roles[0] if roles else "reporter", "roles": list(roles), "can_track_players": track}
 
 
 def test_release_411_contract_and_user_lifecycle_head():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.1.2"
-    assert 'APP_VERSION = "4.1.2"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.1.2"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
-    migration = ROOT / "alembic/versions/0011_user_lifecycle_4_1_1.py"
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.1"
+    assert 'APP_VERSION = "4.2.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.2.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    migration = ROOT / "alembic/versions/0012_sporting_reading_4_2.py"
     assert migration.exists()
-    assert 'down_revision = "0010_core_workspace_schema_repair_4_0_4"' in migration.read_text(encoding="utf-8")
+    assert 'down_revision = "0011_user_lifecycle_4_1_1"' in migration.read_text(encoding="utf-8")
 
 
-def test_roles_are_orthogonal_not_admin_hierarchy():
+def test_roles_are_orthogonal_and_tracking_is_capability():
     admin = _user_dict("admin")
     director = _user_dict("director")
-    scout = _user_dict("scout")
-    multi = _user_dict("admin", "director", "scout")
+    reporter = _user_dict("reporter")
+    tracker = _user_dict("reporter", track=True)
+    multi = _user_dict("admin", "director", "reporter", track=True)
 
     assert can_admin(admin)
     assert not can_direct(admin)
-    assert not can_scout(admin)
+    assert not can_track_players(admin)
     assert "Administración" in navigation_for(admin)
-    assert "Plantilla" not in navigation_for(admin)
+    assert "Dirección Deportiva" not in navigation_for(admin)
     assert can_direct(director)
-    assert not can_scout(director)
-    assert "Plantilla" in navigation_for(director)
-    assert can_scout(scout)
-    assert not can_direct(scout)
-    assert can_admin(multi) and can_direct(multi) and can_scout(multi)
-
+    assert "Dirección Deportiva" in navigation_for(director)
+    assert not can_track_players(reporter)
+    assert can_track_players(tracker) and can_scout(tracker)
+    assert can_admin(multi) and can_direct(multi) and can_track_players(multi)
 
 def test_simple_passwords_are_valid_and_never_force_change(session_factory):
     with session_factory.begin() as session:
@@ -52,12 +51,12 @@ def test_simple_passwords_are_valid_and_never_force_change(session_factory):
             role="admin", roles=["admin"], must_change_password=False,
         )
         user = repo.create_user(
-            session, "Scout", "scout411@example.com", "1234",
-            role="scout", roles=["scout"], actor_id=admin.id, must_change_password=True,
+            session, "Informador", "info411@example.com", "1234",
+            role="reporter", roles=["reporter"], actor_id=admin.id, must_change_password=True, can_track_players=True,
         )
         assert user.must_change_password is False
         assert verify_password("1234", user.password_hash)
-        assert repo.authenticate(session, "scout411@example.com", "1234") is not None
+        assert repo.authenticate(session, "info411@example.com", "1234") is not None
 
         repo.update_user(session, user.id, password="x", actor_id=admin.id, force_password_change=True)
         assert user.must_change_password is False
@@ -68,10 +67,10 @@ def test_admin_can_edit_email_delete_and_restore_user(session_factory):
     with session_factory.begin() as session:
         admin = repo.create_user(session, "Admin", "admin-users411@example.com", "1234", role="admin", roles=["admin"])
         user = repo.create_user(session, "Info", "info411@example.com", "1", role="reporter", roles=["reporter"], actor_id=admin.id)
-        repo.update_user(session, user.id, actor_id=admin.id, full_name="Informador Uno", email="nuevo411@example.com", roles=["reporter", "scout"], role="reporter")
+        repo.update_user(session, user.id, actor_id=admin.id, full_name="Informador Uno", email="nuevo411@example.com", roles=["reporter", "director"], role="director")
         assert user.full_name == "Informador Uno"
         assert user.email == "nuevo411@example.com"
-        assert set(repo.get_user_roles(session, user.id)) == {"reporter", "scout"}
+        assert set(repo.get_user_roles(session, user.id)) == {"reporter", "director"}
 
         repo.delete_user(session, user.id, admin.id)
         assert user.deleted_at is not None
@@ -93,61 +92,26 @@ def test_admin_cannot_delete_self(session_factory):
             repo.delete_user(session, admin.id, admin.id)
 
 
-def test_only_director_assigns_and_only_explicit_scout_receives(session_factory):
+def test_tracking_permission_is_independent_from_roles(session_factory):
     with session_factory.begin() as session:
-        admin = repo.create_user(
-            session, "Admin", "admin-flow410@example.com", "1",
-            role="admin", roles=["admin"], must_change_password=False,
-        )
-        director = repo.create_user(
-            session, "DD", "dd410@example.com", "1",
-            role="director", roles=["director"], actor_id=admin.id, must_change_password=False,
-        )
-        scout = repo.create_user(
-            session, "Scout", "scout-flow410@example.com", "1",
-            role="scout", roles=["scout"], actor_id=admin.id, must_change_password=False,
-        )
-        season = repo.create_season(session, "2026/27", date(2026, 7, 1), date(2027, 6, 30), admin.id)
-        comp = repo.create_competition(session, "Liga 4.1", actor_id=admin.id)
-        a = repo.create_team(session, "Equipo A", actor_id=admin.id)
-        b = repo.create_team(session, "Equipo B", actor_id=admin.id)
-        match = repo.create_match(
-            session, season_id=season.id, competition_id=comp.id, round_name="J1",
-            match_date=date(2026, 9, 20), kickoff_at=datetime(2026, 9, 20, 17, 0),
-            schedule_status="confirmed", home_team_id=a.id, away_team_id=b.id,
-            created_by=admin.id, status="scheduled",
-        )
+        admin = repo.create_user(session, "Admin", "admin-flow420@example.com", "1", role="admin", roles=["admin"])
+        reporter = repo.create_user(session, "Info", "info-flow420@example.com", "1", role="reporter", roles=["reporter"], actor_id=admin.id)
+        tracker = repo.create_user(session, "David", "track-flow420@example.com", "1", role="reporter", roles=["reporter"], actor_id=admin.id, can_track_players=True)
+        assert reporter.can_track_players is False
+        assert tracker.can_track_players is True
+        assert "scout" not in repo.get_user_roles(session, tracker.id)
 
-        with pytest.raises(PermissionError):
-            planning_repo.create_mission(
-                session, match_id=match.id, mission_type="spontaneous", title="Visionar",
-                assigned_to=scout.id, requested_by=admin.id,
-            )
-
-        mission = planning_repo.create_mission(
-            session, match_id=match.id, mission_type="spontaneous", title="Visionar",
-            assigned_to=scout.id, requested_by=director.id,
-        )
-        assert mission.assigned_to == scout.id
-        assert mission.requested_by == director.id
-
-        with pytest.raises(ValueError):
-            planning_repo.create_mission(
-                session, match_id=match.id, mission_type="spontaneous", title="No válido",
-                assigned_to=admin.id, requested_by=director.id,
-            )
-
-
-def test_jornada_uses_automatic_scout_depth_and_dd_assignment():
+def test_jornada_separates_own_postmatch_neutral_reading_and_tracking():
     body = (ROOT / "views/jornada.py").read_text(encoding="utf-8")
-    assert "Dirección Deportiva · asignar seguimiento" in body
-    assert "Asignar trabajo de scouting" in body
-    assert "Scout · registrar lo observado" in body
-    assert "varios = apuntes rápidos; uno = observación individual" in body
-    assert "dossier 360 se construye automáticamente" in body
-    assert "Tipo de seguimiento" not in body
-    assert "Dossier completo" not in body
-
+    assert "Partido No Name · flujo 4.2" in body
+    assert "Partido neutral · flujo 4.2" in body
+    assert "Dirección Deportiva · lectura conjunta" in body
+    assert "Tu lectura del partido" in body
+    assert "Seguimiento individual" in body
+    assert "Iniciar seguimiento" in body
+    assert "Dirección Deportiva · asignar seguimiento" not in body
+    assert "Asignar trabajo de scouting" not in body
+    assert "Scout · registrar lo observado" not in body
 
 def test_admin_user_screen_has_full_crud_and_optional_password_copy():
     body = (ROOT / "views/admin.py").read_text(encoding="utf-8")
@@ -172,7 +136,7 @@ def test_admin_does_not_expose_primary_role_selector():
 
 def test_compatibility_role_is_automatic_and_permissions_stay_multirole():
     assert repo.compatibility_role_for(["reporter"]) == "reporter"
-    assert repo.compatibility_role_for(["reporter", "scout"]) == "scout"
+    assert repo.compatibility_role_for(["reporter", "scout"]) == "reporter"
     assert repo.compatibility_role_for(["reporter", "director"]) == "director"
     assert repo.compatibility_role_for(["scout", "director"]) == "director"
     assert repo.compatibility_role_for(["reporter", "admin"]) == "admin"

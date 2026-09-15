@@ -9,9 +9,9 @@ from reports.player_report_pdf import generate_player_executive_pdf, generate_pl
 
 
 def _seed(session):
-    admin = repo.create_user(session, "Admin", "admin36@example.com", "ValidPass123!", role="admin", roles=["admin", "director", "scout"], must_change_password=False)
+    admin = repo.create_user(session, "Admin", "admin36@example.com", "ValidPass123!", role="admin", roles=["admin", "director"], must_change_password=False)
     reporter = repo.create_user(session, "Info", "info36@example.com", "ValidPass123!", role="reporter", actor_id=admin.id, must_change_password=False)
-    scout = repo.create_user(session, "Scout", "scout36@example.com", "ValidPass123!", role="scout", roles=["scout"], actor_id=admin.id, must_change_password=False)
+    scout = repo.create_user(session, "Seguimiento", "scout36@example.com", "ValidPass123!", role="reporter", roles=["reporter"], actor_id=admin.id, must_change_password=False, can_track_players=True)
     season = repo.create_season(session, "2026/27", date(2026,7,1), date(2027,6,30), admin.id)
     repo.set_active_season(session, season.id, admin.id)
     comp = repo.create_competition(session, "Liga", actor_id=admin.id)

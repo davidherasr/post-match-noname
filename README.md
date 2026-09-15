@@ -1,30 +1,45 @@
-# No Name PostMatch 4.1.2
+# No Name PostMatch 4.2.1
 
-Aplicación interna de No Name para postpartido, scouting, Dirección Deportiva y planificación de plantilla. La capa visible se organiza en **Inicio · Jornada · Jugadores · Plantilla · Administración**, mientras la profundidad del modelo de datos queda detrás del contexto de trabajo.
+Aplicación interna de No Name para postpartido, lectura compartida del staff, Dirección Deportiva y seguimiento individual de jugadores externos. La capa visible se organiza en **Inicio · Jornada · Jugadores · Dirección Deportiva · Administración**.
 
-## Flujo diario
+## Flujo diario 4.2
 
-- **Inicio**: lo que requiere atención, con Partido de hoy/Próximo partido y tareas.
-- **Jornada**: calendario operativo, Match Hub, horarios, postpartido, scouting e informes.
-- **Jugadores**: ficha única Player Report 360, evolución, Modelo No Name, decisión y próxima acción.
-- **Plantilla**: roles, necesidades, referencias internas, candidatos y oportunidades de scouting.
-- **Administración**: usuarios, club, datos, configuración y herramientas técnicas.
+- **Inicio**: partido de hoy/próximo partido y acciones pendientes.
+- **Jornada**: distingue de forma explícita entre partidos de No Name y partidos neutrales.
+- **Jugadores**: Player Report 360, evolución y seguimiento individual cuando exista evidencia real.
+- **Dirección Deportiva**: lectura agregada del staff, pesos de opinión, Modelo No Name, plantilla y candidatos.
+- **Administración**: usuarios, roles, calendario, equipos, plantillas, calidad de datos y configuración.
 
-Los roles son capacidades explícitas y combinables. No existe Perfil activo: Administración, Dirección Deportiva, Scout e Informador son responsabilidades independientes.
+Los roles organizativos son **Administrador · Dirección Deportiva · Informador**. El seguimiento individual de jugadores **no es un rol Scout**: es un permiso adicional `Puede realizar seguimiento individual de jugadores`, activable solo para quienes realmente hagan ese trabajo.
 
+## 4.2.1 · Lectura transversal de Dirección Deportiva
 
-## 4.1 · Flujo de trabajo por responsabilidades
+La lectura deportiva ya no se limita al partido abierto. Dirección Deportiva dispone de una capa de **inteligencia de liga** construida únicamente con datos introducidos por el staff:
 
-4.1 separa definitivamente **Administración → Dirección Deportiva → Scout**. Administración prepara usuarios, calendario, equipos, horarios y datos; Dirección Deportiva decide qué merece seguimiento y lo asigna a uno o varios usuarios con rol Scout; el Scout ejecuta el visionado y registra lo observado. Ser Administrador ya no concede automáticamente capacidades de DD o Scout: si una persona realiza varias funciones, Administración le asigna varios roles.
+- jugadores externos que empiezan a repetirse entre partidos;
+- número de partidos y señales, personas que los señalaron y nota ponderada por el peso deportivo de cada miembro;
+- tendencia entre primeras y últimas apariciones;
+- equipos rivales con evidencia acumulada;
+- discrepancias localizadas por partido, equipo o jugador con etiquetas de consenso legibles;
+- acceso directo desde Inicio a `Lectura deportiva → Jugadores señalados`.
 
-En Jornada desaparece el selector manual **Barrido / Observación / Dossier**. El flujo se deduce del trabajo real: varios jugadores generan apuntes rápidos, un jugador abre una observación individual y el **dossier 360** se construye automáticamente con el historial acumulado en Player Report 360.
+Los permisos también quedan cerrados por responsabilidad: **Administrador** mantiene datos y usuarios, **Dirección Deportiva** interpreta la información y **Informador** es el único rol que habilita la escritura de valoraciones y postpartidos. Los roles pueden combinarse. El permiso `Puede realizar seguimiento individual de jugadores` sigue siendo independiente.
 
-Desde 4.1.1 las contraseñas son deliberadamente simples para este entorno interno: se acepta cualquier valor no vacío, incluido `1` o `1234`. Cambiarla es una opción del usuario, nunca una obligación. Administración dispone además de una gestión completa de cuentas: alta, edición de nombre/correo/roles/estado/contraseña, eliminación segura y restauración.
+La 4.2.1 no añade esquema nuevo; utiliza la migración `0012_sporting_reading_4_2`. Los históricos de antiguas misiones se conservan en base de datos, pero ya no forman parte de los workspaces ni de las vistas activas.
 
-4.1.1 añade la migración no destructiva `0011_user_lifecycle_4_1_1` para soportar borrado lógico de usuarios sin romper el historial.
+## 4.2 · Lectura deportiva real
 
-Desde 4.1.2 Administración ya no muestra ni solicita **Rol principal**. Solo se asignan **Roles y accesos**; todos son efectivos simultáneamente. El campo histórico `users.role` se mantiene únicamente por compatibilidad interna y la aplicación lo calcula automáticamente, sin afectar permisos. 4.1.2 no añade migraciones.
+4.2 elimina el flujo artificial de `DD → asignar Scout → misión`. El trabajo se adapta a la estructura real del staff:
 
+- **Partidos de No Name**: son postpartidos. Cada Informador puntúa el rendimiento colectivo de No Name, el rival y los jugadores que realmente haya podido valorar. Dirección Deportiva obtiene consensos ponderados, discrepancias y evolución. Los jugadores propios se tratan siempre como **rendimiento de plantilla**, nunca como objetivos de mercado.
+- **Partidos neutrales**: cada miembro del staff deja una lectura ligera del partido, puntúa a ambos equipos y puede señalar jugadores que le hayan llamado la atención. Señalar un jugador genera una **señal**, no un seguimiento automático.
+- **Dirección Deportiva**: dispone de un centro propio con tres áreas: `Lectura deportiva`, `Plantilla y modelo` y `Criterio del staff`. Puede dar más o menos peso a cada persona según se trate de partidos de No Name o partidos neutrales.
+- **Seguimiento individual**: solo aparece a usuarios con el permiso especial. Desde una señal de DD o desde un partido se puede iniciar seguimiento de un jugador externo y alimentar su Player Report 360. El sistema impide abrir como objetivo de mercado a un jugador de No Name.
+- **Administración**: ya no reparte trabajo deportivo. Prepara usuarios, datos, plantillas, calendario y horarios.
+
+La migración no destructiva `0012_sporting_reading_4_2` añade el permiso individual, los pesos deportivos del staff, las lecturas de partidos neutrales y las notas colectivas No Name/rival. Los antiguos registros Scout se conservan como histórico y los usuarios con rol Scout heredado se convierten a **Informador + permiso de seguimiento individual**.
+
+Las contraseñas siguen siendo deliberadamente libres para este entorno interno: cualquier valor no vacío es válido y cambiarlo es opcional.
 
 ## 4.0.7 · XI observado reactivo
 

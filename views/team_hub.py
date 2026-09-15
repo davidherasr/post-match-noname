@@ -38,8 +38,11 @@ def render(user:dict,team_id:int)->None:
             a.caption(d.status if d else "Observado")
             if b.button("Abrir",key=f"teamplayer38_{team.id}_{p.id}",use_container_width=True):
                 st.session_state["workspace_player_id"]=p.id;request_navigation("Jugadores");st.rerun()
-    if data["analyses"]:
-        st.markdown("### Últimos análisis")
-        for analysis in data["analyses"]:
-            with st.expander(f"{analysis.match.home_team.name} - {analysis.match.away_team.name} · {analysis.completed_at.strftime('%d/%m/%Y') if analysis.completed_at else ''}"):
-                st.text(analysis.result_summary or "Sin conclusión escrita.")
+    if data.get("readings"):
+        st.markdown("### Lectura acumulada del equipo")
+        st.caption("Histórico 4.2.1 construido con opiniones del staff en neutrales y valoraciones del rival en postpartidos de No Name.")
+        for row in reversed(data["readings"][-8:]):
+            match = row["match"]
+            score = "—" if row["score"] is None else f"{row['score']:.2f}"
+            st.markdown(f"**{match.round_name} · {match.home_team.name} - {match.away_team.name}** · {score}")
+            st.caption(f"{row['mentions']} opinión(es)")

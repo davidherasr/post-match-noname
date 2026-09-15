@@ -150,7 +150,7 @@ def _render_rivals() -> None:
             player = session.get(Player, history_id)
             history = repo.player_history_by_scope(session, history_id, scope="rival")
         if player:
-            _history_block(player, history, "Scouting acumulado")
+            _history_block(player, history, "Observaciones acumuladas")
 
 
 def render(user: dict) -> None:

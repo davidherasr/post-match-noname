@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 ROLE_REPORTER = "reporter"
-ROLE_SCOUT = "scout"
 ROLE_DIRECTOR = "director"
 ROLE_ADMIN = "admin"
 
@@ -20,16 +19,22 @@ def has_any(user: dict | None, *roles: str) -> bool:
 
 
 def can_report(user: dict | None) -> bool:
-    # Reporting remains available to Informador and to Director/Admin when those
-    # users need to review or intervene in legacy report workflows.
-    return has_any(user, ROLE_REPORTER, ROLE_DIRECTOR, ROLE_ADMIN)
+    # 4.2.1: valorar/postpartido es responsabilidad explícita de Informador.
+    # Administrador y Dirección Deportiva necesitan también ese rol si quieren puntuar.
+    return has_any(user, ROLE_REPORTER)
+
+
+def can_track_players(user: dict | None) -> bool:
+    """Individual market/player tracking is a capability, not an organizational role."""
+    if not user:
+        return False
+    return bool(user.get("can_track_players"))
 
 
 def can_scout(user: dict | None) -> bool:
-    # 4.1: sporting roles are capabilities, not a hierarchy. Being Admin or DD
-    # does not automatically make somebody a Scout. Add the Scout role explicitly
-    # when one person performs both functions.
-    return has_any(user, ROLE_SCOUT)
+    # Backwards-compatible alias for legacy modules/tests. 4.2 no longer exposes
+    # Scout as a normal staff role.
+    return can_track_players(user)
 
 
 def can_direct(user: dict | None) -> bool:
@@ -45,7 +50,7 @@ def can_admin(user: dict | None) -> bool:
 def navigation_for(user: dict | None) -> list[str]:
     items = ["Inicio", "Jornada", "Jugadores"]
     if can_direct(user):
-        items.append("Plantilla")
+        items.append("Dirección Deportiva")
     if can_admin(user):
         items.append("Administración")
     return items

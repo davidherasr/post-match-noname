@@ -48,7 +48,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name PostMatch se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la release 4.1.2; "
+        "Sustituye **todo el contenido del repositorio** por la release 4.2.1; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -98,7 +98,7 @@ except DatabaseUnavailableError as exc:
 except DatabaseSchemaError as exc:
     st.error("La base de datos necesita completar una actualización de esquema.")
     st.markdown(
-        "No se ha ejecutado ninguna pantalla deportiva. La release 4.1.2 incluye una migración "
+        "No se ha ejecutado ninguna pantalla deportiva. La release 4.2.1 incluye una migración "
         "de reparación **no destructiva** para alinear la estructura física de Supabase con la aplicación."
     )
     if exc.missing:
@@ -145,13 +145,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.1.2"
+    expected_api = "4.2.1"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.1.2 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.2.1 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -164,7 +164,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
         st.error(f"No se encuentra la función requerida: views.reports.{renderer_name}().")
-        st.info("Vuelve a subir el paquete completo No Name PostMatch 4.1.2 y reinicia la aplicación.")
+        st.info("Vuelve a subir el paquete completo No Name PostMatch 4.2.1 y reinicia la aplicación.")
         st.stop()
     renderer(user)
 
@@ -184,7 +184,7 @@ def render_login() -> None:
             <div class="pm-card" style="padding:28px">
               <div class="pm-kicker">Aplicación interna</div>
               <div class="pm-page-title" style="font-size:2.25rem">{safe_html(app_settings.get('club_name') or APP_NAME)}</div>
-              <div class="pm-page-subtitle">Informes postpartido y seguimiento de jugadores · Versión {APP_VERSION}</div>
+              <div class="pm-page-subtitle">Postpartidos, lectura deportiva y seguimiento individual · Versión {APP_VERSION}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -217,7 +217,7 @@ if not user:
     render_login()
     st.stop()
 
-# 4.1.2: password changes are optional. Simple internal passwords are allowed.
+# 4.2.1: password changes are optional. Simple internal passwords are allowed.
 # Legacy must_change_password flags are ignored/cleared on successful login.
 
 # 3.8: roles are cumulative capabilities, never an operating profile selector.
@@ -278,7 +278,7 @@ elif selected_label == "Jornada":
 elif selected_label == "Jugadores":
     from views.player_hub import render
     render(user)
-elif selected_label == "Plantilla":
+elif selected_label == "Dirección Deportiva":
     from views.squad import render
     render(user)
 elif selected_label == "Administración":

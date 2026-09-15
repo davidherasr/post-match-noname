@@ -1,3 +1,34 @@
+## 4.2.1 · Inteligencia transversal y permisos cerrados
+
+- Dirección Deportiva deja de ser una lectura aislada por partido y cruza señales entre jornadas.
+- Nueva lectura transversal de jugadores externos: partidos distintos, número de señales, personas que los señalaron, nota ponderada, tendencia y notas recientes.
+- Nueva lectura transversal de equipos rivales combinando partidos neutrales y valoración del rival en postpartidos de No Name.
+- Las discrepancias del staff se convierten en etiquetas comprensibles (`Consenso muy alto`, `Consenso alto`, `Opiniones divididas`, `Discrepancia alta`) y DD puede abrir el partido exacto donde aparecen.
+- Inicio enlaza directamente con `Dirección Deportiva → Lectura deportiva → Jugadores señalados`.
+- Permisos estrictos: Administrador administra, Dirección Deportiva interpreta y solo Informador puede puntuar o editar postpartidos/lecturas neutrales. Un usuario puede combinar roles si necesita varias capacidades.
+- El seguimiento individual continúa siendo un permiso independiente de los roles y solo puede aplicarse a jugadores externos.
+- Se eliminan del paquete las vistas antiguas de Scout/DD y los workspaces activos dejan de consultar `ScoutMission`; los históricos de base de datos se conservan por compatibilidad.
+- Fichas y pantallas visibles sustituyen terminología Scout por `seguimiento individual`, `observador` y `observaciones` cuando corresponde.
+- El test de aceptación contra base real usa un Informador temporal dentro del SAVEPOINT y mantiene rollback total.
+- Sin migración nueva: Alembic continúa en `0012_sporting_reading_4_2`.
+- Suite final: 106 tests.
+
+## 4.2.0 · Lectura deportiva y seguimiento real
+
+- Se elimina de la interfaz activa el flujo de asignación `Dirección Deportiva → Scout`.
+- Los roles visibles pasan a ser Administrador, Dirección Deportiva e Informador.
+- El seguimiento individual de jugadores pasa a ser un permiso especial por usuario, no un rol organizativo.
+- Partidos de No Name y partidos neutrales tienen flujos distintos.
+- Los postpartidos de No Name incorporan nota colectiva de No Name y del rival.
+- Los partidos neutrales permiten una lectura ligera del staff y señalar jugadores sin iniciar seguimiento.
+- Dirección Deportiva agrega opiniones con pesos separados para partidos de No Name y neutrales.
+- Nuevo centro DD: Lectura deportiva / Plantilla y modelo / Criterio del staff.
+- Un jugador de No Name nunca puede abrirse como objetivo de seguimiento de mercado.
+- Calendario y Jornada eliminan los formularios de misiones Scout.
+- Jugadores elimina la asignación de próxima acción a Scout y muestra observaciones de seguimiento.
+- Nueva migración no destructiva `0012_sporting_reading_4_2`.
+- Suite final de la release: 101 tests.
+
 ## 4.1.2 · Roles sin principal visible
 
 - Se elimina **Rol principal** de Listado, alta y edición de usuarios.

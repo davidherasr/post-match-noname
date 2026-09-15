@@ -161,7 +161,7 @@ def _timeline(history: list[dict], observations: list[ScoutObservation]) -> list
             continue
         rows.append({
             "date": obs.observed_at.date() if hasattr(obs.observed_at, "date") else obs.observed_at,
-            "source": "Scout específico" if obs.source_type == "specific" else ("Barrido Scout" if obs.source_type == "match_scan" else "Scout espontáneo"),
+            "source": "Seguimiento individual" if obs.source_type == "specific" else ("Apunte rápido histórico" if obs.source_type == "match_scan" else "Observación individual"),
             "rating": float(obs.general_rating),
             "position": obs.observed_position,
             "match": "-" if not obs.match else f"{obs.match.home_team.name} - {obs.match.away_team.name}",
@@ -323,7 +323,7 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
     team = _current_team(session, player.id, season_id, history)
     metrics = _postmatch_metrics(history)
     positions = league_repo.observed_position_counts(session, player.id, season_id=season_id)
-    # Add Scout-only positions without inventing ratings.
+    # Add positions coming only from individual tracking without inventing ratings.
     scout_pos = Counter(o.observed_position for o in submitted if o.observed_position)
     known = {str(r["position"]): int(r["observations"]) for r in positions if r.get("position")}
     for pos, count in scout_pos.items():

@@ -2,7 +2,6 @@ ROLES = {
     "admin": "Administrador",
     "reporter": "Informador",
     "director": "Dirección deportiva",
-    "scout": "Scout",
 }
 
 MATCH_STATUSES = {
@@ -91,21 +90,6 @@ SCHEDULE_STATUSES = {
     # Administración confirme una hora real.
     "window": "Fecha orientativa · horario pendiente",
     "date_confirmed": "Fecha sin hora · pendiente",
-}
-
-SCOUT_MISSION_TYPES = {
-    "player": "Jugador concreto",
-    "multi_player": "Varios jugadores",
-    "team": "Equipo completo",
-    "rival_analysis": "Análisis de rival",
-    "spontaneous": "Observación espontánea",
-}
-
-SCOUT_MISSION_STATUSES = {
-    "pending": "Pendiente",
-    "in_progress": "En curso",
-    "completed": "Completada",
-    "cancelled": "Cancelada",
 }
 
 NEED_LEVELS = ["Alta", "Media", "Cubierta"]

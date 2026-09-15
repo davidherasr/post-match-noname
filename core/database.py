@@ -52,7 +52,11 @@ _REQUIRED_COLUMNS: dict[str, set[str]] = {
     "seasons": {"id", "name", "start_date", "end_date", "active", "updated_at"},
     "player_season_decisions": {"current_level", "potential_score", "criteria_json"},
     "scout_observations": {"observation_level", "model_role_id", "legacy_review_id"},
-    "users": {"deleted_at"},
+    "users": {"deleted_at", "can_track_players"},
+    "reports": {"own_team_rating", "rival_team_rating"},
+    "staff_sporting_weights": {"user_id", "own_match_weight", "neutral_match_weight"},
+    "match_opinions": {"match_id", "user_id", "home_team_rating", "away_team_rating", "summary"},
+    "match_opinion_players": {"opinion_id", "player_id", "team_id", "rating", "note"},
 }
 
 

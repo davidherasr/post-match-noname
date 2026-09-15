@@ -20,15 +20,19 @@ from repositories.users import assert_role, user_has_role
 MISSION_TYPES = {"player", "multi_player", "team", "rival_analysis", "spontaneous"}
 
 
-def list_scout_users(session: Session, *, include_privileged: bool = False) -> list[User]:
-    """Return users that explicitly carry the Scout role.
+def _assert_tracker(session: Session, user_id: int) -> User:
+    user = session.get(User, int(user_id))
+    if not user or not user.active:
+        raise PermissionError("Usuario no válido.")
+    if not bool(getattr(user, "can_track_players", False)):
+        raise PermissionError("Tu usuario no tiene permiso de seguimiento individual de jugadores.")
+    return user
 
-    4.1 separates administrative and sporting responsibilities. Admin/Director do
-    not become scouts by hierarchy; a multi-role user simply receives ``scout``
-    explicitly from Administration.
-    """
+
+def list_scout_users(session: Session, *, include_privileged: bool = False) -> list[User]:
+    """Compatibility helper: return users allowed to perform individual tracking."""
     users = list(session.scalars(select(User).where(User.active.is_(True)).order_by(User.full_name)).all())
-    return [u for u in users if user_has_role(session, u.id, "scout")]
+    return [u for u in users if bool(getattr(u, "can_track_players", False))]
 
 
 def create_mission(
@@ -51,8 +55,8 @@ def create_mission(
         raise ValueError("Tipo de misión no válido.")
     match = session.get(Match, int(match_id))
     assignee = session.get(User, int(assigned_to))
-    if not match or not assignee or not assignee.active or not user_has_role(session, assignee.id, "scout"):
-        raise ValueError("Partido o Scout no disponible. El responsable debe tener el rol Scout asignado.")
+    if not match or not assignee or not assignee.active or not bool(getattr(assignee, "can_track_players", False)):
+        raise ValueError("Partido o responsable no disponible. El usuario debe tener permiso de seguimiento individual.")
     item = ScoutMission(
         match_id=int(match_id), mission_type=mission_type, target_team_id=target_team_id,
         title=title.strip() or "Observación", purpose=(purpose or "").strip() or None,
@@ -115,7 +119,7 @@ def update_mission_status(session: Session, mission_id: int, actor_id: int, *, s
 
 
 def ensure_scout_profile(session: Session, player_id: int, actor_id: int) -> ScoutedPlayerProfile:
-    assert_role(session, actor_id, "scout")
+    _assert_tracker(session, actor_id)
     item = session.scalar(select(ScoutedPlayerProfile).where(ScoutedPlayerProfile.player_id == int(player_id)))
     if item:
         return item
@@ -143,15 +147,15 @@ def create_observation(
     observation_level: str = "observation",
     model_role_id: int | None = None,
 ) -> ScoutObservation:
-    assert_role(session, reviewer_id, "scout")
+    _assert_tracker(session, reviewer_id)
     profile = ensure_scout_profile(session, int(player_id), reviewer_id)
     if mission_id:
         mission = session.get(ScoutMission, int(mission_id))
         if not mission or mission.assigned_to != int(reviewer_id):
-            raise PermissionError("La tarea no está asignada a este Scout.")
+            raise PermissionError("La tarea histórica no está asignada a este usuario.")
         match_id = mission.match_id
     if match_id:
-        require_schedule_confirmed(session.get(Match, int(match_id)), action="iniciar la observación Scout")
+        require_schedule_confirmed(session.get(Match, int(match_id)), action="iniciar el seguimiento individual")
     if mission_id:
         mission.status = "in_progress"
         mission.updated_at = UTC_NOW()
@@ -198,7 +202,7 @@ def save_observation(
     if not item:
         raise ValueError("Observación no encontrada.")
     if item.reviewer_id != int(actor_id):
-        raise PermissionError("Solo el Scout autor puede editar esta observación.")
+        raise PermissionError("Solo el autor puede editar esta observación de seguimiento.")
     item.observed_position = observed_position
     if model_role_id is not None:
         if not session.get(GameModelRole, int(model_role_id)):
@@ -269,7 +273,7 @@ def save_quick_match_observations(
     session: Session, *, match_id: int, reviewer_id: int, rows: Sequence[dict], mission_id: int | None = None,
 ) -> int:
     """Save quick observations for several players and optionally fulfil an assigned task."""
-    assert_role(session, reviewer_id, "scout")
+    _assert_tracker(session, reviewer_id)
     match = session.get(Match, int(match_id))
     if not match:
         raise ValueError("Partido no encontrado.")

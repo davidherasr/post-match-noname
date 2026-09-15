@@ -40,6 +40,9 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # 4.2 · capability independent from organizational roles. Only users who
+    # actually perform individual player tracking need this permission.
+    can_track_players: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class UserRole(Base):
@@ -244,6 +247,57 @@ class Participation(Base):
     )
 
 
+class StaffSportingWeight(Base):
+    __tablename__ = "staff_sporting_weights"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    own_match_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    neutral_match_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+    updater: Mapped[User] = relationship(foreign_keys=[updated_by])
+    __table_args__ = (UniqueConstraint("user_id", name="uq_staff_sporting_weight_user"),)
+
+
+class MatchOpinion(Base):
+    __tablename__ = "match_opinions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    home_team_rating: Mapped[float | None] = mapped_column(Float)
+    away_team_rating: Mapped[float | None] = mapped_column(Float)
+    summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    match: Mapped["Match"] = relationship()
+    user: Mapped[User] = relationship()
+    __table_args__ = (UniqueConstraint("match_id", "user_id", name="uq_match_opinion_user"),)
+
+
+class MatchOpinionPlayer(Base):
+    __tablename__ = "match_opinion_players"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    opinion_id: Mapped[int] = mapped_column(ForeignKey("match_opinions.id", ondelete="CASCADE"), nullable=False)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    rating: Mapped[float | None] = mapped_column(Float)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    opinion: Mapped[MatchOpinion] = relationship()
+    player: Mapped[Player] = relationship()
+    team: Mapped[Team] = relationship()
+    __table_args__ = (UniqueConstraint("opinion_id", "player_id", name="uq_match_opinion_player"),)
+
+
 class ReportAssignment(Base):
     __tablename__ = "report_assignments"
 
@@ -272,6 +326,9 @@ class Report(Base):
     rival_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
     rival_level: Mapped[str | None] = mapped_column(String(40))
+    # 4.2 · team-performance ratings are distinct from individual player ratings.
+    own_team_rating: Mapped[float | None] = mapped_column(Float)
+    rival_team_rating: Mapped[float | None] = mapped_column(Float)
     opponent_overview: Mapped[str | None] = mapped_column(Text)
     own_team_note: Mapped[str | None] = mapped_column(Text)
     key_takeaways: Mapped[str | None] = mapped_column(Text)

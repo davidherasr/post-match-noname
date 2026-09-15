@@ -10,8 +10,8 @@ from repositories import scouting as repo
 
 
 def _base(session):
-    admin = repo.create_user(session, "Admin", "admin35@example.com", "ValidPass123!", role="admin", roles=["admin", "director", "scout"], must_change_password=False)
-    scout = repo.create_user(session, "Scout", "scout35@example.com", "ValidPass123!", role="scout", roles=["scout", "reporter"], actor_id=admin.id, must_change_password=False)
+    admin = repo.create_user(session, "Admin", "admin35@example.com", "ValidPass123!", role="admin", roles=["admin", "director"], must_change_password=False, can_track_players=True)
+    scout = repo.create_user(session, "Seguimiento", "scout35@example.com", "ValidPass123!", role="reporter", roles=["reporter"], actor_id=admin.id, must_change_password=False, can_track_players=True)
     season = repo.create_season(session, "2026/27", date(2026, 7, 1), date(2027, 6, 30), admin.id)
     repo.set_active_season(session, season.id, admin.id)
     comp = repo.create_competition(session, "Liga", actor_id=admin.id)
@@ -52,9 +52,10 @@ def test_full_league_calendar_import_and_schedule_confirmation(session_factory):
 def test_multi_role_profile_and_scout_mission_with_repeated_observations(session_factory):
     with session_factory.begin() as session:
         admin, scout, season, comp, _ = _base(session)
-        assert repo.user_has_role(session, scout.id, "scout")
+        assert not repo.user_has_role(session, scout.id, "scout")
         assert repo.user_has_role(session, scout.id, "reporter")
-        assert {r.role for r in session.query(UserRole).filter(UserRole.user_id == scout.id)} == {"scout", "reporter"}
+        assert scout.can_track_players is True
+        assert {r.role for r in session.query(UserRole).filter(UserRole.user_id == scout.id)} == {"reporter"}
 
         a = repo.create_team(session, "La Bañeza", actor_id=admin.id)
         b = repo.create_team(session, "Laguna", actor_id=admin.id)

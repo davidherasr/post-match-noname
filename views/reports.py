@@ -9,7 +9,7 @@ from core.constants import ASSIGNMENT_STATUSES, PDF_MODES, REPORT_STATUSES
 from core.database import session_scope
 from core.evaluation_rules import AUTO_STANDOUT_THRESHOLD
 from core.performance import measure
-from core.permissions import can_direct
+from core.permissions import can_direct, can_report
 from core.utils import safe_html
 from repositories import scouting as repo
 from services.report_service import generate_report_pdf, report_filename
@@ -17,7 +17,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.1.2"
+REPORTS_PAGE_API_VERSION = "4.2.1"
 
 
 
@@ -257,6 +257,43 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
     metrics[2].metric("Destacados", len([e for e in valid_rival + valid_own if e.standout])); metrics[3].metric("Versión", f"V{report.version}")
     if errors and not read_only:
         st.warning(" · ".join(errors))
+
+    st.markdown("### Lectura global del partido")
+    st.caption("La nota de No Name mide nuestro rendimiento colectivo. La del rival mide su actuación en este partido; no equivale a iniciar seguimiento de ningún jugador.")
+    if read_only:
+        c1, c2 = st.columns(2)
+        c1.metric("No Name", "—" if report.own_team_rating is None else f"{report.own_team_rating:.1f}")
+        c2.metric(report.rival_team.name, "—" if report.rival_team_rating is None else f"{report.rival_team_rating:.1f}")
+        if report.own_team_note:
+            st.markdown(f"**Lectura No Name:** {report.own_team_note}")
+        if report.opponent_overview:
+            st.markdown(f"**Lectura rival:** {report.opponent_overview}")
+        if report.key_takeaways:
+            st.markdown(f"**Conclusiones:** {report.key_takeaways}")
+    else:
+        with st.form(f"global_reading_42_{report_id}"):
+            c1, c2 = st.columns(2)
+            own_rating = c1.number_input("Nota No Name", 0.0, 10.0, float(report.own_team_rating or 0.0), .5, help="0 = sin valorar")
+            rival_rating = c2.number_input(f"Nota {report.rival_team.name}", 0.0, 10.0, float(report.rival_team_rating or 0.0), .5, help="0 = sin valorar")
+            own_note = st.text_area("Lectura No Name", value=report.own_team_note or "", height=80, placeholder="Qué hicimos bien, qué nos costó, sensaciones colectivas...")
+            rival_note = st.text_area("Lectura rival", value=report.opponent_overview or "", height=80, placeholder="Qué propuso el rival y cómo nos condicionó...")
+            takeaways = st.text_area("Conclusiones", value=report.key_takeaways or "", height=80, placeholder="2-3 ideas que merece la pena conservar")
+            save_global = st.form_submit_button("Guardar lectura global", use_container_width=True)
+        if save_global:
+            try:
+                with session_scope() as session:
+                    repo.save_report_summary(
+                        session, report_id, rival_level=report.rival_level, opponent_overview=rival_note,
+                        own_team_note=own_note, key_takeaways=takeaways, standout_player_id=report.standout_player_id,
+                        actor_id=user["id"], expected_revision=report.revision,
+                        own_team_rating=own_rating, rival_team_rating=rival_rating,
+                    )
+                _invalidate_workspace(report_id)
+                st.success("Lectura global guardada.")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
     if not read_only:
         st.success("No hay cambios de edición pendientes: has llegado aquí después de guardar el bloque Rival.")
         c1, c2 = st.columns(2)
@@ -387,6 +424,9 @@ def _available_work_matches(user: dict):
 
 
 def _render_work(user: dict) -> None:
+    if not can_report(user):
+        st.error("Para valorar partidos necesitas el rol Informador.")
+        return
     page_header("Valorar partido", "Carga una vez, puntúa sin consultas y guarda cada plantilla en un único lote.")
     matches, assignments, reports = _available_work_matches(user)
     if not matches:
@@ -408,7 +448,7 @@ def _render_work(user: dict) -> None:
         if st.button("Empezar a valorar", type="primary", use_container_width=True):
             try:
                 with session_scope() as session:
-                    repo.get_or_create_report(session, selected_match_id, user["id"], actor_role="director" if can_direct(user) else "reporter")
+                    repo.get_or_create_report(session, selected_match_id, user["id"], actor_role="reporter")
                 st.rerun()
             except Exception as exc: st.error(str(exc))
         return
@@ -454,9 +494,12 @@ def _render_archive(user: dict) -> None:
 
 
 def render_match_report(user: dict, match_id: int) -> None:
-    """3.9 contextual report editor opened from Match Hub."""
+    """Contextual postmatch editor opened from Match Hub."""
+    if not can_report(user):
+        st.error("Para completar un postpartido necesitas el rol Informador.")
+        return
     contextual = dict(user)
-    contextual["role"] = "director" if can_direct(user) else "reporter"
+    contextual["role"] = "reporter"
     with session_scope() as session:
         report = repo.report_for_user(session, int(match_id), int(user["id"]))
     if not report:

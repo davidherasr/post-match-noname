@@ -9,7 +9,6 @@ STATUS_ICON = {
 
 PLAYER_STATES = ["Observado", "Interesante", "Seguimiento", "Prioritario", "Descartado"]
 NEED_STATES = ["Alta", "Media", "Baja", "Cubierta", "No prioritaria"]
-SCOUT_LEVELS = ["Barrido", "Observación"]  # Compatibilidad visual; el dossier 360 ya no es un nivel seleccionable.
 
 
 def normalize_player_state(value: str | None) -> str:
