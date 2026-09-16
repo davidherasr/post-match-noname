@@ -40,7 +40,9 @@ def test_approved_rival_only_analytics_and_immutable_version(session_factory):
         repo.upsert_evaluation(session, report.id, own_player.id, own.id, parts[own_player.id].id, actor_id=reporter.id, observation_status="evaluated", general_rating=9.5, short_note="Valoración interna.")
         assert repo.player_rankings(session) == []  # drafts are excluded
         submitted, version = repo.submit_report(session, report.id, reporter.id)
-        assert submitted.status == "submitted"
+        assert submitted.status == "incorporated"
+        assert submitted.reviewer_id is None and submitted.approved_at is None
+        assert len(repo.player_rankings(session)) == 1
         snapshot_before = version.snapshot_json
         repo.approve_report(session, report.id, director.id)
         rankings = repo.player_rankings(session)

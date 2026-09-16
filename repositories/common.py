@@ -9,8 +9,8 @@ from core.utils import json_dumps
 from models.entities import AuditLog
 
 UTC_NOW = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
-FINAL_REPORT_STATUSES = {"approved", "final"}
-LOCKED_REPORT_STATUSES = {"submitted", "approved", "final"}
+FINAL_REPORT_STATUSES = {"approved", "final", "incorporated"}
+LOCKED_REPORT_STATUSES = {"submitted", "approved", "final", "incorporated"}
 
 def _snapshot(obj, fields: Sequence[str]) -> dict:
     return {field: getattr(obj, field, None) for field in fields}

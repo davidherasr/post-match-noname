@@ -1,8 +1,10 @@
+> Actualización 4.2.3: Admin selecciona C.D. Noname real por ID; el equipo «Noname Club» y dos encuentros ficticios contra Santa Marta se gestionan como prueba exclusivamente mediante selección administrativa por ID y archivo reversible. Jugadores se rediseña con equipo/temporada/filtros y paginación; entrega de informes pasa directamente a estadísticas y DD (sin aprobación obligatoria). El botón PUBLICAR POSTPARTIDO se hace localizable en el asistente. Head nuevo 0013, sin tocar producción automáticamente.
+
 # CONTEXTO DE CONTINUIDAD — No Name PostMatch
 
 ## Qué debe hacer el nuevo chat
 
-Este documento sirve para continuar el desarrollo de **No Name PostMatch** sin reconstruir decisiones anteriores. La release base que debe tomarse como referencia es **4.2.2**. El ZIP completo de esa release contiene código, tests, migraciones Alembic y documentación.
+Este documento sirve para continuar el desarrollo de **No Name PostMatch** sin reconstruir decisiones anteriores. **Nueva release candidata: 4.2.3**, construida íntegramente desde 4.2.2 (sin mezclar archivos del repositorio desplegado 4.2.1). La 4.2.3 no se ha desplegado ni validado en Cloud/Supabase reales. Tras aceptación y confirmación del despliegue, su ZIP completo pasará a ser la base del siguiente cambio; hasta entonces conservar el ZIP 4.2.2 como retorno y el repo actual 4.2.1 como referencia de despliegue anterior. Leer `UPGRADE_4_2_3.md` y `VALIDACION_4_2_3.md`.
 
 Regla de trabajo: **no inventar datos deportivos, no resetear Supabase, no borrar histórico y no afirmar que una release está validada si no se ha ejecutado realmente la validación**. Cuando se entregue una versión nueva, el usuario prefiere un ZIP completo, no parches de archivos sueltos.
 

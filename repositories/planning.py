@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from repositories import players as players_repo
+
+from repositories.data_governance import official_match_clause
+
 import json
 from datetime import date, datetime
 from typing import Sequence
@@ -259,6 +263,8 @@ def list_observations(session: Session, *, player_id: int | None = None, reviewe
         joinedload(ScoutObservation.match).joinedload(Match.home_team), joinedload(ScoutObservation.match).joinedload(Match.away_team),
         joinedload(ScoutObservation.mission),
     )
+    stmt = stmt.where(or_(ScoutObservation.match_id.is_(None),
+                          ScoutObservation.match_id.in_(select(Match.id).where(official_match_clause()))))
     if player_id:
         stmt = stmt.join(ScoutedPlayerProfile, ScoutObservation.profile_id == ScoutedPlayerProfile.id).where(ScoutedPlayerProfile.player_id == int(player_id))
     if reviewer_id:
@@ -401,7 +407,7 @@ def shadow_squad(session: Session, season_id: int) -> list[dict]:
     roles = list_model_roles(session)
     needs = {n.model_role_id: n for n in list_squad_needs(session, season_id)}
     decisions = list_season_decisions(session, season_id)
-    own_team = session.scalar(select(Team).where(Team.is_own_team.is_(True)))
+    own_team = players_repo.get_own_team(session)
     own_ids: set[int] = set()
     if own_team:
         own_ids = set(session.scalars(select(TeamRoster.player_id).where(
@@ -470,7 +476,8 @@ def scouting_evidence_many(session: Session, player_ids: Sequence[int], *, seaso
         .select_from(ScoutObservation)
         .join(ScoutedPlayerProfile, ScoutObservation.profile_id == ScoutedPlayerProfile.id)
         .outerjoin(Match, ScoutObservation.match_id == Match.id)
-        .where(ScoutedPlayerProfile.player_id.in_(ids), ScoutObservation.status == "submitted")
+        .where(ScoutedPlayerProfile.player_id.in_(ids), ScoutObservation.status == "submitted",
+            or_(ScoutObservation.match_id.is_(None), ScoutObservation.match_id.in_(select(Match.id).where(official_match_clause()))))
     )
     if season_id:
         scout_stmt = scout_stmt.where(or_(Match.season_id == int(season_id), ScoutObservation.match_id.is_(None)))
@@ -518,7 +525,7 @@ def scouting_opportunities(session: Session, *, season_id: int, days_ahead: int 
             select(Match)
             .options(joinedload(Match.home_team), joinedload(Match.away_team))
             .where(
-                Match.season_id == int(season_id), Match.deleted_at.is_(None),
+                Match.season_id == int(season_id), official_match_clause(),
                 Match.match_date >= today, Match.match_date <= until,
                 or_(Match.home_team_id.in_(team_ids), Match.away_team_id.in_(team_ids)),
             )

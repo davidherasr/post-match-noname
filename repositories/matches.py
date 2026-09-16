@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.data_governance import official_match_clause
+
 import json
 import math
 from collections import defaultdict
@@ -82,7 +84,7 @@ def archive_match(session: Session, match_id: int, actor_id: int) -> Match:
 def list_matches(session: Session, status: str | None = None, limit: int | None = None, season_id: int | None = None, competition_id: int | None = None, include_archived: bool = False, offset: int = 0) -> list[Match]:
     stmt = select(Match).options(joinedload(Match.season), joinedload(Match.competition), joinedload(Match.home_team), joinedload(Match.away_team))
     if not include_archived:
-        stmt = stmt.where(Match.deleted_at.is_(None))
+        stmt = stmt.where(official_match_clause())
     if status:
         stmt = stmt.where(Match.status == status)
     if season_id:
@@ -162,11 +164,11 @@ def replace_participations(session: Session, match_id: int, team_id: int, rows: 
 
 
 def _own_team_id_for_match(session: Session, match: Match) -> int:
-    own = session.scalar(select(Team.id).where(Team.is_own_team.is_(True)).limit(1))
-    if own in {match.home_team_id, match.away_team_id}:
-        return int(own)
-    configured = get_setting(session, "own_team_id")
-    return int(configured) if configured else match.home_team_id
+    # Never turn the local side of a neutral match into our own club by fallback.
+    own = get_own_team(session)
+    # This helper classifies evaluation scope while importing either own or
+    # neutral lineups. No fallback to local side; the neutral fixture remains neutral.
+    return int(own.id) if own is not None else -1
 
 
 
@@ -327,7 +329,7 @@ def assign_reporters(session: Session, match_id: int, user_ids: Sequence[int], a
             item.status = "pending"
         result.append(item)
     for item in current.values():
-        if item.status not in {"submitted", "approved"}:
+        if item.status not in {"submitted", "approved", "incorporated"}:
             item.status = "waived"
     audit(session, actor_id, "assign_reporters", "match", match_id, detail=",".join(map(str, user_ids)))
     return result
@@ -344,7 +346,7 @@ def list_assignments(session: Session, match_id: int | None = None, user_id: int
 
 def assignment_progress(session: Session, match_id: int) -> dict:
     rows = list_assignments(session, match_id=match_id)
-    return {"total": len([a for a in rows if a.required]), "approved": len([a for a in rows if a.status == "approved"]), "submitted": len([a for a in rows if a.status == "submitted"]), "pending": len([a for a in rows if a.status in {"pending", "in_progress", "returned"}])}
+    return {"total": len([a for a in rows if a.required]), "approved": len([a for a in rows if a.status in {"approved", "incorporated"}]), "submitted": len([a for a in rows if a.status == "submitted"]), "pending": len([a for a in rows if a.status in {"pending", "in_progress", "returned"}])}
 
 
 def assignment_progress_many(session: Session, match_ids: Sequence[int]) -> dict[int, dict[str, int]]:
@@ -361,7 +363,7 @@ def assignment_progress_many(session: Session, match_ids: Sequence[int]) -> dict
         item = result.setdefault(int(match_id), {"total": 0, "approved": 0, "submitted": 0, "pending": 0})
         if required:
             item["total"] += 1
-        if status == "approved":
+        if status in {"approved", "incorporated"}:
             item["approved"] += 1
         elif status == "submitted":
             item["submitted"] += 1

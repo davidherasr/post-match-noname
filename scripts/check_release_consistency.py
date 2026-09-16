@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.2.2"
-HEAD_MIGRATION = "0012_sporting_reading_4_2"
+EXPECTED = "4.2.3"
+HEAD_MIGRATION = "0013_data_governance_4_2_3"
 
 
 def read_version() -> str:
@@ -90,9 +90,9 @@ def main() -> None:
         errors.append("Permisos conserva Scout como rol activo")
 
     migration = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
-    for token in ["can_track_players", "staff_sporting_weights", "match_opinions", "match_opinion_players", "own_team_rating", "rival_team_rating"]:
+    for token in ["is_test", "archived_at", "archived_previous_status"]:
         if token not in migration:
-            errors.append(f"Migración 0012 incompleta: falta {token}")
+            errors.append(f"Migración 0013 incompleta: falta {token}")
 
     jornada_text = (ROOT / "views" / "jornada.py").read_text(encoding="utf-8")
     for token in [

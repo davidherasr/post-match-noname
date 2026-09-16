@@ -127,19 +127,58 @@ def _technical(user: dict) -> None:
         elif tool=="Rendimiento": legacy._section_performance(user)
 
 
+
+def _report_corrections_423(user: dict) -> None:
+    """Exceptional correction, not a DD approval queue."""
+    st.markdown('#### Reabrir informe por corrección')
+    st.caption('Solo Administración; requiere motivo y conserva la versión entregada. Hasta volver a entregar, la revisión en curso no participa en las estadísticas oficiales.')
+    with session_scope() as session:
+        from repositories import reports as report_repo
+        candidates = [item for item in report_repo.list_reports(session, limit=200)
+                      if item.status in {'incorporated', 'approved', 'final', 'submitted'}]
+    if not candidates:
+        st.info('No hay informes entregados que necesiten corrección.'); return
+    labels = {item.id: f'ID {item.id} · {item.match.match_date} · {item.match.home_team.name} - {item.match.away_team.name} · {item.reporter.full_name} · V{item.version} ({item.status})'
+              for item in candidates}
+    report_id = st.selectbox('Informe que debe corregirse', list(labels), format_func=lambda item_id: labels[item_id], key='admin_report_reopen_423')
+    reason = st.text_area('Motivo de corrección obligatorio', key='admin_report_reopen_reason_423', placeholder='Qué debe revisar el Informador y por qué...')
+    confirm = st.checkbox(f'Confirmo que quiero reabrir el informe ID {report_id} y conservar su versión anterior.', key=f'admin_report_confirm_{report_id}_423')
+    if st.button('Reabrir para corrección', type='primary', key='admin_report_reopen_submit_423',
+                 disabled=not (confirm and reason.strip()), use_container_width=True):
+        try:
+            with session_scope() as session:
+                from repositories import reports as report_repo
+                report_repo.reopen_report(session, report_id, user['id'], reason.strip())
+            st.success('Informe reabierto y auditado. Volverá a las tareas del Informador; la versión entregada permanece en el histórico.'); st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+
+
 def render(user: dict) -> None:
     if not can_admin(user):
         st.error("No tienes permiso de administración."); return
     page_header("Administración","Usuarios, roles, calendario y datos. Las decisiones deportivas se realizan desde Dirección Deportiva.")
-    section=st.segmented_control("Sección",["Usuarios","Club","Datos","Configuración"],default="Usuarios") or "Usuarios"
+    pending_section = st.session_state.pop('admin_section_423', None)
+    if pending_section in {'Usuarios', 'Club', 'Datos', 'Configuración'}:
+        st.session_state['admin_section_current_423'] = pending_section
+    section=st.selectbox("Sección",["Usuarios","Club","Datos","Configuración"],key="admin_section_current_423")
     from views import admin as legacy_admin
     from views import catalog as legacy_catalog
     if section=="Usuarios": legacy_admin._section_users(user)
-    elif section=="Club": legacy_admin._section_brand(user)
+    elif section=="Club":
+        from views import data_governance
+        data_governance.render(user)
+        with st.expander("Identidad visual y documentos", expanded=False):
+            legacy_admin._section_brand(user)
     elif section=="Datos":
         _real_data_status(user)
         _data_search(user)
         _quality(user)
+        with st.expander('Corrección excepcional de informes incorporados', expanded=False):
+            _report_corrections_423(user)
+        with st.expander("Gestionar equipo propio y datos de prueba", expanded=False):
+            from views import data_governance
+            data_governance.render(user)
     else:
         config=st.radio("Configurar",["Temporadas","Competiciones","Equipos","Plantillas"],horizontal=True,key="admin_config38")
         if config=="Temporadas": legacy_catalog._section_seasons(user)

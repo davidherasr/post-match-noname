@@ -1,3 +1,13 @@
+## 4.2.3 · Catálogo DD, datos de prueba y postpartidos directos
+
+- Admin → Club: equipo propio único por ID y gestión de pruebas/archivos reversibles y auditados (teams/matches); no se identifican registros por coincidencia de nombre.
+- Filtro compartido para excluir partidos de prueba/archivados y equipos de prueba/archivados de calendarios, estadísticas oficiales e inteligencia.
+- Jugadores: filtros estables por equipo/temporada/posición/ámbito/estado/evidencia, resultados paginados en SQL, contadores desglosados por procedencia.
+- Preparación de postpartido: paso de publicación localizable desde el inicio; requisitos explícitos; reutilización de titulares documentados para el mismo partido; sin formación predeterminada inventada.
+- Entrega de Informador incorporada directamente a DD y estadísticas, sin revisor ficticio; Admin dispone de reapertura excepcional con motivo/auditoría y snapshot histórico para nueva entrega V+1. Se conservan estados e informes históricos.
+- Migración aditiva `0013_data_governance_4_2_3`; no se renombran ni borran históricos. Validación: 113 pruebas y migraciones temporales (no producción).
+- Consultar `UPGRADE_4_2_3.md` y `VALIDACION_4_2_3.md`; requiere backup PostgreSQL real y comprobación Cloud posterior.
+
 ## 4.2.2 · Hotfix de arranque + paquete de continuidad
 
 - Corrige el arranque observado en 4.2.1 evitando entrar en Alembic cuando Supabase ya está exactamente en el head `0012_sporting_reading_4_2`.

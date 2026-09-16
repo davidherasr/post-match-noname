@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.data_governance import official_match_clause
+
 from datetime import date, datetime, timedelta
 from typing import Sequence
 
@@ -58,7 +60,7 @@ def import_fixtures(
             select(Match).where(
                 Match.season_id == int(season_id), Match.competition_id == int(competition_id),
                 Match.round_name == str(row["round_name"]), Match.home_team_id == home.id, Match.away_team_id == away.id,
-                Match.deleted_at.is_(None),
+                official_match_clause(),
             )
         )
         if existing is None:
@@ -106,7 +108,7 @@ def list_calendar(
 ) -> list[Match]:
     stmt = select(Match).options(
         joinedload(Match.home_team), joinedload(Match.away_team), joinedload(Match.season), joinedload(Match.competition)
-    ).where(Match.deleted_at.is_(None), Match.status != "archived")
+    ).where(official_match_clause(), Match.status != "archived")
     if season_id:
         stmt = stmt.where(Match.season_id == int(season_id))
     if competition_id:

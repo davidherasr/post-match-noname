@@ -5,7 +5,9 @@ import math
 from collections import Counter, defaultdict
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from models.entities import Match
+from repositories.data_governance import official_match_clause, official_team_clause
 from sqlalchemy.orm import Session, joinedload
 
 from models.entities import (
@@ -104,7 +106,8 @@ def _current_team(session: Session, player_id: int, season_id: int | None, histo
         roster = session.scalar(
             select(TeamRoster)
             .options(joinedload(TeamRoster.team))
-            .where(TeamRoster.player_id == int(player_id), TeamRoster.season_id == int(season_id), TeamRoster.active.is_(True))
+            .join(Team, Team.id == TeamRoster.team_id)
+            .where(TeamRoster.player_id == int(player_id), TeamRoster.season_id == int(season_id), TeamRoster.active.is_(True), official_team_clause())
             .order_by(TeamRoster.updated_at.desc())
         )
         if roster:
@@ -113,7 +116,8 @@ def _current_team(session: Session, player_id: int, season_id: int | None, histo
         return history[0]["team"]
     roster = session.scalar(
         select(TeamRoster).options(joinedload(TeamRoster.team))
-        .where(TeamRoster.player_id == int(player_id), TeamRoster.active.is_(True))
+        .join(Team, Team.id == TeamRoster.team_id)
+        .where(TeamRoster.player_id == int(player_id), TeamRoster.active.is_(True), official_team_clause())
         .order_by(TeamRoster.updated_at.desc())
     )
     return roster.team if roster else None
@@ -257,7 +261,8 @@ def _comparison_pool(session: Session, *, season_id: int | None, player_id: int,
         .options(joinedload(PlayerSeasonDecision.player), joinedload(PlayerSeasonDecision.model_role))
         .where(PlayerSeasonDecision.season_id == int(season_id), PlayerSeasonDecision.model_role_id == role.id, PlayerSeasonDecision.player_id != int(player_id))
     ).unique().all())
-    own_team = session.scalar(select(Team).where(Team.is_own_team.is_(True)))
+    from repositories.players import get_own_team
+    own_team = get_own_team(session)
     own_ids: set[int] = set()
     if own_team:
         own_ids = set(session.scalars(select(TeamRoster.player_id).where(
@@ -274,7 +279,8 @@ def _comparison_pool(session: Session, *, season_id: int | None, player_id: int,
         if profile_ids:
             obs_rows = list(session.scalars(
                 select(ScoutObservation).options(joinedload(ScoutObservation.profile)).where(
-                    ScoutObservation.profile_id.in_(profile_ids), ScoutObservation.status == "submitted"
+                    ScoutObservation.profile_id.in_(profile_ids), ScoutObservation.status == "submitted",
+                    or_(ScoutObservation.match_id.is_(None), ScoutObservation.match_id.in_(select(Match.id).where(official_match_clause())))
                 )
             ).unique().all())
             for obs in obs_rows:

@@ -42,11 +42,11 @@ _REQUIRED_COLUMNS: dict[str, set[str]] = {
         "home_team_id", "away_team_id", "home_score", "away_score", "venue",
         "home_formation", "away_formation", "video_available", "video_reference",
         "home_formation_known", "away_formation_known", "study_notes", "status",
-        "report_due_at", "revision", "deleted_at", "created_by", "created_at", "updated_at",
+        "report_due_at", "revision", "deleted_at", "is_test", "archived_previous_status", "created_by", "created_at", "updated_at",
     },
     "teams": {
         "id", "name", "short_name", "country", "logo_b64", "logo_mime",
-        "is_own_team", "active", "created_at", "updated_at",
+        "is_own_team", "active", "is_test", "archived_at", "created_at", "updated_at",
     },
     "competitions": {"id", "name", "country", "active", "updated_at"},
     "seasons": {"id", "name", "start_date", "end_date", "active", "updated_at"},
@@ -144,12 +144,15 @@ def _connect_with_retry(attempts: int = 3, delay_seconds: float = 1.0):
     last: Exception | None = None
     engine = get_engine()
     for attempt in range(1, attempts + 1):
+        connection = None
         try:
             connection = engine.connect()
             connection.execute(text("SELECT 1"))
             return connection
         except OperationalError as exc:
             last = exc
+            if connection is not None:
+                connection.close()
             if attempt < attempts:
                 time.sleep(delay_seconds * attempt)
     target = database_target()

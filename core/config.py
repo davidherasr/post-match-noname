@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.engine import make_url
 
 APP_NAME = "No Name PostMatch"
-APP_VERSION = "4.2.2"
+APP_VERSION = "4.2.3"
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -75,7 +75,7 @@ class Settings:
     local_storage_dir: Path = Path(str(env("LOCAL_STORAGE_DIR", BASE_DIR / "storage")))
     login_max_attempts: int = int(env("LOGIN_MAX_ATTEMPTS", 5))
     login_lock_minutes: int = int(env("LOGIN_LOCK_MINUTES", 15))
-    require_report_approval: bool = env_bool("REQUIRE_REPORT_APPROVAL", True)
+    require_report_approval: bool = env_bool("REQUIRE_REPORT_APPROVAL", False)
     run_migrations: bool = env_bool("RUN_MIGRATIONS", True)
 
 

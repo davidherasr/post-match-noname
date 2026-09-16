@@ -17,6 +17,7 @@ from models.entities import (
 from repositories import planning as planning_repo
 from repositories import player_report as player_report_repo
 from repositories import players as players_repo
+from repositories.data_governance import official_match_clause
 
 
 def _round_key(value: str | None) -> tuple:
@@ -27,7 +28,7 @@ def _round_key(value: str | None) -> tuple:
 
 def list_rounds(session: Session, season_id: int, competition_id: int | None = None) -> list[str]:
     stmt = select(Match.round_name).where(
-        Match.season_id == int(season_id), Match.deleted_at.is_(None), Match.status != "archived"
+        Match.season_id == int(season_id), official_match_clause(), Match.status != "archived"
     ).distinct()
     if competition_id:
         stmt = stmt.where(Match.competition_id == int(competition_id))
@@ -37,7 +38,7 @@ def list_rounds(session: Session, season_id: int, competition_id: int | None = N
 def default_round(session: Session, season_id: int, own_team_id: int | None = None) -> str | None:
     today = local_today()
     stmt = select(Match).where(
-        Match.season_id == int(season_id), Match.deleted_at.is_(None), Match.status != "archived",
+        Match.season_id == int(season_id), official_match_clause(), Match.status != "archived",
         Match.match_date >= today,
     )
     if own_team_id:
@@ -46,7 +47,7 @@ def default_round(session: Session, season_id: int, own_team_id: int | None = No
     if row:
         return row.round_name
     row = session.scalar(
-        select(Match).where(Match.season_id == int(season_id), Match.deleted_at.is_(None), Match.status != "archived")
+        select(Match).where(Match.season_id == int(season_id), official_match_clause(), Match.status != "archived")
         .order_by(desc(Match.match_date), desc(Match.id)).limit(1)
     )
     return row.round_name if row else None
@@ -60,7 +61,7 @@ def load_round_workspace(session: Session, *, season_id: int, round_name: str, u
             joinedload(Match.competition), joinedload(Match.season),
         ).where(
             Match.season_id == int(season_id), Match.round_name == str(round_name),
-            Match.deleted_at.is_(None), Match.status != "archived",
+            official_match_clause(), Match.status != "archived",
         ).order_by(Match.match_date, Match.kickoff_at.nullslast(), Match.id)
     ).unique().all())
     match_ids = [m.id for m in matches]
@@ -73,7 +74,9 @@ def load_round_workspace(session: Session, *, season_id: int, round_name: str, u
             bucket = assignment_counts[int(match_id)]
             if required:
                 bucket["total"] += 1
-            if status in bucket:
+            if status == "incorporated":
+                bucket["approved"] += 1
+            elif status in bucket:
                 bucket[status] += 1
             elif status in {"pending", "in_progress", "returned"}:
                 bucket["pending"] += 1
@@ -88,7 +91,7 @@ def load_match_workspace(session: Session, *, match_id: int, user_id: int | None
     match = session.scalar(
         select(Match).options(
             joinedload(Match.home_team), joinedload(Match.away_team), joinedload(Match.competition), joinedload(Match.season)
-        ).where(Match.id == int(match_id), Match.deleted_at.is_(None))
+        ).where(Match.id == int(match_id), official_match_clause())
     )
     if not match:
         raise ValueError("Partido no encontrado.")
@@ -137,7 +140,7 @@ def _next_own_match(session: Session, own_team_id: int, season_id: int) -> Match
             joinedload(Match.away_team).load_only(Team.id, Team.name),
         )
         .where(
-            Match.season_id == int(season_id), Match.deleted_at.is_(None), Match.status != "archived",
+            Match.season_id == int(season_id), official_match_clause(), Match.status != "archived",
             Match.match_date >= today,
             or_(Match.home_team_id == int(own_team_id), Match.away_team_id == int(own_team_id)),
         ).order_by(Match.match_date, Match.kickoff_at.nullslast(), Match.id).limit(1)
@@ -157,7 +160,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
         issues = list(session.scalars(
             select(Match).options(joinedload(Match.home_team), joinedload(Match.away_team))
             .where(
-                Match.season_id == active.id, Match.deleted_at.is_(None), Match.match_date >= today, Match.match_date <= end,
+                Match.season_id == active.id, official_match_clause(), Match.match_date >= today, Match.match_date <= end,
                 Match.schedule_status.notin_(["confirmed", "cancelled"]),
             ).order_by(Match.match_date, Match.id).limit(20)
         ).unique().all())
@@ -167,14 +170,20 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
     if "reporter" in roles:
         assignments = list(session.scalars(
             select(ReportAssignment).options(joinedload(ReportAssignment.match).joinedload(Match.home_team), joinedload(ReportAssignment.match).joinedload(Match.away_team))
-            .where(ReportAssignment.user_id == int(user_id), ReportAssignment.status.in_(["pending", "in_progress", "returned"]))
+            .where(ReportAssignment.user_id == int(user_id), ReportAssignment.status.in_(["pending", "in_progress", "returned"]),
+                   ReportAssignment.match_id.in_(select(Match.id).where(official_match_clause())))
             .order_by(ReportAssignment.due_at.nullslast(), desc(ReportAssignment.created_at)).limit(20)
         ).unique().all())
         for a in assignments:
             tasks.append({"kind": "report", "severity": "action" if a.status == "returned" else "pending", "title": f"Informe · {a.match.home_team.name} - {a.match.away_team.name}", "match_id": a.match_id, "due": a.due_at or a.match.match_date})
 
-    director = {"decision_count": 0, "high_needs": 0, "neutral_signals": 0}
+    director = {"decision_count": 0, "high_needs": 0, "neutral_signals": 0, "latest_reports": []}
     if active and "director" in roles:
+        director["latest_reports"] = list(session.scalars(
+            select(Report).options(joinedload(Report.match).joinedload(Match.home_team), joinedload(Report.match).joinedload(Match.away_team), joinedload(Report.reporter))
+            .where(Report.status.in_(["incorporated", "approved", "final"]),
+                   Report.match_id.in_(select(Match.id).where(official_match_clause(), Match.season_id == active.id)))
+            .order_by(desc(Report.submitted_at), desc(Report.id)).limit(5)).unique().all())
         director["decision_count"] = int(session.scalar(
             select(func.count(PlayerSeasonDecision.id)).where(PlayerSeasonDecision.season_id == active.id, PlayerSeasonDecision.status.in_(["Base", "Observado", "Interesante"]))
         ) or 0)
@@ -217,7 +226,7 @@ def candidate_next_matches(session: Session, *, player_id: int, season_id: int, 
     return list(session.scalars(
         select(Match).options(joinedload(Match.home_team), joinedload(Match.away_team))
         .where(
-            Match.season_id == int(season_id), Match.deleted_at.is_(None), Match.match_date >= local_today(),
+            Match.season_id == int(season_id), official_match_clause(), Match.match_date >= local_today(),
             or_(Match.home_team_id == roster.team_id, Match.away_team_id == roster.team_id),
         ).order_by(Match.match_date, Match.kickoff_at.nullslast(), Match.id).limit(int(limit))
     ).unique().all())
@@ -353,13 +362,13 @@ def load_team_workspace(session: Session, *, team_id: int, season_id: int | None
     if own and season_id:
         next_vs_own = session.scalar(
             select(Match).options(joinedload(Match.home_team),joinedload(Match.away_team),joinedload(Match.competition))
-            .where(Match.season_id==int(season_id),Match.deleted_at.is_(None),Match.match_date>=local_today(),
+            .where(Match.season_id==int(season_id),official_match_clause(),Match.match_date>=local_today(),
                    or_(and_(Match.home_team_id==own.id,Match.away_team_id==team.id),and_(Match.home_team_id==team.id,Match.away_team_id==own.id)))
             .order_by(Match.match_date,Match.kickoff_at.nullslast()).limit(1)
         )
     last_match = session.scalar(
         select(Match).options(joinedload(Match.home_team),joinedload(Match.away_team))
-        .where(Match.deleted_at.is_(None),Match.match_date<=local_today(),or_(Match.home_team_id==team.id,Match.away_team_id==team.id))
+        .where(official_match_clause(),Match.match_date<=local_today(),or_(Match.home_team_id==team.id,Match.away_team_id==team.id))
         .order_by(desc(Match.match_date),desc(Match.id)).limit(1)
     )
     last_lineup=[]
@@ -397,14 +406,14 @@ def load_operational_readiness(session: Session) -> dict:
     result["fixture_count"] = int(session.scalar(
         select(func.count(Match.id)).where(
             Match.season_id == active.id,
-            Match.deleted_at.is_(None),
+            official_match_clause(),
             Match.status != "archived",
         )
     ) or 0)
     result["round_count"] = int(session.scalar(
         select(func.count(func.distinct(Match.round_name))).where(
             Match.season_id == active.id,
-            Match.deleted_at.is_(None),
+            official_match_clause(),
             Match.status != "archived",
         )
     ) or 0)
@@ -422,7 +431,7 @@ def load_operational_readiness(session: Session) -> dict:
             joinedload(Match.home_team), joinedload(Match.away_team), joinedload(Match.competition)
         ).where(
             Match.season_id == active.id,
-            Match.deleted_at.is_(None),
+            official_match_clause(),
             Match.status != "archived",
             Match.match_date == local_today(),
             own_filter,

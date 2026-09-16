@@ -57,8 +57,8 @@ def _new_draft(active_season_id: int | None = None) -> dict:
         "own_location": "Local",
         "own_score": 0,
         "rival_score": 0,
-        "own_formation": "4-3-3",
-        "rival_formation": "4-3-3",
+        "own_formation": None,
+        "rival_formation": None,
         "venue": "",
         "due_enabled": False,
         "due_date": (local_today() + timedelta(days=1)).isoformat(),
@@ -98,16 +98,67 @@ def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
             "kickoff_time": match.kickoff_at.strftime("%H:%M"),
             "own_location": "Local" if match.home_team_id == own_id else "Visitante",
             "venue": match.venue or "",
-            "own_formation": (match.home_formation if match.home_team_id == own_id else match.away_formation) or "4-3-3",
-            "rival_formation": (match.away_formation if match.home_team_id == own_id else match.home_formation) or "4-3-3",
+            "own_formation": match.home_formation if match.home_team_id == own_id else match.away_formation,
+            "rival_formation": match.away_formation if match.home_team_id == own_id else match.home_formation,
         })
         # Reuse recurring staff and previous XI suggestions without replacing fixture identity.
         recent = recent_match_defaults(session, own_id, match.season_id)
         draft["reporter_ids"] = recent.get("reporter_ids", [])
-        if recent.get("own_formation") and not draft.get("own_formation"):
-            draft["own_formation"] = recent["own_formation"]
+        # Reuse verified participants of THIS match, never a guessed XI from
+        # previous fixtures, roster order or a default formation.
+        own_parts = repo.get_participations(session, match.id, own_id)
+        rival_parts = repo.get_participations(session, match.id, rival_id)
+        own_starters = [part for part in own_parts if part.starter]
+        rival_starters = [part for part in rival_parts if part.starter]
+        own_slots = slots_for(draft["own_formation"])
+        rival_slots = slots_for(draft["rival_formation"])
+        if len(own_starters) == 11:
+            draft["own_xi"] = _prefill_own_starters(own_starters, own_slots)
+            draft["own_xi_source"] = "Titulares ya registrados en este mismo partido"
+            draft["own_xi_formation"] = draft["own_formation"]
+        if len(rival_starters) == 11:
+            draft["rival_xi"] = _prefill_rival_starters(rival_starters, rival_slots)
+            draft["rival_xi_source"] = "Titulares ya registrados en este mismo partido"
+            draft["rival_xi_formation"] = draft["rival_formation"]
         return draft
 
+
+
+def _lineup_slots(formation: str | None):
+    """Known formation slots or anonymous XI: never fabricate tactical positions."""
+    return slots_for(formation) or [
+        _ns(code="Otro", label=f"Titular {index}") for index in range(1, 12)
+    ]
+
+
+def _order_verified_starters(parts, slots):
+    """Use match order, not a made-up positional mapping."""
+    ordered = sorted(parts, key=lambda x: (x.order_index, x.id))
+    if not slots:
+        return ordered
+    # Only use position-derived ordering when every slot has an unambiguous
+    # documented position; otherwise preserve the recorded order.
+    by_code = {}
+    for part in ordered:
+        by_code.setdefault(part.position, []).append(part)
+    if all(len(by_code.get(slot.code, [])) == sum(1 for sl in slots if sl.code == slot.code) for slot in slots):
+        return [by_code[slot.code].pop(0) for slot in slots]
+    return ordered
+
+
+def _prefill_own_starters(starters, slots):
+    ordered = _order_verified_starters(starters, slots)
+    return [{'player_id': part.player_id, 'position':part.position or 'Otro',
+             'role': slots[index].label if index < len(slots) else f'Titular {index+1}'}
+            for index, part in enumerate(ordered)]
+
+
+def _prefill_rival_starters(starters, slots):
+    ordered = _order_verified_starters(starters, slots)
+    return [{'name': part.player.full_name, 'shirt_number': part.shirt_number,
+             'position':part.position or 'Otro',
+             'role':slots[index].label if index < len(slots) else f'Titular {index+1}'}
+            for index, part in enumerate(ordered)]
 
 def _draft() -> dict:
     if DRAFT_KEY not in st.session_state:
@@ -144,18 +195,11 @@ def _to_time(value, fallback: time | None = None) -> time:
 
 
 def _setup_own_team(user: dict) -> None:
-    st.info("Esta instalación es para No Name. Configura el equipo propio una sola vez.")
-    with st.form("noname_setup_32"):
-        name = st.text_input("Nombre", value="No Name")
-        short = st.text_input("Nombre corto", value="NO NAME")
-        save = st.form_submit_button("Configurar No Name", type="primary", use_container_width=True)
-    if save and name.strip():
-        with session_scope() as session:
-            team = repo.create_team(session, name.strip(), short.strip() or None, None, True, user["id"])
-            repo.set_setting(session, "own_team_id", str(team.id), user["id"])
-            repo.set_setting(session, "club_name", team.name, user["id"])
-        _invalidate_context()
-        st.success("No Name configurado.")
+    st.warning("No hay un equipo propio válido. Selecciona el registro REAL existente desde Administración → Club → Equipo propio. No se crea un duplicado automáticamente.")
+    if st.button("Abrir Administración", key="own_setup_admin_423"):
+        from core.navigation import request_navigation
+        st.session_state["admin_section_423"] = "Club"
+        request_navigation("Administración")
         st.rerun()
 
 
@@ -185,8 +229,8 @@ def _load_context():
         active_obj = repo.get_active_season(session)
         season_objs = repo.list_seasons(session, active_only=True)
         competition_objs = repo.list_competitions(session, active_only=True)
-        team_objs = [t for t in repo.list_teams(session, active_only=True) if not t.is_own_team]
-        user_objs = [u for u in repo.list_users(session, active_only=True) if repo.user_has_role(session, u.id, "reporter", "admin", "director")]
+        team_objs = [t for t in repo.list_teams(session, active_only=True) if not t.is_own_team and not t.is_test and t.archived_at is None]
+        user_objs = [u for u in repo.list_users(session, active_only=True) if repo.user_has_role(session, u.id, "reporter")]
     own = _ns(id=own_obj.id, name=own_obj.name) if own_obj else None
     active = _ns(id=active_obj.id, name=active_obj.name) if active_obj else None
     seasons = [_ns(id=x.id, name=x.name) for x in season_objs]
@@ -230,8 +274,10 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
             own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
             rival_score = b.number_input(f"Goles {rival.name if rival else 'rival'}", 0, 30, int(d.get("rival_score", 0)))
             a, b = st.columns(2)
-            own_formation = a.selectbox("Sistema No Name", FORMATIONS, index=FORMATIONS.index(d.get("own_formation")) if d.get("own_formation") in FORMATIONS else 0)
-            rival_formation = b.selectbox("Sistema rival", FORMATIONS, index=FORMATIONS.index(d.get("rival_formation")) if d.get("rival_formation") in FORMATIONS else 0)
+            formation_options = [None, *FORMATIONS]
+            formation_label = lambda name: name or "Desconocida (no inventar)"
+            own_formation = a.selectbox("Sistema No Name", formation_options, index=formation_options.index(d.get("own_formation")) if d.get("own_formation") in formation_options else 0, format_func=formation_label)
+            rival_formation = b.selectbox("Sistema rival", formation_options, index=formation_options.index(d.get("rival_formation")) if d.get("rival_formation") in formation_options else 0, format_func=formation_label)
             reporter_ids = st.multiselect(
                 "Informadores", user_ids,
                 default=[uid for uid in d.get("reporter_ids", []) if uid in user_ids],
@@ -283,8 +329,10 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
         rival_score = b.number_input("Goles rival", 0, 30, int(d.get("rival_score", 0)))
         a, b = st.columns(2)
-        own_formation = a.selectbox("Sistema No Name", FORMATIONS, index=FORMATIONS.index(d.get("own_formation")) if d.get("own_formation") in FORMATIONS else 0)
-        rival_formation = b.selectbox("Sistema rival", FORMATIONS, index=FORMATIONS.index(d.get("rival_formation")) if d.get("rival_formation") in FORMATIONS else 0)
+        formation_options = [None, *FORMATIONS]
+        formation_label = lambda name: name or "Desconocida (no inventar)"
+        own_formation = a.selectbox("Sistema No Name", formation_options, index=formation_options.index(d.get("own_formation")) if d.get("own_formation") in formation_options else 0, format_func=formation_label)
+        rival_formation = b.selectbox("Sistema rival", formation_options, index=formation_options.index(d.get("rival_formation")) if d.get("rival_formation") in formation_options else 0, format_func=formation_label)
         reporter_ids = st.multiselect("Informadores", user_ids, default=[uid for uid in d.get("reporter_ids", []) if uid in user_ids], format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in users if u.id == uid))
         prepare = st.form_submit_button("CONTINUAR", type="primary", use_container_width=True)
     if prepare:
@@ -418,14 +466,11 @@ def _own_lineup(user: dict, own, d: dict) -> None:
         return
     labels = {r.player_id: f"{r.player.display_name or r.player.full_name}{f' · #{r.shirt_number}' if r.shirt_number is not None else ''}" for r in roster}
     ids = list(labels)
-    if not d.get("own_xi"):
-        d["own_xi"] = _suggest_own_xi(roster, d.get("own_formation", "4-3-3"), previous_parts)
-        d["own_xi_source"] = "Último XI" if previous_parts else "Posición principal"
-    slots = slots_for(d.get("own_formation"))
-    if not slots:
-        st.warning("Para una formación personalizada, utiliza la edición avanzada del partido desde Administración.")
-        return
-    st.caption(f"XI propuesto automáticamente · {d.get('own_xi_source','Plantilla')}. Solo corrige los nombres que cambien.")
+    slots = _lineup_slots(d.get("own_formation"))
+    if d.get('own_xi_source'):
+        st.info(f"XI recuperado: {d['own_xi_source']}. Revisa y guarda para confirmar.")
+    else:
+        st.info("Completa los once titulares del partido. No se copian automáticamente los del último encuentro. Si desconoces la formación, el XI se registra sin posición táctica inventada.")
     with st.form("own_xi_32", border=True):
         selected_rows = []
         current = d.get("own_xi", [])
@@ -435,8 +480,9 @@ def _own_lineup(user: dict, own, d: dict) -> None:
             a.caption(slot.code)
             current_pid = current[idx].get("player_id") if idx < len(current) else None
             opts = [None] + ids
-            pid = b.selectbox(f"Jugador {slot.label}", opts, index=opts.index(current_pid) if current_pid in opts else 0, format_func=lambda x: "Seleccionar..." if x is None else labels[x], key=f"own_slot_32_{idx}", label_visibility="collapsed")
-            selected_rows.append({"player_id": pid, "position": slot.code, "role": slot.label})
+            pid = b.selectbox(f"Jugador {slot.label}", opts, index=opts.index(current_pid) if current_pid in opts else 0, format_func=lambda x: "Seleccionar..." if x is None else labels[x], key=f"own_slot_423_{d.get('existing_match_id')}_{d.get('own_formation')}_{idx}", label_visibility="collapsed")
+            retained = current[idx].get('position') if idx < len(current) and current[idx].get('player_id') == pid else None
+            selected_rows.append({"player_id": pid, "position": retained or slot.code if slot.code == 'Otro' else slot.code, "role": slot.label})
         save = st.form_submit_button("Guardar XI en el borrador", type="primary", use_container_width=True)
     if save:
         chosen = [x["player_id"] for x in selected_rows if x["player_id"] is not None]
@@ -476,8 +522,8 @@ def _own_lineup(user: dict, own, d: dict) -> None:
                 st.success("Cambios preparados localmente.")
 
 
-def _parse_quick_rival(text: str, formation: str) -> list[dict]:
-    slots = slots_for(formation)
+def _parse_quick_rival(text: str, formation: str | None) -> list[dict]:
+    slots = _lineup_slots(formation)
     rows = []
     for idx, raw in enumerate([x.strip() for x in text.splitlines() if x.strip()]):
         shirt = None
@@ -507,31 +553,15 @@ def _rival_lineup(own, d: dict) -> None:
     if not d.get("rival_id") and not d.get("new_rival"):
         return
     st.markdown("### 3 · Rival")
-    formation = d.get("rival_formation", "4-3-3")
-    slots = slots_for(formation)
-    if not slots:
-        st.warning("Usa una formación estándar para la carga rápida rival.")
-        return
+    formation = d.get("rival_formation")
+    slots = _lineup_slots(formation)
     previous_parts = []
     if d.get("rival_id"):
         previous_parts = _rival_previous_support(own.id, int(d["rival_id"]), _to_date(d.get("match_date")))
-        if previous_parts and not d.get("rival_xi"):
-            starters = [p for p in previous_parts if p.starter]
-            by_pos = {}
-            for p in starters:
-                by_pos.setdefault(p.position or p.player.primary_position or "Otro", []).append(p)
-            used = set(); generated = []
-            for slot in slots:
-                candidate = next((p for p in by_pos.get(slot.code, []) if p.player_id not in used), None)
-                if candidate:
-                    used.add(candidate.player_id)
-                    generated.append({"name": candidate.player.full_name, "shirt_number": candidate.shirt_number, "position": slot.code, "role": slot.label})
-                else:
-                    generated.append({"name": "", "shirt_number": None, "position": slot.code, "role": slot.label})
-            d["rival_xi"] = generated
-            d["rival_xi_source"] = "Última alineación conocida"
-    if previous_parts:
-        st.caption(f"Rival precargado · {d.get('rival_xi_source','Última alineación conocida')}. Corrige solo las diferencias.")
+    if d.get('rival_xi_source'):
+        st.info(f"XI recuperado: {d['rival_xi_source']}. Revisa y guarda para confirmar.")
+    else:
+        st.info("Registra los once titulares reales del rival; el XI de una jornada anterior no se aplica por defecto.")
 
     with st.expander("Pegado rápido", expanded=False):
         st.caption("Pega `1 Bote`, una lista de nombres o `1;Bote;POR`. Se asignan por orden a la formación.")
@@ -556,9 +586,10 @@ def _rival_lineup(own, d: dict) -> None:
             row = current[idx] if idx < len(current) else {}
             a, b, c = st.columns([1.4, 3, 1])
             a.markdown(f"**{slot.label}**"); a.caption(slot.code)
-            name = b.text_input(f"Nombre {idx+1}", value=row.get("name", ""), label_visibility="collapsed", placeholder="Nombre")
-            shirt = c.number_input(f"Dorsal {idx+1}", 0, 99, value=row.get("shirt_number"), step=1, label_visibility="collapsed")
-            rows.append({"name": name.strip(), "shirt_number": int(shirt) if shirt is not None else None, "position": slot.code, "role": slot.label})
+            name = b.text_input(f"Nombre {idx+1}", value=row.get("name", ""), label_visibility="collapsed", placeholder="Nombre", key=f"rival_xi_name_423_{d.get('existing_match_id')}_{formation}_{idx}")
+            shirt = c.number_input(f"Dorsal {idx+1}", 0, 99, value=row.get("shirt_number"), step=1, label_visibility="collapsed", key=f"rival_xi_shirt_423_{d.get('existing_match_id')}_{formation}_{idx}")
+            retained = row.get('position') if row.get('name') == name.strip() else None
+            rows.append({"name": name.strip(), "shirt_number": int(shirt) if shirt is not None else None, "position": (retained or slot.code) if slot.code == 'Otro' else slot.code, "role": slot.label})
         save = st.form_submit_button("Guardar XI rival en el borrador", type="primary", use_container_width=True)
     if save:
         if len([r for r in rows if r["name"]]) != 11:
@@ -770,6 +801,10 @@ def _cloud_drafts(user: dict) -> None:
             st.rerun()
 
 
+def _go_to_publish_423() -> None:
+    st.session_state[DRAFT_KEY]['ui_step'] = 'publish'
+
+
 def render(user: dict) -> None:
     if not can_admin(user):
         st.error("Solo administración puede preparar postpartidos.")
@@ -815,7 +850,22 @@ def render(user: dict) -> None:
     d = _draft()
     step = d.get("ui_step") or "match"
     step_names = {"match": "1 Partido", "own": "2 No Name", "rival": "3 Rival", "publish": "4 Publicar"}
+    st.progress((list(step_names).index(step) + 1) / len(step_names), text=f"Preparación · {step_names[step]} de 4")
     st.caption("  →  ".join((f"**{label}**" if key == step else label) for key, label in step_names.items()))
+    if d.get("existing_match_id"):
+        st.info(f"Estás preparando el partido ya registrado (ID {d['existing_match_id']}). No se duplicará el encuentro. Publicar solo estará disponible después de completar ambos XI.")
+    own_count = len({int(x['player_id']) for x in d.get('own_xi', []) if x.get('player_id')})
+    rival_count = len({str(x['name']).strip().casefold() for x in d.get('rival_xi', []) if x.get('name')})
+    st.caption(f"Requisitos: XI No Name {own_count}/11 · XI rival {rival_count}/11 · Informadores {len(d.get('reporter_ids', []))}.")
+    if step != 'publish':
+        ready, _ = _validate_draft_for_publish(d)
+        st.button('4 · PUBLICAR POSTPARTIDO — completar requisitos primero' if ready else '4 · Revisar y PUBLICAR POSTPARTIDO →',
+                  key='postmatch_publish_shortcut_423', type='primary', use_container_width=True,
+                  disabled=bool(ready), on_click=_go_to_publish_423)
+        if ready:
+            st.warning('Pendiente para publicar: ' + ' · '.join(ready))
+        else:
+            st.success('Los requisitos mínimos están completos; abre la revisión y pulsa PUBLICAR POSTPARTIDO.')
 
     if step == "match":
         _header(user, own, active, seasons, competitions, teams, users)

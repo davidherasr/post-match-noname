@@ -616,8 +616,9 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     if data["is_own_match"]:
         st.markdown("### Estado del postpartido")
         st.markdown(f"**Informes** · {len(data['reports'])}/{len(data['assignments']) or len(data['reports'])}")
+        from core.constants import REPORT_STATUSES
         for report in data["reports"][:8]:
-            st.caption(f"{report.reporter.full_name} · {report.status}")
+            st.caption(f"{report.reporter.full_name} · {REPORT_STATUSES.get(report.status, report.status)}")
     else:
         with session_scope() as session:
             neutral_reading = sporting_repo.neutral_match_reading(session, match.id)

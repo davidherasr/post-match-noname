@@ -100,14 +100,11 @@ def create_team(session: Session, name: str, short_name: str | None = None, coun
         if is_own_team:
             set_own_team(session, existing.id, actor_id)
         return existing
-    if is_own_team:
-        for team in session.scalars(select(Team).where(Team.is_own_team.is_(True))).all():
-            team.is_own_team = False
     item = Team(name=name.strip(), short_name=short_name.strip() if short_name else None, country=country.strip() if country else None, is_own_team=is_own_team)
     session.add(item)
     session.flush()
     if is_own_team:
-        set_setting(session, "own_team_id", str(item.id), actor_id)
+        set_own_team(session, item.id, actor_id)
     audit(session, actor_id, "create_team", "team", item.id, after=_snapshot(item, ["name", "short_name", "country", "is_own_team"]))
     return item
 
@@ -120,6 +117,10 @@ def update_team(session: Session, team_id: int, actor_id: int, **values) -> Team
     before = _snapshot(item, ["name", "short_name", "country", "active", "is_own_team", "logo_mime"])
     for key in ["name", "short_name", "country", "active", "logo_b64", "logo_mime"]:
         if key in values:
+            if key == "active" and not values[key] and item.is_own_team:
+                raise ValueError("No se puede desactivar el equipo propio.")
+            if key == "active" and values[key] and item.archived_at is not None:
+                raise ValueError("Usa Restaurar equipo: no es posible activar directamente un archivo.")
             setattr(item, key, values[key])
     if values.get("is_own_team"):
         set_own_team(session, item.id, actor_id)
@@ -128,9 +129,18 @@ def update_team(session: Session, team_id: int, actor_id: int, **values) -> Team
 
 
 def set_own_team(session: Session, team_id: int, actor_id: int | None = None) -> None:
-    for team in session.scalars(select(Team)).all():
-        team.is_own_team = team.id == team_id
-    set_setting(session, "own_team_id", str(team_id), actor_id)
+    if actor_id is not None:
+        assert_role(session, actor_id, "admin")
+    target = session.get(Team, int(team_id))
+    if not target or not target.active or target.is_test or target.archived_at is not None:
+        raise ValueError("El equipo propio debe existir, estar activo y no ser de prueba/archivado.")
+    old = get_setting(session, "own_team_id")
+    for team in session.scalars(select(Team).where(Team.is_own_team.is_(True))).all():
+        team.is_own_team = False
+    target.is_own_team = True
+    set_setting(session, "own_team_id", str(target.id), actor_id)
+    audit(session, actor_id, "set_own_team", "team", target.id,
+          before={"own_team_id": old}, after={"own_team_id": target.id})
 
 
 def add_player_alias(session: Session, player_id: int, alias: str, actor_id: int | None = None) -> PlayerAlias:
@@ -336,13 +346,15 @@ def get_own_team(session: Session) -> Team | None:
     if configured:
         try:
             item = session.get(Team, int(configured))
-            if item and item.active:
+            if item and item.active and not item.is_test and item.archived_at is None:
                 return item
         except (TypeError, ValueError):
             pass
-    return session.scalar(
-        select(Team).where(and_(Team.is_own_team.is_(True), Team.active.is_(True))).order_by(Team.id).limit(1)
-    )
+    candidates = list(session.scalars(
+        select(Team).where(and_(Team.is_own_team.is_(True), Team.active.is_(True),
+                                Team.is_test.is_(False), Team.archived_at.is_(None)))
+    ).all())
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def get_active_season(session: Session) -> Season | None:

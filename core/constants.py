@@ -16,7 +16,8 @@ REPORT_STATUSES = {
     "draft": "Borrador",
     "submitted": "Entregado",
     "returned": "Devuelto para corregir",
-    "approved": "Aprobado",
+    "approved": "Aprobado (histórico)",
+    "incorporated": "Incorporado · disponible en DD",
     "final": "Finalizado (legado)",
 }
 
@@ -24,7 +25,8 @@ ASSIGNMENT_STATUSES = {
     "pending": "Pendiente",
     "in_progress": "En curso",
     "submitted": "Entregado",
-    "approved": "Aprobado",
+    "approved": "Aprobado (histórico)",
+    "incorporated": "Incorporado",
     "returned": "Devuelto",
     "waived": "No requerido",
 }

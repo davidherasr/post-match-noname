@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.data_governance import official_match_clause
+
 import json
 import math
 from collections import defaultdict
@@ -225,22 +227,24 @@ def _valid_rival_evaluation_predicates():
         PlayerEvaluation.team_id == Report.rival_team_id,
         PlayerEvaluation.observation_status == "evaluated",
         PlayerEvaluation.general_rating.is_not(None),
+        official_match_clause(),
     ]
 
 
 def dashboard_counts(session: Session, user_id: int | None = None) -> dict[str, int]:
-    published_matches = int(session.scalar(select(func.count(Match.id)).where(and_(Match.status == "published", Match.deleted_at.is_(None)))) or 0)
-    drafts_stmt = select(func.count(Report.id)).where(Report.status.in_({"draft", "returned"}))
+    published_matches = int(session.scalar(select(func.count(Match.id)).where(and_(Match.status == "published", official_match_clause()))) or 0)
+    official_matches = select(Match.id).where(official_match_clause())
+    drafts_stmt = select(func.count(Report.id)).where(Report.status.in_({"draft", "returned"}), Report.match_id.in_(official_matches))
     if user_id:
         drafts_stmt = drafts_stmt.where(Report.reporter_id == user_id)
     valid_join = select(func.count(func.distinct(PlayerEvaluation.player_id))).join(Report, PlayerEvaluation.report_id == Report.id).where(*_valid_rival_evaluation_predicates())
-    assignment_stmt = select(func.count(ReportAssignment.id)).where(ReportAssignment.status.in_({"pending", "in_progress", "returned"}))
+    assignment_stmt = select(func.count(ReportAssignment.id)).where(ReportAssignment.status.in_({"pending", "in_progress", "returned"}), ReportAssignment.match_id.in_(official_matches))
     if user_id:
         assignment_stmt = assignment_stmt.where(ReportAssignment.user_id == user_id)
     return {
         "published_matches": published_matches,
         "draft_reports": int(session.scalar(drafts_stmt) or 0),
-        "final_reports": int(session.scalar(select(func.count(Report.id)).where(Report.status.in_(FINAL_REPORT_STATUSES))) or 0),
+        "final_reports": int(session.scalar(select(func.count(Report.id)).where(Report.status.in_(FINAL_REPORT_STATUSES), Report.match_id.in_(official_matches))) or 0),
         "players_observed": int(session.scalar(valid_join) or 0),
         "pending_assignments": int(session.scalar(assignment_stmt) or 0),
     }
@@ -335,7 +339,7 @@ def player_rankings(session: Session, min_observations: int = 1, position: str |
 
 
 def player_history(session: Session, player_id: int, include_non_final: bool = False) -> list[dict]:
-    stmt = select(PlayerEvaluation, Report, Match, User, Team, Competition, Participation).join(Report, PlayerEvaluation.report_id == Report.id).join(Match, Report.match_id == Match.id).join(User, Report.reporter_id == User.id).join(Team, PlayerEvaluation.team_id == Team.id).join(Competition, Match.competition_id == Competition.id).outerjoin(Participation, PlayerEvaluation.participation_id == Participation.id).where(and_(PlayerEvaluation.player_id == player_id, PlayerEvaluation.evaluation_scope == "rival", PlayerEvaluation.team_id == Report.rival_team_id))
+    stmt = select(PlayerEvaluation, Report, Match, User, Team, Competition, Participation).join(Report, PlayerEvaluation.report_id == Report.id).join(Match, Report.match_id == Match.id).join(User, Report.reporter_id == User.id).join(Team, PlayerEvaluation.team_id == Team.id).join(Competition, Match.competition_id == Competition.id).outerjoin(Participation, PlayerEvaluation.participation_id == Participation.id).where(and_(PlayerEvaluation.player_id == player_id, PlayerEvaluation.evaluation_scope == "rival", PlayerEvaluation.team_id == Report.rival_team_id, official_match_clause()))
     if not include_non_final:
         stmt = stmt.where(Report.status.in_(FINAL_REPORT_STATUSES))
     stmt = stmt.options(joinedload(Match.home_team), joinedload(Match.away_team)).order_by(desc(Match.match_date))
@@ -481,7 +485,7 @@ def previous_match_with_team(
         select(Match)
         .options(joinedload(Match.home_team), joinedload(Match.away_team), joinedload(Match.season), joinedload(Match.competition))
         .where(
-            Match.deleted_at.is_(None),
+            official_match_clause(),
             or_(Match.home_team_id == team_id, Match.away_team_id == team_id),
         )
     )
@@ -625,6 +629,7 @@ def own_player_rankings(
             Report.status.in_(FINAL_REPORT_STATUSES),
             PlayerEvaluation.evaluation_scope == "own",
             PlayerEvaluation.team_id == Report.own_team_id,
+            official_match_clause(),
             PlayerEvaluation.observation_status == "evaluated",
             PlayerEvaluation.general_rating.is_not(None),
         )
@@ -686,7 +691,7 @@ def player_history_by_scope(
         .join(Team, PlayerEvaluation.team_id == Team.id)
         .join(Competition, Match.competition_id == Competition.id)
         .outerjoin(Participation, PlayerEvaluation.participation_id == Participation.id)
-        .where(PlayerEvaluation.player_id == player_id)
+        .where(PlayerEvaluation.player_id == player_id, official_match_clause())
     )
     if scope == "rival":
         stmt = stmt.where(PlayerEvaluation.evaluation_scope == "rival", PlayerEvaluation.team_id == Report.rival_team_id)
@@ -992,7 +997,7 @@ def global_catalog_search(session: Session, query: str, *, limit: int = 30) -> d
         ).order_by(Player.full_name).limit(limit)
     ).all())
     teams = list(session.scalars(
-        select(Team).where(Team.active.is_(True), or_(Team.name.ilike(pattern), Team.short_name.ilike(pattern)))
+        select(Team).where(Team.active.is_(True), Team.is_test.is_(False), Team.archived_at.is_(None), or_(Team.name.ilike(pattern), Team.short_name.ilike(pattern)))
         .order_by(Team.name).limit(limit)
     ).all())
     return {"players": players, "teams": teams}

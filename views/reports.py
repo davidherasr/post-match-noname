@@ -17,7 +17,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.2.2"
+REPORTS_PAGE_API_VERSION = "4.2.3"
 
 
 
@@ -307,7 +307,7 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
                 st.session_state[confirm_key] = True
                 st.rerun()
         else:
-            st.warning("¿Entregar este informe? Después necesitará devolución de DD para editarlo.")
+            st.warning("¿Incorporar este informe? Se añadirá inmediatamente a las estadísticas. Una corrección posterior requiere reapertura autorizada y motivo registrado.")
             a,b=st.columns(2)
             if a.button("Cancelar",use_container_width=True,key=f"cancel_submit_38_{report_id}"):
                 st.session_state.pop(confirm_key,None); st.rerun()
@@ -319,14 +319,14 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
                                 repo.submit_report(session, report_id, user["id"])
                     st.session_state.pop(confirm_key,None)
                     _invalidate_workspace(report_id)
-                    st.success("Informe entregado.")
+                    st.success("Informe incorporado directamente a las estadísticas y a Dirección Deportiva.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
     else:
         st.success(f"Informe bloqueado: {REPORT_STATUSES.get(report.status, report.status)}.")
         if report.status == "submitted":
-            st.info("Pendiente de revisión por Dirección Deportiva.")
+            st.info("Entrega histórica anterior al flujo 4.2.3. No se ha cambiado automáticamente su estado.")
 
 
 def _render_documents(report_id: int) -> None:
@@ -419,7 +419,8 @@ def _available_work_matches(user: dict):
             assignments = repo.list_assignments(session, user_id=user["id"])
             reports = repo.list_reports(session, reporter_id=user["id"])
     assigned_ids = {a.match_id for a in assignments if a.status != "waived"}
-    matches = [m for m in all_matches if can_direct(user) or not assignments or m.id in assigned_ids]
+    # Own-match report writing is assignment-driven even for hybrid DD/Informador.
+    matches = [m for m in all_matches if m.id in assigned_ids]
     return matches, assignments, reports
 
 
@@ -467,7 +468,7 @@ def _render_archive(user: dict) -> None:
     season_id = c1.selectbox("Temporada", season_opts, format_func=lambda x: "Todas" if x is None else next(s.name for s in seasons if s.id == x))
     status_keys = [None] + list(REPORT_STATUSES)
     status = c2.selectbox("Estado", status_keys, format_func=lambda x: "Todos" if x is None else REPORT_STATUSES[x])
-    rival_opts = [None] + [t.id for t in teams if not t.is_own_team]
+    rival_opts = [None] + [t.id for t in teams if not t.is_own_team and not t.is_test and t.archived_at is None]
     rival_id = c3.selectbox("Rival", rival_opts, format_func=lambda x: "Todos" if x is None else next(t.name for t in teams if t.id == x))
     round_query = c4.text_input("Jornada", placeholder="Ej. Jornada 8")
     reporter_id = None if can_direct(user) else user["id"]

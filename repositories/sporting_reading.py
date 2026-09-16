@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.data_governance import official_match_clause
+
 from collections import defaultdict
 from datetime import datetime, timezone
 import math
@@ -142,8 +144,8 @@ def save_neutral_opinion(
     if not users_repo.user_has_role(session, int(user_id), "reporter"):
         raise PermissionError("Solo un usuario con rol Informador puede guardar una lectura de partido.")
     match = session.get(Match, int(match_id))
-    if not match:
-        raise ValueError("Partido no encontrado.")
+    if not match or match.deleted_at or match.is_test or match.status == "archived" or match.home_team.is_test or match.away_team.is_test or match.home_team.archived_at or match.away_team.archived_at:
+        raise ValueError("Partido inexistente o excluido de la actividad oficial.")
     own = players_repo.get_own_team(session)
     if own and own.id in {match.home_team_id, match.away_team_id}:
         raise ValueError("Los partidos de No Name usan el flujo de postpartido, no la lectura neutral.")
@@ -202,7 +204,7 @@ def neutral_match_reading(session: Session, match_id: int) -> dict:
     opinions = list(session.scalars(
         select(MatchOpinion)
         .options(joinedload(MatchOpinion.user), joinedload(MatchOpinion.match).joinedload(Match.home_team), joinedload(MatchOpinion.match).joinedload(Match.away_team))
-        .where(MatchOpinion.match_id == int(match_id))
+        .where(MatchOpinion.match_id == int(match_id), MatchOpinion.match_id.in_(select(Match.id).where(official_match_clause())))
         .order_by(MatchOpinion.updated_at)
     ).unique().all())
     weights = weight_map(session)
@@ -260,15 +262,15 @@ def neutral_match_reading(session: Session, match_id: int) -> dict:
 
 def own_match_reading(session: Session, match_id: int) -> dict:
     match = session.get(Match, int(match_id))
-    if not match:
-        raise ValueError("Partido no encontrado.")
+    if not match or match.deleted_at or match.is_test or match.status == "archived" or match.home_team.is_test or match.away_team.is_test or match.home_team.archived_at or match.away_team.archived_at:
+        raise ValueError("Partido inexistente o excluido de la actividad oficial.")
     own = players_repo.get_own_team(session)
     if not own or own.id not in {match.home_team_id, match.away_team_id}:
         raise ValueError("Este partido no corresponde a No Name.")
     reports = list(session.scalars(
         select(Report)
         .options(joinedload(Report.reporter), joinedload(Report.rival_team), joinedload(Report.own_team))
-        .where(Report.match_id == match.id, Report.status.in_(["submitted", "approved", "final"]))
+        .where(Report.match_id == match.id, Report.status.in_(["approved", "final", "incorporated"]))
         .order_by(Report.updated_at)
     ).unique().all())
     weights = weight_map(session)
@@ -345,7 +347,7 @@ def recent_sporting_matches(session: Session, season_id: int, limit: int = 8) ->
             .options(joinedload(Match.home_team), joinedload(Match.away_team), joinedload(Match.competition))
             .where(
                 Match.season_id == int(season_id),
-                Match.deleted_at.is_(None),
+                official_match_clause(),
                 or_(Match.home_team_id == own.id, Match.away_team_id == own.id),
             )
             .order_by(desc(Match.match_date), desc(Match.id))
@@ -361,7 +363,7 @@ def recent_sporting_matches(session: Session, season_id: int, limit: int = 8) ->
         .join(MatchOpinion, MatchOpinion.match_id == Match.id)
         .where(
             Match.season_id == int(season_id),
-            Match.deleted_at.is_(None),
+            official_match_clause(),
             *(
                 [Match.home_team_id != own.id, Match.away_team_id != own.id]
                 if own else []
@@ -460,7 +462,7 @@ def league_intelligence(session: Session, season_id: int) -> dict:
         .join(Match, MatchOpinion.match_id == Match.id)
         .where(
             Match.season_id == season_id,
-            Match.deleted_at.is_(None),
+            official_match_clause(),
             *(
                 [Match.home_team_id != own_id, Match.away_team_id != own_id]
                 if own_id else []
@@ -490,8 +492,8 @@ def league_intelligence(session: Session, season_id: int) -> dict:
         )
         .join(Match, Report.match_id == Match.id)
         .where(
-            Match.season_id == season_id, Match.deleted_at.is_(None),
-            Report.status.in_(["submitted", "approved", "final"]),
+            Match.season_id == season_id, official_match_clause(),
+            Report.status.in_(["approved", "final", "incorporated"]),
             *(
                 [or_(Match.home_team_id == own_id, Match.away_team_id == own_id)]
                 if own_id else []

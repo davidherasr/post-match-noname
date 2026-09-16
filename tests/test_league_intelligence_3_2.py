@@ -106,6 +106,6 @@ def test_review_queue_batches_submitted_reports(session_factory):
         repo.bulk_upsert_evaluations_fast(session, report.id, [{"player_id":player.id,"team_id":rival.id,"participation_id":part.id,"observation_status":"evaluated","general_rating":7.7,"short_note":None,"standout":False,"pdf_include":True}], reporter.id)
         repo.submit_report(session, report.id, reporter.id)
         queue = repo.load_review_queue(session)
-        assert len(queue) == 1
-        assert queue[0]["report"].id == report.id
-        assert len(queue[0]["evaluations"]) == 1
+        # Newly incorporated reports bypass the old mandatory-review queue.
+        assert queue == []
+        assert report.status == "incorporated"

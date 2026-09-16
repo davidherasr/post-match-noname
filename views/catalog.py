@@ -173,7 +173,6 @@ def _section_teams(user: dict) -> None:
                     repo.update_team(session, selected, user["id"], **values)
                     if own:
                         repo.set_own_team(session, selected, user["id"])
-                        repo.set_setting(session, "own_team_id", str(selected), user["id"])
                 st.success("Equipo actualizado.")
                 st.rerun()
             except Exception as exc:

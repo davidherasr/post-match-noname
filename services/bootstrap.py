@@ -32,7 +32,7 @@ def bootstrap_application() -> None:
             "report_subtitle": "No Name · Informe postpartido",
             "report_confidentiality": "Documento interno y confidencial",
             "pdf_default_mode": "executive",
-            "require_report_approval": "true" if settings.require_report_approval else "false",
+            "require_report_approval": "false",
             "edition": "noname",
         }
         for key, value in defaults.items():

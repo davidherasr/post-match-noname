@@ -252,7 +252,7 @@ def _section_brand(user: dict) -> None:
         primary = c1.color_picker("Color principal", value=app_settings.get("primary_color") or "#B91C1C")
         secondary = c2.color_picker("Color secundario", value=app_settings.get("secondary_color") or "#111827")
         pdf_default = st.selectbox("PDF por defecto", ["executive", "full"], index=0 if app_settings.get("pdf_default_mode", "executive") == "executive" else 1, format_func=lambda v: "Resumen" if v == "executive" else "Completo")
-        require_approval = st.checkbox("Exigir aprobación de dirección deportiva", value=(app_settings.get("require_report_approval", "true").lower() == "true"))
+        st.caption("Flujo 4.2.3: incorporación directa al entregar. DD analiza los informes; no tiene una cola de aprobación.")
         logo = st.file_uploader("Escudo o logotipo (PNG/JPG)", type=["png", "jpg", "jpeg"])
         remove_logo = st.checkbox("Eliminar el logotipo actual", disabled=not bool(app_settings.get("logo_b64")))
         save = st.form_submit_button("Guardar identidad", type="primary")
@@ -264,7 +264,7 @@ def _section_brand(user: dict) -> None:
             repo.set_setting(session, "primary_color", primary, user["id"])
             repo.set_setting(session, "secondary_color", secondary, user["id"])
             repo.set_setting(session, "pdf_default_mode", pdf_default, user["id"])
-            repo.set_setting(session, "require_report_approval", "true" if require_approval else "false", user["id"])
+            repo.set_setting(session, "require_report_approval", "false", user["id"])
             if remove_logo:
                 repo.set_setting(session, "logo_b64", None, user["id"])
                 repo.set_setting(session, "logo_mime", None, user["id"])

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.data_governance import official_match_clause
+
 import json
 import math
 from collections import defaultdict
@@ -346,17 +348,17 @@ def submit_report(session: Session, report_id: int, actor_id: int) -> tuple[Repo
     _assert_report_owner_or_privileged(session, report, actor_id)
     if report.status not in {"draft", "returned"}:
         raise ValueError("El informe ya está entregado o aprobado.")
-    require_approval = str(get_setting(session, "require_report_approval", "true" if settings.require_report_approval else "false")).strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
-    report.status = "submitted" if require_approval else "approved"
+    # 4.2.3: a delivered report becomes official immediately, no DD approval.
+    # Historical submitted/approved/final records are never bulk-mutated.
+    report.status = "incorporated"
     report.submitted_at = UTC_NOW()
-    if report.status == "approved":
-        report.approved_at = report.submitted_at
-        report.finalized_at = report.submitted_at
-        report.reviewer_id = actor_id
+    report.finalized_at = report.submitted_at
+    report.approved_at = None
+    report.reviewer_id = None
     version = create_report_version(session, report_id, actor_id, report.status)
     assignment = session.scalar(select(ReportAssignment).where(and_(ReportAssignment.match_id == report.match_id, ReportAssignment.user_id == report.reporter_id)))
     if assignment:
-        assignment.status = "submitted" if report.status == "submitted" else "approved"
+        assignment.status = "incorporated"
     audit(session, actor_id, "submit_report", "report", report.id, detail=f"V{report.version}; status={report.status}")
     return report, version
 
@@ -371,8 +373,8 @@ def approve_report(session: Session, report_id: int, actor_id: int, review_note:
     report = session.get(Report, report_id)
     if not report:
         raise ValueError("Informe no encontrado.")
-    if report.status != "submitted":
-        raise ValueError("Solo se pueden aprobar informes entregados.")
+    if report.status not in {"submitted", "incorporated"}:
+        raise ValueError("Solo se pueden revisar informes históricos entregados o incorporados.")
     report.status = "approved"
     report.reviewer_id = actor_id
     report.review_note = review_note
@@ -391,7 +393,7 @@ def approve_report(session: Session, report_id: int, actor_id: int, review_note:
 def return_report(session: Session, report_id: int, actor_id: int, review_note: str) -> Report:
     assert_role(session, actor_id, "admin", "director")
     report = session.get(Report, report_id)
-    if not report or report.status not in {"submitted", "approved", "final"}:
+    if not report or report.status not in {"submitted", "approved", "final", "incorporated"}:
         raise ValueError("Informe no válido para devolución.")
     report.status = "returned"
     report.reviewer_id = actor_id
@@ -408,12 +410,16 @@ def return_report(session: Session, report_id: int, actor_id: int, review_note: 
     return report
 
 
-def reopen_report(session: Session, report_id: int, actor_id: int) -> Report:
-    return return_report(session, report_id, actor_id, "Reabierto por administración.")
+def reopen_report(session: Session, report_id: int, actor_id: int, reason: str) -> Report:
+    assert_role(session, actor_id, "admin")
+    if not reason or not reason.strip():
+        raise ValueError("Indica el motivo de la corrección.")
+    return return_report(session, report_id, actor_id, reason.strip())
 
 
 def list_reports(session: Session, reporter_id: int | None = None, status: str | None = None, limit: int | None = None, match_id: int | None = None, season_id: int | None = None, competition_id: int | None = None, rival_team_id: int | None = None, offset: int = 0) -> list[Report]:
     stmt = select(Report).options(joinedload(Report.match).joinedload(Match.home_team), joinedload(Report.match).joinedload(Match.away_team), joinedload(Report.match).joinedload(Match.competition), joinedload(Report.match).joinedload(Match.season), joinedload(Report.reporter), joinedload(Report.reviewer), joinedload(Report.rival_team), joinedload(Report.own_team))
+    stmt = stmt.where(Report.match_id.in_(select(Match.id).where(official_match_clause())))
     if reporter_id:
         stmt = stmt.where(Report.reporter_id == reporter_id)
     if status:

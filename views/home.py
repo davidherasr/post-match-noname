@@ -76,10 +76,17 @@ def render(user: dict) -> None:
             actionable.append(f"{dd['high_needs']} necesidades altas")
         if dd.get("neutral_signals"):
             actionable.append(f"{dd['neutral_signals']} jugadores señalados en partidos neutrales")
-        if actionable:
+        recent_reports = dd.get('latest_reports') or []
+        if actionable or recent_reports:
             st.markdown("### Dirección Deportiva")
             with st.container(border=True):
                 for text in actionable:
                     st.markdown(f"- {text}")
+                if recent_reports:
+                    st.caption('Últimos postpartidos incorporados · consulta directa, sin aprobación de DD')
+                    for report in recent_reports:
+                        st.write(f"{report.match.home_team.name} – {report.match.away_team.name} · {report.reporter.full_name} · {report.status}")
+                        if st.button('Abrir partido', use_container_width=True, key=f'home_dd_report_{report.id}'):
+                            _open_match(report.match_id)
                 if st.button("Abrir lectura deportiva", use_container_width=True, key="home_to_dd_reading"):
                     _open_director_reading()
