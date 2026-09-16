@@ -18,9 +18,9 @@ def _user_dict(*roles: str, track: bool = False) -> dict:
 
 
 def test_release_411_contract_and_user_lifecycle_head():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.3.1"
-    assert 'APP_VERSION = "4.2.3.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.2.3.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.3.2"
+    assert 'APP_VERSION = "4.2.3.2"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.2.3.2"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
     migration = ROOT / "alembic/versions/0012_sporting_reading_4_2.py"
     assert migration.exists()
     assert 'down_revision = "0011_user_lifecycle_4_1_1"' in migration.read_text(encoding="utf-8")
@@ -103,8 +103,8 @@ def test_tracking_permission_is_independent_from_roles(session_factory):
 
 def test_jornada_separates_own_postmatch_neutral_reading_and_tracking():
     body = (ROOT / "views/jornada.py").read_text(encoding="utf-8")
-    assert "Partido No Name · flujo 4.2" in body
-    assert "Partido neutral · flujo 4.2" in body
+    assert "Estado del postpartido" in body
+    assert "Estado de la lectura" in body
     assert "Dirección Deportiva · lectura conjunta" in body
     assert "Tu lectura del partido" in body
     assert "Seguimiento individual" in body
@@ -119,7 +119,7 @@ def test_admin_user_screen_has_full_crud_and_optional_password_copy():
         assert token in body
     assert "Cambio obligatorio" not in body
     assert "obligar cambio" not in body
-    assert "Puede mantener esa contraseña indefinidamente" in body
+    assert "Nueva contraseña (opcional)" in body
 
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     assert 'if user.get("must_change_password")' not in app

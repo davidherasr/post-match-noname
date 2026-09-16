@@ -55,12 +55,12 @@ def _data_search(user: dict) -> None:
             result=repo.global_catalog_search(session,query.strip())
         for p in result.get("players",[]):
             with st.container(border=True):
-                a,b=st.columns([5,1]); a.markdown(f"**{p.full_name}** · {p.primary_position or '-'}"); a.caption(f"ID {p.id}")
+                a,b=st.columns([5,1]); a.markdown(f"**{p.full_name}** · {p.primary_position or '-'}"); 
                 if b.button("Abrir",key=f"admin_data_player38_{p.id}",use_container_width=True):
                     st.session_state["workspace_player_id"]=p.id; request_navigation("Jugadores"); st.rerun()
         for t in result.get("teams",[]):
             with st.container(border=True):
-                st.markdown(f"**{t.name}**"); st.caption(f"ID {t.id}")
+                st.markdown(f"**{t.name}**"); 
         if not result.get("players") and not result.get("teams"):
             st.info("Sin coincidencias.")
 
@@ -91,7 +91,7 @@ def _quality(user: dict) -> None:
         with session_scope() as session:
             players=[session.get(__import__('models.entities',fromlist=['Player']).Player,pid) for pid in ids]
         players=[p for p in players if p]
-        st.dataframe(pd.DataFrame([{"ID":p.id,"Jugador":p.full_name,"POS":p.primary_position,"Nacimiento":p.date_of_birth} for p in players]),hide_index=True,use_container_width=True)
+        st.dataframe(pd.DataFrame([{"Jugador":p.full_name,"POS":p.primary_position,"Nacimiento":p.date_of_birth} for p in players]),hide_index=True,use_container_width=True)
         if len(players)>=2:
             with st.form(f"merge_issue39_{selected}"):
                 target=st.selectbox("Conservar",[p.id for p in players],format_func=lambda pid:next(p.full_name for p in players if p.id==pid))
@@ -138,11 +138,11 @@ def _report_corrections_423(user: dict) -> None:
                       if item.status in {'incorporated', 'approved', 'final', 'submitted'}]
     if not candidates:
         st.info('No hay informes entregados que necesiten corrección.'); return
-    labels = {item.id: f'ID {item.id} · {item.match.match_date} · {item.match.home_team.name} - {item.match.away_team.name} · {item.reporter.full_name} · V{item.version} ({item.status})'
+    labels = {item.id: f'{item.match.match_date} · {item.match.home_team.name} – {item.match.away_team.name} · {item.reporter.full_name} · Versión {item.version} ({item.status})'
               for item in candidates}
     report_id = st.selectbox('Informe que debe corregirse', list(labels), format_func=lambda item_id: labels[item_id], key='admin_report_reopen_423')
     reason = st.text_area('Motivo de corrección obligatorio', key='admin_report_reopen_reason_423', placeholder='Qué debe revisar el Informador y por qué...')
-    confirm = st.checkbox(f'Confirmo que quiero reabrir el informe ID {report_id} y conservar su versión anterior.', key=f'admin_report_confirm_{report_id}_423')
+    confirm = st.checkbox('Confirmo que quiero reabrir el informe seleccionado y conservar su versión anterior.', key=f'admin_report_confirm_{report_id}_423')
     if st.button('Reabrir para corrección', type='primary', key='admin_report_reopen_submit_423',
                  disabled=not (confirm and reason.strip()), use_container_width=True):
         try:
@@ -176,9 +176,9 @@ def render(user: dict) -> None:
         _quality(user)
         with st.expander('Corrección excepcional de informes incorporados', expanded=False):
             _report_corrections_423(user)
-        with st.expander("Gestionar equipo propio y datos de prueba", expanded=False):
-            from views import data_governance
-            data_governance.render(user)
+        with st.expander("Eliminación definitiva de datos", expanded=False):
+            from views import permanent_deletion
+            permanent_deletion.render(user)
     else:
         config=st.radio("Configurar",["Temporadas","Competiciones","Equipos","Plantillas"],horizontal=True,key="admin_config38")
         if config=="Temporadas": legacy_catalog._section_seasons(user)

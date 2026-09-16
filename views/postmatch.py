@@ -18,6 +18,7 @@ from core.postmatch_validation import validate_postmatch_draft
 from core.schedule import require_schedule_confirmed
 from repositories import scouting as repo
 from ui.styles import page_header
+from ui.selection import reporter_checkboxes
 
 
 DRAFT_KEY = "postmatch_32_local_draft"
@@ -269,6 +270,11 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
             f"{season.name if season else 'Temporada'}"
         )
         st.markdown(f"### {home_name} — {away_name}")
+        reporter_ids = reporter_checkboxes(
+            {u.id: f"{u.full_name}" for u in users},
+            [uid for uid in d.get("reporter_ids", []) if uid in user_ids],
+            key_prefix=f"prepare_reporters_{d.get('existing_match_id')}",
+        )
         with st.form("postmatch_38_context_header", border=True):
             a, b = st.columns(2)
             own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
@@ -278,11 +284,6 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
             formation_label = lambda name: name or "Desconocida (no inventar)"
             own_formation = a.selectbox("Sistema No Name", formation_options, index=formation_options.index(d.get("own_formation")) if d.get("own_formation") in formation_options else 0, format_func=formation_label)
             rival_formation = b.selectbox("Sistema rival", formation_options, index=formation_options.index(d.get("rival_formation")) if d.get("rival_formation") in formation_options else 0, format_func=formation_label)
-            reporter_ids = st.multiselect(
-                "Informadores", user_ids,
-                default=[uid for uid in d.get("reporter_ids", []) if uid in user_ids],
-                format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in users if u.id == uid),
-            )
             with st.expander("Datos opcionales"):
                 venue = st.text_input("Campo / ubicación", value=d.get("venue", ""))
                 due_enabled = st.checkbox("Fecha límite para informes", value=bool(d.get("due_enabled", False)))
@@ -308,10 +309,15 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
 
     # Exceptional admin flow for a fixture that genuinely does not exist in the
     # imported calendar. It remains available, but it is no longer navigation.
-    st.info("Alta excepcional de partido. El flujo habitual empieza en Jornada.")
+    st.caption("¿No encuentras el partido en Jornada? Puedes darlo de alta aquí.")
     season_ids = [s.id for s in seasons]
     comp_ids = [None] + [c.id for c in competitions]
     team_ids = [None] + [t.id for t in teams]
+    reporter_ids = reporter_checkboxes(
+        {u.id: u.full_name for u in users},
+        [uid for uid in d.get("reporter_ids", []) if uid in user_ids],
+        key_prefix="prepare_reporters_new",
+    )
     with st.form("postmatch_38_exception_header", border=True):
         a, b, c = st.columns(3)
         season_id = a.selectbox("Temporada", season_ids, index=season_ids.index(d["season_id"]) if d.get("season_id") in season_ids else 0, format_func=lambda sid: next(x.name for x in seasons if x.id == sid))
@@ -333,7 +339,6 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         formation_label = lambda name: name or "Desconocida (no inventar)"
         own_formation = a.selectbox("Sistema No Name", formation_options, index=formation_options.index(d.get("own_formation")) if d.get("own_formation") in formation_options else 0, format_func=formation_label)
         rival_formation = b.selectbox("Sistema rival", formation_options, index=formation_options.index(d.get("rival_formation")) if d.get("rival_formation") in formation_options else 0, format_func=formation_label)
-        reporter_ids = st.multiselect("Informadores", user_ids, default=[uid for uid in d.get("reporter_ids", []) if uid in user_ids], format_func=lambda uid: next(f"{u.full_name} · {ROLES.get(u.role, u.role)}" for u in users if u.id == uid))
         prepare = st.form_submit_button("CONTINUAR", type="primary", use_container_width=True)
     if prepare:
         if competition_id is None and not new_competition.strip():
@@ -468,9 +473,9 @@ def _own_lineup(user: dict, own, d: dict) -> None:
     ids = list(labels)
     slots = _lineup_slots(d.get("own_formation"))
     if d.get('own_xi_source'):
-        st.info(f"XI recuperado: {d['own_xi_source']}. Revisa y guarda para confirmar.")
+        st.caption("Titulares recuperados de este partido. Revísalos antes de guardar.")
     else:
-        st.info("Completa los once titulares del partido. No se copian automáticamente los del último encuentro. Si desconoces la formación, el XI se registra sin posición táctica inventada.")
+        st.caption("Completa los titulares. Si desconoces la formación, puedes registrar el XI sin una posición táctica.")
     with st.form("own_xi_32", border=True):
         selected_rows = []
         current = d.get("own_xi", [])
@@ -559,9 +564,9 @@ def _rival_lineup(own, d: dict) -> None:
     if d.get("rival_id"):
         previous_parts = _rival_previous_support(own.id, int(d["rival_id"]), _to_date(d.get("match_date")))
     if d.get('rival_xi_source'):
-        st.info(f"XI recuperado: {d['rival_xi_source']}. Revisa y guarda para confirmar.")
+        st.caption("Titulares recuperados de este partido. Revísalos antes de guardar.")
     else:
-        st.info("Registra los once titulares reales del rival; el XI de una jornada anterior no se aplica por defecto.")
+        st.caption("Registra los titulares del rival para este encuentro.")
 
     with st.expander("Pegado rápido", expanded=False):
         st.caption("Pega `1 Bote`, una lista de nombres o `1;Bote;POR`. Se asignan por orden a la formación.")
@@ -839,7 +844,7 @@ def render(user: dict) -> None:
             st.warning(f"No se pudo preparar el partido programado: {exc}")
 
     if DRAFT_KEY not in st.session_state:
-        st.info("El flujo normal empieza en Jornada → partido de No Name → Preparar partido.")
+        st.caption("Puedes preparar cada encuentro desde Jornada.")
         with st.expander("Alta excepcional de un partido fuera del calendario", expanded=False):
             if st.button("Crear contexto excepcional", use_container_width=True):
                 st.session_state[DRAFT_KEY] = _new_draft_with_recent_defaults(own.id, active.id)
@@ -853,7 +858,7 @@ def render(user: dict) -> None:
     st.progress((list(step_names).index(step) + 1) / len(step_names), text=f"Preparación · {step_names[step]} de 4")
     st.caption("  →  ".join((f"**{label}**" if key == step else label) for key, label in step_names.items()))
     if d.get("existing_match_id"):
-        st.info(f"Estás preparando el partido ya registrado (ID {d['existing_match_id']}). No se duplicará el encuentro. Publicar solo estará disponible después de completar ambos XI.")
+        st.caption('Completa las alineaciones y selecciona Informadores para publicar el partido.')
     own_count = len({int(x['player_id']) for x in d.get('own_xi', []) if x.get('player_id')})
     rival_count = len({str(x['name']).strip().casefold() for x in d.get('rival_xi', []) if x.get('name')})
     st.caption(f"Requisitos: XI No Name {own_count}/11 · XI rival {rival_count}/11 · Informadores {len(d.get('reporter_ids', []))}.")

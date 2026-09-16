@@ -231,7 +231,7 @@ def _formation_lineup_editor(match, team, user: dict, *, side: str, formation: s
 
 def _neutral_match_study(match, user: dict) -> None:
     st.markdown("### Estudio del partido")
-    st.caption("4.0 separa lo que realmente conoces de cada equipo. Una formación puede estar disponible en un lado y no en el otro.")
+    st.caption("Indica únicamente las formaciones que conozcas de cada equipo.")
     local_state=match.home_formation if match.home_formation_known and match.home_formation else "Plantilla / dorsal"
     away_state=match.away_formation if match.away_formation_known and match.away_formation else "Plantilla / dorsal"
     st.markdown(
@@ -574,18 +574,20 @@ def _manage_postmatch_assignments_4231(match, user: dict, assignments: list) -> 
             st.caption(f"{len(active)} asignación(es) registradas. Los informes ya entregados no se eliminan al actualizar el reparto.")
         unavailable = [assignment.user_id for assignment in active if assignment.user_id not in options]
         if unavailable:
-            st.warning("Hay asignaciones a cuentas no disponibles (IDs: " + ", ".join(map(str, unavailable)) + "). Revisa estos usuarios antes de modificar el reparto.")
+            st.warning(f"Hay {len(unavailable)} asignación(es) a cuentas inactivas o sin permiso. Revisa estos usuarios antes de modificar el reparto.")
         if not options:
             st.warning("No existen usuarios activos con rol Informador. Administración → Usuarios permite asignar el rol.")
             return
-        with st.form(f"manage_published_reporters_4231_{match.id}"):
-            selected_ids = st.multiselect("Informadores que deben completar este postpartido", list(options),
-                                          default=selected_default,
-                                          format_func=lambda uid: f"{options[uid]} · ID {uid}")
-            st.caption("Selecciona al menos uno. La operación crea o actualiza asignaciones auditadas; no duplica el partido, informes ni jugadores.")
-            save = st.form_submit_button("Guardar asignaciones y activar tareas", type="primary",
-                                         use_container_width=True, disabled=not selected_ids)
+        from ui.selection import reporter_checkboxes
+        selected_ids = reporter_checkboxes(
+            options, selected_default, key_prefix=f"published_reporters_{match.id}",
+        )
+        save = st.button("Guardar asignaciones y activar tareas", type="primary",
+                         use_container_width=True, key=f"save_reporters_{match.id}")
         if save:
+            if not selected_ids:
+                st.error("Selecciona al menos un Informador antes de guardar.")
+                return
             try:
                 with session_scope() as session:
                     assigned = matches_repo.assign_reporters(session, match.id, selected_ids, user["id"],
@@ -658,10 +660,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     if not data["is_own_match"]:
         _neutral_match_study(match,user)
 
-    if data["is_own_match"]:
-        st.info("**Partido No Name · flujo 4.2.2**: el staff completa su postpartido. Dirección Deportiva compara el criterio conjunto. Los jugadores propios se leen como rendimiento de plantilla, nunca como seguimiento de mercado.")
-    else:
-        st.info("**Partido neutral · flujo 4.2.2**: cada miembro deja una lectura ligera del partido y puede señalar jugadores. Señalar no equivale a seguir; el seguimiento individual es un permiso aparte.")
+    # Contextual help is available on the relevant buttons; no development notes on the public screen.
 
     if data["is_own_match"]:
         st.markdown("### Estado del postpartido")

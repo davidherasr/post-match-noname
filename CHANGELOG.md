@@ -1,3 +1,12 @@
+## 4.2.3.2 · Área Técnica, borrado definitivo y selección de Informadores
+
+- Renombrada la marca visible a «No Name · Área Técnica». Oculta numeración de versión y retira mensajes internos de desarrollo de las pantallas habituales.
+- Administración → Datos incorpora selección múltiple por casillas (temporadas, partidos, equipos, jugadores) con búsqueda/paginación, seleccionar todos solo en la página, selección global reversible y vista previa de relaciones.
+- Eliminación SQL física solicitada expresamente por Admin, transaccional y auditada con confirmación reforzada y bloqueo de planes obsoletos. Eliminación de dependencias mostradas; jugadores exclusivos sugeridos pero nunca borrados automáticamente; los documentos externos requieren gestión separada.
+- Reparación de asignación publicada y preparación: informadores elegidos con controles reactivos y botones en español, sin el botón de guardado bloqueado por formularios de Streamlit.
+- Exportación tabular diagnóstica ahora cubre las 39 tablas ORM; se aclara que no es `pg_dump` ni contiene bucket. No proporciona restauración productiva.
+- Head Alembic 0013 **sin cambios**; pruebas locales 128 superadas, migraciones SQLite aisladas, Cloud y Supabase por validar. Ver `UPGRADE_4_2_3_2.md` y `VALIDACION_4_2_3_2.md`.
+
 ## 4.2.3.1 · Hotfix de asignaciones y bandeja del Informador
 
 - Corrige el fallo detectado en Cloud 4.2.3: publicación sin informadores permitida por un aviso no bloqueante; el partido aparecía como «Informes 0/0» y no generaba ninguna tarea.

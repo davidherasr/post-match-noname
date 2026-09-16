@@ -234,7 +234,7 @@ def render_data(payload: dict) -> None:
         ("Nacionalidad", player.nationality or "-"),
     ]
     st.dataframe(pd.DataFrame(rows, columns=["Dato", "Valor"]), hide_index=True, use_container_width=True)
-    st.caption("La ficha muestra únicamente datos existentes en No Name PostMatch. No completa altura, mercado, estadísticas o comparables externos de forma automática.")
+    st.caption("La ficha recoge únicamente información deportiva registrada por el cuerpo técnico.")
 
 
 def render_monthly_profile(payload: dict) -> None:

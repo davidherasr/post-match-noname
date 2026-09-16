@@ -17,7 +17,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.2.3.1"
+REPORTS_PAGE_API_VERSION = "4.2.3.2"
 
 
 
@@ -326,7 +326,7 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
     else:
         st.success(f"Informe bloqueado: {REPORT_STATUSES.get(report.status, report.status)}.")
         if report.status == "submitted":
-            st.info("Entrega histórica anterior al flujo 4.2.3.1. No se ha cambiado automáticamente su estado.")
+            st.caption('Este informe conserva su estado histórico de entrega.')
 
 
 def _render_documents(report_id: int) -> None:

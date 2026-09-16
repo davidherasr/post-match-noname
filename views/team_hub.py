@@ -40,7 +40,7 @@ def render(user:dict,team_id:int)->None:
                 st.session_state["workspace_player_id"]=p.id;request_navigation("Jugadores");st.rerun()
     if data.get("readings"):
         st.markdown("### Lectura acumulada del equipo")
-        st.caption("Histórico 4.2.2 construido con opiniones del staff en neutrales y valoraciones del rival en postpartidos de No Name.")
+        st.caption('Histórico de valoraciones del staff en partidos propios y neutrales.')
         for row in reversed(data["readings"][-8:]):
             match = row["match"]
             score = "—" if row["score"] is None else f"{row['score']:.2f}"

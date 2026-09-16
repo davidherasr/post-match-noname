@@ -31,9 +31,9 @@ def _neutral_match(session):
 
 
 def test_release_407_contract():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.3.1"
-    assert 'APP_VERSION = "4.2.3.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.2.3.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.3.2"
+    assert 'APP_VERSION = "4.2.3.2"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.2.3.2"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
 
 
 def test_parser_understands_starters_and_substitutes_sections():
@@ -87,8 +87,8 @@ def test_jornada_labels_squad_status_and_42_flow():
     assert "🟢 TIT" in body
     assert "🟡 SUP" in body
     assert "⚪ PLANTILLA" in body
-    assert "Partido No Name · flujo 4.2" in body
-    assert "Partido neutral · flujo 4.2" in body
+    assert "Estado del postpartido" in body
+    assert "Estado de la lectura" in body
     assert "Seguimiento individual" in body
     assert "Dirección Deportiva · asignar seguimiento" not in body
     assert "TITULARES" in body and "SUPLENTES" in body

@@ -229,7 +229,7 @@ def generate_player_360_pdf(payload: dict, settings: dict) -> bytes:
         ["Nacionalidad",p.nationality or "-","Decisión",payload.get("recommendation") or "Sin decidir"],
     ]
     dt=Table(data,colWidths=[28*mm,61*mm,28*mm,61*mm]); dt.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.25,HexColor("#DDE2E8")),("BACKGROUND",(0,0),(-1,-1),colors.white),("FONTSIZE",(0,0),(-1,-1),7.2),("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),("TOPPADDING",(0,0),(-1,-1),2*mm),("BOTTOMPADDING",(0,0),(-1,-1),2*mm)])); story.append(dt)
-    story.append(Spacer(1,2*mm)); story.append(Paragraph("Solo se incluyen datos realmente existentes en No Name PostMatch; no se estiman valores de mercado, altura, estadísticas o atributos no observados.",styles["small"]))
+    story.append(Spacer(1,2*mm)); story.append(Paragraph("Solo se incluyen los datos registrados por el cuerpo técnico; no se estiman datos no observados.",styles["small"]))
     doc.build(story); return buffer.getvalue()
 
 

@@ -83,19 +83,31 @@ def full_export_xlsx(session: Session) -> bytes:
 
 
 def technical_backup_zip(session: Session) -> bytes:
-    models = [
-        User, LoginAttempt, Season, Competition, Team, Player, PlayerAlias, PlayerMergeLog,
-        TeamRoster, Match, Participation, ReportAssignment, Report, PlayerEvaluation,
-        ReportVersion, Document, FollowUp, FollowUpHistory, ConsolidatedReport,
-        ConsolidatedPlayerEvaluation, PostMatchDraft, LeaguePlayerProfile, ScoutingList, ScoutingListItem, AppSetting, AuditLog,
-    ]
+    """Tabular snapshot of *all* mapped entities; not a pg_dump or bucket backup.
+
+    This export is for diagnostics/inspection. A restorable production backup
+    still requires a PostgreSQL dump plus external document storage.
+    """
+    from models.base import Base
+
+    models = sorted(
+        (mapper.class_ for mapper in Base.registry.mappers
+         if getattr(mapper.class_, '__tablename__', None)),
+        key=lambda model: model.__tablename__,
+    )
     payload = {
-        "format": "postmatch-scout-backup-v2",
+        "format": "noname-tabular-export-v3",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "table_count": len(models),
         "tables": {model.__tablename__: _model_rows(session, model) for model in models},
     }
     output = BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("backup.json", json.dumps(payload, ensure_ascii=False, default=str, indent=2))
-        archive.writestr("README.txt", "Copia técnica completa de No Name PostMatch 4.0. Contiene datos sensibles y hashes de contraseña. Guárdala de forma segura.\n")
+        archive.writestr("exportacion.json", json.dumps(payload, ensure_ascii=False, default=str, indent=2))
+        archive.writestr("LEEME.txt", (
+            "Exportación tabular de todas las entidades de No Name · Área Técnica. "
+            "NO es una copia SQL restaurable de PostgreSQL ni incluye bytes de documentos "
+            "del bucket. Contiene datos personales y hashes de contraseñas. "
+            "Para restauración productiva obtén pg_dump y copia aparte el almacenamiento documental.\n"
+        ))
     return output.getvalue()

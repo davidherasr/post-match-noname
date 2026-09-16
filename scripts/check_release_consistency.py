@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.2.3.1"
+EXPECTED = "4.2.3.2"
 HEAD_MIGRATION = "0013_data_governance_4_2_3"
 
 
@@ -96,7 +96,7 @@ def main() -> None:
 
     jornada_text = (ROOT / "views" / "jornada.py").read_text(encoding="utf-8")
     for token in [
-        "Partido No Name · flujo 4.2.2", "Partido neutral · flujo 4.2.2",
+        "Estado del postpartido", "Estado de la lectura",
         "Dirección Deportiva · lectura conjunta", "Tu lectura del partido",
         "Seguimiento individual", "Iniciar seguimiento", "TITULARES", "SUPLENTES",
     ]:

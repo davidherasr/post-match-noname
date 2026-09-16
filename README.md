@@ -1,8 +1,16 @@
-# No Name PostMatch 4.2.2
+# No Name · Área Técnica 4.2.3.2
 
 Aplicación interna de No Name para postpartido, lectura compartida del staff, Dirección Deportiva y seguimiento individual de jugadores externos. La capa visible se organiza en **Inicio · Jornada · Jugadores · Dirección Deportiva · Administración**.
 
-## Flujo diario 4.2
+## Novedades 4.2.3.2
+
+- Administración → Datos → Eliminación definitiva: selección con casillas y controles en español por temporadas, partidos, equipos y jugadores; simulación de dependencias, confirmación irreversible y borrado SQL transaccional con auditoría. Los jugadores ligados a un equipo eliminado solo se proponen para selección explícita; nunca se borran automáticamente por similitud de nombre.
+- Asignaciones de Informadores con selección reactiva y botón guardar operativo, sin esperar al envío de un formulario.
+- Marca visible «No Name · Área Técnica», interfaz limpia de textos de desarrollo, nombres legibles sin IDs y selección masiva en español.
+- Exportación tabular técnica de todas las tablas ORM. NO es un respaldo SQL restaurable y NO contiene los ficheros del bucket. Antes de un borrado permanente obtener `pg_dump` y guardar el bucket por separado.
+- Mantiene la migración 0013 de 4.2.3 y NO añade cambios de esquema. No se borra ni altera ninguna fila productiva durante el despliegue; el borrado requiere acción expresa del Administrador.
+
+## Flujo diario
 
 - **Inicio**: partido de hoy/próximo partido y acciones pendientes.
 - **Jornada**: distingue de forma explícita entre partidos de No Name y partidos neutrales.

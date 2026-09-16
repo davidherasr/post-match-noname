@@ -8,7 +8,7 @@ import streamlit as st
 # This lets us show a useful diagnosis even when a deployment contains files
 # from different releases (for example a new app.py with an old core/config.py).
 st.set_page_config(
-    page_title="No Name PostMatch",
+    page_title="No Name · Área Técnica",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -49,8 +49,8 @@ try:
 except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
-        "No Name PostMatch se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la release 4.2.3.1; "
+        "No Name · Área Técnica se ha detenido antes de acceder a la base de datos. "
+        "Sustituye **todo el contenido del repositorio** por la versión 4.2.3.2; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -63,7 +63,7 @@ except ImportError as exc:
 
 def _render_database_startup_error(exc: Exception) -> None:
     target = database_target()
-    st.error("No Name PostMatch no puede conectar con la base de datos.")
+    st.error("No Name · Área Técnica no puede conectar con la base de datos.")
     st.markdown(
         "La aplicación se ha detenido **antes de modificar ningún dato**. "
         "Revisa la conexión PostgreSQL/Supabase en los Secrets de Streamlit Cloud."
@@ -96,10 +96,10 @@ _startup_logger = logging.getLogger("noname.startup")
 
 def _render_unexpected_startup_error(exc: Exception, phase: str) -> None:
     _startup_logger.exception("Startup failure during %s", phase)
-    st.error("No Name PostMatch no ha podido completar el arranque de la base de datos.")
+    st.error("No Name · Área Técnica no ha podido completar el arranque de la base de datos.")
     st.markdown(
         "No se ha continuado con el arranque. Consulta **Manage app → Logs** para el detalle técnico. "
-        "La 4.2.3.1 identifica también la fase exacta del arranque para evitar diagnósticos a ciegas."
+        "La 4.2.3.2 identifica también la fase exacta del arranque para evitar diagnósticos a ciegas."
     )
     st.caption(f"Fase: {phase} · Tipo de error: {type(exc).__name__} · Versión {APP_VERSION}")
     st.stop()
@@ -121,7 +121,7 @@ except DatabaseUnavailableError as exc:
 except DatabaseSchemaError as exc:
     st.error("La base de datos necesita completar una actualización de esquema.")
     st.markdown(
-        "No se ha ejecutado ninguna pantalla deportiva. La release 4.2.3.1 valida de forma "
+        "No se ha ejecutado ninguna pantalla deportiva. La versión 4.2.3.2 valida de forma "
         "**no destructiva** que el esquema físico de Supabase coincide con la aplicación."
     )
     if exc.missing:
@@ -131,7 +131,7 @@ except DatabaseSchemaError as exc:
         st.code("\n".join(lines), language="text")
     st.info(
         "Comprueba que `RUN_MIGRATIONS = true` en los Secrets de Streamlit Cloud y haz "
-        "**Manage app → Reboot**. 4.2.3.1 incorpora la migración aditiva 0013: comprueba el head de PostgreSQL antes de iniciar."
+        "**Manage app → Reboot**. 4.2.3.2 incorpora la migración aditiva 0013: comprueba el head de PostgreSQL antes de iniciar."
     )
     st.stop()
 except Exception as exc:
@@ -167,13 +167,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.2.3.1"
+    expected_api = "4.2.3.2"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.2.3.1 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.2.3.2 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -186,7 +186,7 @@ def _render_reports_route(user: dict, mode: str) -> None:
     renderer = getattr(reports_page, renderer_name, None)
     if not callable(renderer):
         st.error(f"No se encuentra la función requerida: views.reports.{renderer_name}().")
-        st.info("Vuelve a subir el paquete completo No Name PostMatch 4.2.3.1 y reinicia la aplicación.")
+        st.info("Actualiza todos los archivos del proyecto y reinicia la aplicación.")
         st.stop()
     renderer(user)
 
@@ -204,9 +204,9 @@ def render_login() -> None:
         st.markdown(
             f"""
             <div class="pm-card" style="padding:28px">
-              <div class="pm-kicker">Aplicación interna</div>
-              <div class="pm-page-title" style="font-size:2.25rem">{safe_html(app_settings.get('club_name') or APP_NAME)}</div>
-              <div class="pm-page-subtitle">Postpartidos, lectura deportiva y seguimiento individual · Versión {APP_VERSION}</div>
+              <div class="pm-kicker">CUERPO TÉCNICO · {safe_html(app_settings.get('club_name') or 'NO NAME')}</div>
+              <div class="pm-page-title" style="font-size:2.25rem">{safe_html(APP_NAME)}</div>
+              <div class="pm-page-subtitle">Partidos, informes y análisis deportivo</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -239,7 +239,7 @@ if not user:
     render_login()
     st.stop()
 
-# 4.2.3.1: password changes are optional. Simple internal passwords are allowed.
+# 4.2.3.2: password changes are optional. Simple internal passwords are allowed.
 # Legacy must_change_password flags are ignored/cleared on successful login.
 
 # 3.8: roles are cumulative capabilities, never an operating profile selector.
@@ -256,8 +256,8 @@ with st.sidebar:
     st.markdown(
         f"""
         <div class="pm-brand">
-          <div class="pm-brand-title">{safe_html(app_settings.get('club_name') or APP_NAME)}</div>
-          <div class="pm-brand-version">Versión {APP_VERSION}</div>
+          <div class="pm-brand-title">{safe_html(APP_NAME)}</div>
+          <div class="pm-brand-version">{safe_html(app_settings.get('club_name') or 'Cuerpo técnico')}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -268,10 +268,10 @@ with st.sidebar:
     selected_label = st.radio("Navegación", labels, label_visibility="collapsed", key=nav_key)
     st.divider()
     with st.expander("Mi cuenta", expanded=False):
-        st.caption("Puedes mantener tu contraseña actual aunque sea simple. Cambiarla es opcional.")
+        st.caption("Puedes cambiar tu contraseña cuando lo necesites. Cambiarla es opcional.")
         with st.form("optional_password_change_sidebar"):
             current_password = st.text_input("Contraseña actual", type="password", key="sidebar_current_password")
-            new_password = st.text_input("Nueva contraseña", type="password", key="sidebar_new_password", help="Se acepta cualquier contraseña no vacía, por ejemplo 1234.")
+            new_password = st.text_input("Nueva contraseña", type="password", key="sidebar_new_password", help="Elige una contraseña privada. No puede estar vacía.")
             repeat_password = st.text_input("Repite la nueva", type="password", key="sidebar_repeat_password")
             change_password_submit = st.form_submit_button("Cambiar contraseña", use_container_width=True)
         if change_password_submit:

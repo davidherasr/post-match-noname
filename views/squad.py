@@ -202,10 +202,7 @@ def _sporting_overview(user: dict, season) -> None:
     _teams_intelligence(teams, compact=True)
     st.markdown("#### Principales discrepancias")
     _disagreements_block(disagreements, compact=True)
-    st.info(
-        "Flujo 4.2.2: el staff observa y puntúa → DD detecta consenso, discrepancias y señales repetidas → "
-        "solo un usuario con permiso especial convierte un jugador externo en seguimiento individual."
-    )
+    # The reading itself provides actions and provenance; no internal workflow notes.
 
 def _staff_criterion(user: dict) -> None:
     with st.expander("Criterio del staff · pesos de opinión", expanded=False):

@@ -33,14 +33,14 @@ def _section_users(user: dict) -> None:
     st.markdown("### Gestión de usuarios")
     st.caption(
         "Desde aquí el Administrador puede añadir, editar, desactivar o eliminar cuentas y repartir roles. "
-        "Las contraseñas pueden ser tan simples como 1, 1234 o cualquier otro valor no vacío. Cambiarlas es siempre opcional."
+        "Las contraseñas se gestionan desde cada cuenta y pueden modificarse opcionalmente."
     )
 
-    r1, r2, r3 = st.columns(3)
-    r1.info("**Administrador**\n\nUsuarios, calendario, equipos y calidad de datos.")
-    r2.info("**Dirección Deportiva**\n\nLee el criterio del staff, pondera opiniones y toma decisiones deportivas.")
-    r3.info("**Informador**\n\nValora partidos y jugadores dentro del flujo que corresponda.")
-    st.caption("El seguimiento individual de jugadores no es un rol: es un permiso adicional que se activa solo a quien realmente lo haga.")
+    with st.expander('¿Qué permite cada rol?', expanded=False):
+        st.markdown('**Administrador:** usuarios, calendario y datos.  '
+                    '**Dirección Deportiva:** análisis y decisiones.  '
+                    '**Informador:** evaluaciones e informes.')
+        st.caption('El seguimiento de jugadores externos requiere un permiso independiente.')
 
     with session_scope() as session:
         all_users = repo.list_users(session, include_deleted=True)
@@ -62,8 +62,7 @@ def _section_users(user: dict) -> None:
         rows = []
         for u in users:
             rows.append({
-                "ID": u.id,
-                "Nombre": u.full_name,
+                                "Nombre": u.full_name,
                 "Correo": u.email,
                 "Roles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
                 "Estado": "Activo" if u.active else "Desactivado",
@@ -90,7 +89,7 @@ def _section_users(user: dict) -> None:
             password = c4.text_input(
                 "Contraseña",
                 type="password",
-                help="Sin requisitos de complejidad. Puede ser 1, 1234, nombre+numero, etc. Solo no puede estar vacía.",
+                help="Utiliza una contraseña privada y no la compartas. No puede estar vacía.",
             )
             active = c4.checkbox("Cuenta activa", value=True)
             track_players = st.checkbox("Puede realizar seguimiento individual de jugadores", value=False, help="Permiso especial para abrir seguimientos de jugadores externos y alimentar su Player Report 360.")
@@ -113,7 +112,7 @@ def _section_users(user: dict) -> None:
                             must_change_password=False,
                             can_track_players=track_players,
                         )
-                    st.success("Usuario creado. Puede mantener esa contraseña indefinidamente si quiere.")
+                    st.success("Usuario creado correctamente.")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -149,7 +148,7 @@ def _section_users(user: dict) -> None:
             password_new = st.text_input(
                 "Nueva contraseña (opcional)",
                 type="password",
-                help="Déjala vacía para mantener la actual. Si escribes una nueva, puede ser cualquier valor no vacío, incluido 1234.",
+                help="Déjala vacía para mantener la contraseña actual.",
             )
             save = st.form_submit_button("Guardar cambios", type="primary", use_container_width=True)
         if save:
@@ -209,8 +208,7 @@ def _section_users(user: dict) -> None:
         st.info("No hay usuarios eliminados.")
         return
     st.dataframe(pd.DataFrame([{
-        "ID": u.id,
-        "Nombre": u.full_name,
+                "Nombre": u.full_name,
         "Correo": u.email,
         "Eliminado": u.deleted_at,
         "Roles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
@@ -245,14 +243,14 @@ def _section_brand(user: dict) -> None:
         except Exception:
             st.warning("El logotipo guardado no se ha podido previsualizar.")
     with st.form("brand_form"):
-        club_name = st.text_input("Nombre de la aplicación / club", value=app_settings.get("club_name") or "NO NAME")
+        club_name = st.text_input("Nombre del club", value=app_settings.get("club_name") or "NO NAME")
         report_subtitle = st.text_input("Subtítulo del informe PDF", value=app_settings.get("report_subtitle") or "Dirección deportiva · Observación de rivales")
         confidentiality = st.text_input("Leyenda de confidencialidad", value=app_settings.get("report_confidentiality") or "Documento interno y confidencial")
         c1, c2 = st.columns(2)
         primary = c1.color_picker("Color principal", value=app_settings.get("primary_color") or "#B91C1C")
         secondary = c2.color_picker("Color secundario", value=app_settings.get("secondary_color") or "#111827")
         pdf_default = st.selectbox("PDF por defecto", ["executive", "full"], index=0 if app_settings.get("pdf_default_mode", "executive") == "executive" else 1, format_func=lambda v: "Resumen" if v == "executive" else "Completo")
-        st.caption("Flujo 4.2.3: incorporación directa al entregar. DD analiza los informes; no tiene una cola de aprobación.")
+        st.caption('Los informes entregados se incorporan directamente al análisis deportivo.')
         logo = st.file_uploader("Escudo o logotipo (PNG/JPG)", type=["png", "jpg", "jpeg"])
         remove_logo = st.checkbox("Eliminar el logotipo actual", disabled=not bool(app_settings.get("logo_b64")))
         save = st.form_submit_button("Guardar identidad", type="primary")
@@ -290,7 +288,7 @@ def _section_security(user: dict) -> None:
         attempts = list(session.scalars(select(LoginAttempt).order_by(desc(LoginAttempt.created_at)).limit(200)).all())
     if attempts:
         st.dataframe(pd.DataFrame([{
-            "Fecha": a.created_at, "Correo": a.email, "Usuario ID": a.user_id,
+            "Fecha": a.created_at, "Correo": a.email, 
             "Resultado": "Correcto" if a.success else "Fallido", "Detalle": a.detail,
         } for a in attempts]), use_container_width=True, hide_index=True)
     else:
@@ -304,14 +302,14 @@ def _section_storage(user: dict) -> None:
         st.info("No hay documentos generados.")
     else:
         st.dataframe(pd.DataFrame([{
-            "ID": d.id, "Informe": d.report_id, "Versión": d.version, "Tipo": d.document_type,
+            "Informe": d.report_id, "Versión": d.version, "Tipo": d.document_type,
             "Estado": d.storage_status, "Tamaño": d.size_bytes, "Checksum": d.checksum,
             "Ruta remota": d.storage_path, "Ruta local": d.local_path, "Error": d.error_message,
         } for d in documents]), use_container_width=True, hide_index=True)
         failed = [d for d in documents if d.storage_status not in {"stored_remote", "local_only"}]
         if failed:
             st.error(f"Hay {len(failed)} documentos con almacenamiento incompleto. El estado ya no se oculta.")
-        selected_doc = st.selectbox("Comprobar/descargar documento", [d.id for d in documents], format_func=lambda did: next(f"Informe {d.report_id} · V{d.version} · {d.document_type} · {d.storage_status}" for d in documents if d.id == did))
+        selected_doc = st.selectbox("Comprobar/descargar documento", [d.id for d in documents], format_func=lambda did: next(f"{d.document_type} · Versión {d.version} · {d.storage_status}" for d in documents if d.id == did))
         doc = next(d for d in documents if d.id == selected_doc)
         try:
             payload = load_document_bytes(bucket=doc.storage_bucket, storage_path=doc.storage_path, local_path=doc.local_path)
@@ -348,9 +346,9 @@ def _section_audit(user: dict) -> None:
     if logs:
         st.dataframe(pd.DataFrame([{
             "Fecha": log.created_at, "Usuario": users.get(log.user_id, "Sistema"), "Acción": log.action,
-            "Entidad": log.entity_type, "ID": log.entity_id, "Detalle": log.detail,
+            "Entidad": log.entity_type, "Detalle": log.detail,
         } for log in logs]), use_container_width=True, hide_index=True)
-        selected_log = st.selectbox("Abrir detalle", [log.id for log in logs], format_func=lambda lid: next(f"{log.created_at} · {log.action} · {log.entity_type or '-'} {log.entity_id or ''}" for log in logs if log.id == lid))
+        selected_log = st.selectbox("Abrir detalle", [log.id for log in logs], format_func=lambda lid: next(f"{log.created_at} · {log.action} · {log.entity_type or '-'}" for log in logs if log.id == lid))
         log = next(log for log in logs if log.id == selected_log)
         c1, c2 = st.columns(2)
         c1.text_area("Antes", value=_pretty_json(log.before_json), height=260, disabled=True)
@@ -360,17 +358,17 @@ def _section_audit(user: dict) -> None:
 
 
 def _section_backup(user: dict) -> None:
-    st.warning("El backup técnico contiene todos los datos estructurados, incluidos hashes de contraseña. Trátalo como un archivo confidencial y almacénalo cifrado.")
-    st.caption("No se consulta ni serializa toda la base al entrar aquí. El ZIP solo se prepara cuando lo solicitas.")
-    if st.button("Preparar backup técnico", type="primary", use_container_width=True):
-        with st.spinner("Preparando backup..."):
-            with measure("Backup técnico", "admin"):
+    st.warning("La exportación técnica contiene datos personales y hashes de contraseña. Protégela y no la compartas. Para un respaldo restaurable necesitas una copia SQL de PostgreSQL y otra del almacenamiento de documentos.")
+    st.caption("No se consulta ni serializa toda la base al entrar aquí. El ZIP se prepara únicamente cuando lo solicitas.")
+    if st.button("Preparar exportación técnica", type="primary", use_container_width=True):
+        with st.spinner("Preparando exportación..."):
+            with measure("Exportación técnica", "admin"):
                 with session_scope() as session:
-                    st.session_state["admin_backup_34"] = technical_backup_zip(session)
-    backup = st.session_state.get("admin_backup_34")
+                    st.session_state["admin_export_4232"] = technical_backup_zip(session)
+    backup = st.session_state.get("admin_export_4232")
     if backup:
-        st.download_button("Descargar backup técnico restaurable", backup, "noname_postmatch_3_4_backup.zip", "application/zip", type="primary", use_container_width=True)
-    st.caption("Este backup es distinto de la exportación analítica Excel: conserva tablas y relaciones para recuperación técnica.")
+        st.download_button("Descargar exportación técnica", backup, "noname_area_tecnica_exportacion.zip", "application/zip", type="primary", use_container_width=True)
+    st.caption("Incluye todas las tablas mapeadas, pero no equivale a una copia SQL restaurable ni incluye los documentos almacenados.")
 
 
 def _section_performance(user: dict) -> None:

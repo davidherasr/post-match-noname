@@ -155,7 +155,7 @@ def render(user: dict) -> None:
         with session_scope() as session:
             teams = catalog_repo.teams_for_filter(session, season_id)
         team_labels = {None:'Todos los equipos', 'Sin equipo':'Sin equipo confirmado',
-                       **{t.id:f'{t.name} · ID {t.id}' for t in teams}}
+                       **{t.id:t.name for t in teams}}
         team_options = list(team_labels)
         if st.session_state.get('catalog_team_423') not in team_options:
             st.session_state['catalog_team_423'] = None
@@ -204,7 +204,7 @@ def render(user: dict) -> None:
             current_selected = st.session_state.get('catalog_compare_423') or []
             available = list(dict.fromkeys([*current_selected, *[int(x['player'].id) for x in rows]]))
             selected = st.multiselect('Jugadores', available, max_selections=2,
-                format_func=lambda pid:names.get(pid, f'Jugador ID {pid}'),key='catalog_compare_423')
+                format_func=lambda pid:names.get(pid, 'Jugador no disponible'),key='catalog_compare_423')
             if len(selected) == 2:
                 _compare_players(selected)
             else:

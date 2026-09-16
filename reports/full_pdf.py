@@ -1055,7 +1055,7 @@ def generate_full_pdf(payload: dict, *, current_version: int) -> bytes:
     buffer = BytesIO()
     doc = BaseDocTemplate(buffer, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=18*mm, bottomMargin=18*mm,
                           title=f"Informe postpartido · {match.home_team.name} - {match.away_team.name}", author=report.reporter.full_name,
-                          subject=f"Postpartido · {report.rival_team.name}", creator=f"{club_name} · No Name PostMatch 3.7")
+                          subject=f"Postpartido · {report.rival_team.name}", creator=f"{club_name} · No Name · Área Técnica")
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="main")
     def header_footer(canvas, current_doc):
         canvas.saveState(); page = current_doc.page

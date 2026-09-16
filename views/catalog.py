@@ -327,17 +327,17 @@ def _section_duplicates(user: dict) -> None:
         flat = []
         for group in groups:
             for candidate in group["players"]:
-                flat.append({"Nombre normalizado": group["normalized_name"], "ID": candidate.id, "Jugador": candidate.full_name, "Nacimiento": candidate.date_of_birth, "Posición": candidate.primary_position})
+                flat.append({"Nombre normalizado": group["normalized_name"], "Jugador": candidate.full_name, "Nacimiento": candidate.date_of_birth, "Posición": candidate.primary_position})
         st.dataframe(pd.DataFrame(flat), use_container_width=True, hide_index=True)
-        ids = sorted({row["ID"] for row in flat})
+        ids = sorted({candidate.id for group in groups for candidate in group['players']})
         with session_scope() as session:
             candidates = [session.get(Player, pid) for pid in ids]
             candidates = [p for p in candidates if p]
         if len(candidates) >= 2:
             c1, c2 = st.columns(2)
-            source_id = c1.selectbox("Duplicado que se absorberá", [p.id for p in candidates], format_func=lambda pid: next(f"{p.full_name} · ID {p.id}" for p in candidates if p.id == pid))
+            source_id = c1.selectbox("Duplicado que se absorberá", [p.id for p in candidates], format_func=lambda pid: next(f"{p.full_name} · {p.date_of_birth or p.primary_position or "Sin fecha de nacimiento"}" for p in candidates if p.id == pid))
             target_options = [p.id for p in candidates if p.id != source_id]
-            target_id = c2.selectbox("Registro maestro que se conservará", target_options, format_func=lambda pid: next(f"{p.full_name} · ID {p.id}" for p in candidates if p.id == pid))
+            target_id = c2.selectbox("Registro maestro que se conservará", target_options, format_func=lambda pid: next(f"{p.full_name} · {p.date_of_birth or p.primary_position or "Sin fecha de nacimiento"}" for p in candidates if p.id == pid))
             confirmation = st.text_input("Escribe FUSIONAR para confirmar")
             if st.button("Fusionar jugadores", type="primary", disabled=confirmation != "FUSIONAR"):
                 try:

@@ -101,4 +101,4 @@ def report_filename(session: Session, report_id: int, version: int | None = None
     payload = build_report_payload(session, report_id, version=version)
     match, report = payload["match"], payload["report"]
     date_str = match.match_date.strftime("%Y-%m-%d") if hasattr(match.match_date, "strftime") else str(match.match_date)[:10]
-    return f"NoName_PostMatch_{date_str}_{_slug(match.home_team.name)}_vs_{_slug(match.away_team.name)}_V{version or report.version}_{mode}.pdf"
+    return f"NoName_Informe_{date_str}_{_slug(match.home_team.name)}_vs_{_slug(match.away_team.name)}_V{version or report.version}_{mode}.pdf"
