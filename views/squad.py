@@ -156,8 +156,7 @@ def _disagreements_block(disagreements: list[dict], *, compact: bool = False) ->
 def _sporting_overview(user: dict, season) -> None:
     st.markdown("### Lectura deportiva")
     st.caption(
-        "Dirección Deportiva no reparte tareas de observación: cruza el criterio del staff, detecta patrones entre jornadas "
-        "y separa siempre el rendimiento de No Name de las señales sobre el entorno competitivo."
+        "Rendimiento del equipo, valoraciones del staff y señales de la competición."
     )
     with session_scope() as session:
         recent = sporting_repo.recent_sporting_matches(session, season.id, limit=8)
@@ -172,10 +171,10 @@ def _sporting_overview(user: dict, season) -> None:
     c3.metric("Equipos con lectura", len(teams))
     c4.metric("Discrepancias altas", intel.get("high_disagreements", 0))
 
-    area = st.segmented_control(
-        "Lectura", ["Panorama", "Jugadores señalados", "Equipos", "Discrepancias", "Partidos recientes"],
-        default="Panorama", key="dd_reading_area_421",
-    ) or "Panorama"
+    area = st.selectbox(
+        "Vista de inteligencia", ["Panorama", "Jugadores señalados", "Equipos", "Discrepancias", "Partidos recientes"],
+        key="dd_reading_area_421", help="Selecciona qué información deportiva consultar.",
+    )
 
     if area == "Jugadores señalados":
         st.markdown("#### Señales acumuladas de jugadores externos")
@@ -350,10 +349,10 @@ def render(user: dict) -> None:
     if opened:
         _role_detail(user,season,int(opened)); return
     page_header("Dirección Deportiva","Criterio conjunto, rendimiento de No Name, lectura de la liga y decisiones de plantilla.")
-    section = st.segmented_control(
-        "Área", ["Lectura deportiva", "Plantilla y modelo", "Criterio del staff"],
-        default="Lectura deportiva", key="dd_area_42",
-    ) or "Lectura deportiva"
+    section = st.selectbox(
+        "Área de trabajo", ["Lectura deportiva", "Plantilla y modelo", "Criterio del staff"],
+        key="dd_area_42", help="Inteligencia deportiva, planificación de plantilla o ponderación del staff.",
+    )
     if section == "Lectura deportiva":
         _sporting_overview(user, season)
         return

@@ -27,7 +27,7 @@ def normalize_player_state(value: str | None) -> str:
         "descartado": "Descartado",
         "discarded": "Descartado",
     }
-    return mapping.get(raw, value if value in PLAYER_STATES else "Observado")
+    return mapping.get(raw, value if value in PLAYER_STATES else "Sin decisión")
 
 
 def normalize_need_state(value: str | None) -> str:

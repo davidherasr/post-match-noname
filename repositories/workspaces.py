@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 import re
 
 from sqlalchemy import and_, asc, case as sa_case, desc, func, or_, select
@@ -142,50 +142,120 @@ def _next_own_match(session: Session, own_team_id: int, season_id: int) -> Match
         .where(
             Match.season_id == int(season_id), official_match_clause(), Match.status != "archived",
             Match.match_date >= today,
+            Match.home_score.is_(None), Match.away_score.is_(None),
             or_(Match.home_team_id == int(own_team_id), Match.away_team_id == int(own_team_id)),
         ).order_by(Match.match_date, Match.kickoff_at.nullslast(), Match.id).limit(1)
     )
 
 
+def _last_own_match(session: Session, own_team_id: int, season_id: int) -> Match | None:
+    """Most recent played/past own fixture; never infer a result for an unknown match."""
+    today = local_today()
+    return session.scalar(
+        select(Match).options(
+            joinedload(Match.home_team).load_only(Team.id, Team.name),
+            joinedload(Match.away_team).load_only(Team.id, Team.name),
+        ).where(
+            Match.season_id == int(season_id), official_match_clause(),
+            or_(Match.home_team_id == int(own_team_id), Match.away_team_id == int(own_team_id)),
+            or_(Match.match_date < today,
+                and_(Match.match_date == today, Match.home_score.is_not(None), Match.away_score.is_not(None))),
+        ).order_by(desc(Match.match_date), desc(Match.kickoff_at), desc(Match.id)).limit(1)
+    )
+
+
 def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> dict:
+    """Read-only staff workspace. Tasks are scoped by real season, roles and official match IDs."""
     active = players_repo.get_active_season(session)
     own = players_repo.get_own_team(session)
+    today = local_today()
     next_match = _next_own_match(session, own.id, active.id) if active and own else None
-
+    last_match = _last_own_match(session, own.id, active.id) if active and own else None
     tasks: list[dict] = []
-    if "admin" in roles and active:
-        # One focused query: only future provisional matches in the next 21 days.
-        today = local_today()
-        end = date.fromordinal(today.toordinal() + 21)
-        issues = list(session.scalars(
+    counts = {"admin": 0, "reporter": 0}
+    if "admin" in roles and active and own:
+        own_fixture = or_(Match.home_team_id == own.id, Match.away_team_id == own.id)
+        # Recent unresolved matches are more operationally important than a
+        # future fixture. No artificial default score or kickoff is inferred.
+        pending = list(session.scalars(
             select(Match).options(joinedload(Match.home_team), joinedload(Match.away_team))
-            .where(
-                Match.season_id == active.id, official_match_clause(), Match.match_date >= today, Match.match_date <= end,
-                Match.schedule_status.notin_(["confirmed", "cancelled"]),
-            ).order_by(Match.match_date, Match.id).limit(20)
+            .where(Match.season_id == active.id, official_match_clause(), own_fixture,
+                   Match.match_date <= today, Match.status.in_(["scheduled", "draft"]))
+            .order_by(desc(Match.match_date), desc(Match.id)).limit(40)
         ).unique().all())
-        for m in issues:
-            tasks.append({"kind": "schedule", "severity": "action" if (m.match_date-today).days <= 7 else "pending", "title": f"Confirmar horario · {m.home_team.name} - {m.away_team.name}", "match_id": m.id, "due": m.match_date})
+        for m in pending:
+            tasks.append({"kind": "prepare", "severity": "action", "role": "Administración",
+                          "title": f"Preparar postpartido · {m.home_team.name} - {m.away_team.name}",
+                          "match_id": m.id, "due": m.match_date})
+        published = list(session.scalars(
+            select(Match).options(joinedload(Match.home_team), joinedload(Match.away_team))
+            .where(Match.season_id == active.id, official_match_clause(), own_fixture,
+                   Match.status == "published")
+            .order_by(desc(Match.match_date), desc(Match.id)).limit(60)
+        ).unique().all())
+        if published:
+            ids = [m.id for m in published]
+            assigned = dict(session.execute(
+                select(ReportAssignment.match_id, func.count(ReportAssignment.id))
+                .where(ReportAssignment.match_id.in_(ids), ReportAssignment.status != "waived")
+                .group_by(ReportAssignment.match_id)
+            ).all())
+            for m in published:
+                if not assigned.get(m.id):
+                    tasks.append({"kind": "assign", "severity": "action", "role": "Administración",
+                                  "title": f"Asignar Informadores · {m.home_team.name} - {m.away_team.name}",
+                                  "match_id": m.id, "due": m.match_date})
+        upcoming = list(session.scalars(
+            select(Match).options(joinedload(Match.home_team), joinedload(Match.away_team))
+            .where(Match.season_id == active.id, official_match_clause(), own_fixture,
+                   Match.match_date >= today, Match.match_date <= today + timedelta(days=21),
+                   Match.schedule_status.notin_(["confirmed", "cancelled"]))
+            .order_by(Match.match_date, Match.id).limit(30)
+        ).unique().all())
+        for m in upcoming:
+            tasks.append({"kind": "schedule", "severity": "action" if (m.match_date - today).days <= 7 else "pending",
+                          "role": "Administración", "title": f"Confirmar horario · {m.home_team.name} - {m.away_team.name}",
+                          "match_id": m.id, "due": m.match_date})
+        counts["admin"] = len([t for t in tasks if t["role"] == "Administración"])
 
-    if "reporter" in roles:
+    if "reporter" in roles and active:
         assignments = list(session.scalars(
-            select(ReportAssignment).options(joinedload(ReportAssignment.match).joinedload(Match.home_team), joinedload(ReportAssignment.match).joinedload(Match.away_team))
-            .where(ReportAssignment.user_id == int(user_id), ReportAssignment.status.in_(["pending", "in_progress", "returned"]),
-                   ReportAssignment.match_id.in_(select(Match.id).where(official_match_clause())))
-            .order_by(ReportAssignment.due_at.nullslast(), desc(ReportAssignment.created_at)).limit(20)
+            select(ReportAssignment)
+            .options(joinedload(ReportAssignment.match).joinedload(Match.home_team),
+                     joinedload(ReportAssignment.match).joinedload(Match.away_team))
+            .where(ReportAssignment.user_id == int(user_id),
+                   ReportAssignment.status.in_(["pending", "in_progress", "returned"]),
+                   ReportAssignment.match_id.in_(select(Match.id).where(
+                       official_match_clause(), Match.season_id == active.id, Match.status == "published")))
+            .order_by(ReportAssignment.due_at.nullslast(), desc(ReportAssignment.created_at)).limit(60)
         ).unique().all())
         for a in assignments:
-            tasks.append({"kind": "report", "severity": "action" if a.status == "returned" else "pending", "title": f"Informe · {a.match.home_team.name} - {a.match.away_team.name}", "match_id": a.match_id, "due": a.due_at or a.match.match_date})
+            tasks.append({"kind": "report", "severity": "action" if a.status == "returned" else "pending",
+                          "role": "Informador", "title": f"{'Continuar informe' if a.status == 'in_progress' else 'Corregir informe' if a.status == 'returned' else 'Rellenar informe'} · {a.match.home_team.name} - {a.match.away_team.name}",
+                          "match_id": a.match_id, "due": a.due_at or a.match.match_date})
+        counts["reporter"] = len(assignments)
 
-    director = {"decision_count": 0, "high_needs": 0, "neutral_signals": 0, "latest_reports": []}
+    director = {"decision_count": 0, "high_needs": 0, "neutral_signals": 0,
+                "latest_reports": [], "latest_neutral": []}
     if active and "director" in roles:
+        official_ids = select(Match.id).where(official_match_clause(), Match.season_id == active.id)
         director["latest_reports"] = list(session.scalars(
-            select(Report).options(joinedload(Report.match).joinedload(Match.home_team), joinedload(Report.match).joinedload(Match.away_team), joinedload(Report.reporter))
-            .where(Report.status.in_(["incorporated", "approved", "final"]),
-                   Report.match_id.in_(select(Match.id).where(official_match_clause(), Match.season_id == active.id)))
-            .order_by(desc(Report.submitted_at), desc(Report.id)).limit(5)).unique().all())
+            select(Report).options(joinedload(Report.match).joinedload(Match.home_team),
+                                   joinedload(Report.match).joinedload(Match.away_team), joinedload(Report.reporter))
+            .where(Report.status.in_(["incorporated", "approved", "final"]), Report.match_id.in_(official_ids))
+            .order_by(desc(Report.submitted_at), desc(Report.id)).limit(5)
+        ).unique().all())
+        director["latest_neutral"] = list(session.scalars(
+            select(MatchOpinion).options(joinedload(MatchOpinion.match).joinedload(Match.home_team),
+                                         joinedload(MatchOpinion.match).joinedload(Match.away_team),
+                                         joinedload(MatchOpinion.user))
+            .where(MatchOpinion.match_id.in_(official_ids))
+            .order_by(desc(MatchOpinion.updated_at), desc(MatchOpinion.id)).limit(5)
+        ).unique().all())
         director["decision_count"] = int(session.scalar(
-            select(func.count(PlayerSeasonDecision.id)).where(PlayerSeasonDecision.season_id == active.id, PlayerSeasonDecision.status.in_(["Base", "Observado", "Interesante"]))
+            select(func.count(PlayerSeasonDecision.id)).where(
+                PlayerSeasonDecision.season_id == active.id,
+                PlayerSeasonDecision.status.in_(["Base", "Observado", "Interesante"]))
         ) or 0)
         director["high_needs"] = int(session.scalar(
             select(func.count(SquadNeed.id)).where(SquadNeed.season_id == active.id, SquadNeed.need_level == "Alta")
@@ -193,8 +263,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
         director["neutral_signals"] = int(session.scalar(
             select(func.count(func.distinct(MatchOpinionPlayer.player_id)))
             .join(MatchOpinion, MatchOpinionPlayer.opinion_id == MatchOpinion.id)
-            .join(Match, MatchOpinion.match_id == Match.id)
-            .where(Match.season_id == active.id)
+            .where(MatchOpinion.match_id.in_(official_ids))
         ) or 0)
 
     def due_key(row: dict):
@@ -205,8 +274,27 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
             return datetime.combine(value, time.max)
         return datetime.max
 
-    tasks.sort(key=lambda row: (0 if row["severity"] == "action" else 1, due_key(row), row["title"]))
-    return {"active_season": active, "own_team": own, "next_match": next_match, "is_matchday": bool(next_match and next_match.match_date == local_today()), "tasks": tasks[:25], "director": director}
+    tasks.sort(key=lambda row: (0 if row["severity"] == "action" else 1,
+                                0 if row["kind"] in {"prepare", "assign", "report"} else 1,
+                                due_key(row), row["title"]))
+    match_progress: dict[int, dict] = {}
+    visible_ids = list({m.id for m in (last_match, next_match) if m is not None})
+    if visible_ids:
+        match_progress = {mid: {"assigned": 0, "incorporated": 0} for mid in visible_ids}
+        for mid, assigned_count in session.execute(
+            select(ReportAssignment.match_id, func.count(ReportAssignment.id)).where(
+                ReportAssignment.match_id.in_(visible_ids), ReportAssignment.status != "waived"
+            ).group_by(ReportAssignment.match_id)).all():
+            match_progress[mid]["assigned"] = int(assigned_count or 0)
+        for mid, count in session.execute(
+            select(Report.match_id, func.count(Report.id)).where(
+                Report.match_id.in_(visible_ids), Report.status.in_(["incorporated", "approved", "final"])
+            ).group_by(Report.match_id)).all():
+            match_progress[mid]["incorporated"] = int(count or 0)
+    return {"active_season": active, "own_team": own, "next_match": next_match, "last_match": last_match,
+            "is_matchday": bool(next_match and next_match.match_date == today),
+            "match_progress": match_progress, "tasks": tasks[:40], "task_count": len(tasks),
+            "task_counts": counts, "director": director}
 
 
 def load_player_workspace(session: Session, *, player_id: int, season_id: int | None) -> dict:

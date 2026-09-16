@@ -302,9 +302,17 @@ def validate_report_for_finalization(session: Session, report_id: int) -> list[s
     if not report:
         return ["Informe no encontrado."]
     errors: list[str] = []
-    evaluated = int(session.scalar(select(func.count(PlayerEvaluation.id)).where(and_(PlayerEvaluation.report_id == report_id, PlayerEvaluation.evaluation_scope == "rival", PlayerEvaluation.team_id == report.rival_team_id, PlayerEvaluation.observation_status == "evaluated", PlayerEvaluation.general_rating.is_not(None)))) or 0)
-    if evaluated < 1:
-        errors.append("Evalúa al menos a un jugador rival con nota general.")
+    evaluated = int(session.scalar(select(func.count(PlayerEvaluation.id)).where(
+        PlayerEvaluation.report_id == report_id,
+        PlayerEvaluation.observation_status == "evaluated",
+        PlayerEvaluation.general_rating.is_not(None), PlayerEvaluation.general_rating > 0,
+    )) or 0)
+    has_team_rating = any(value is not None and value > 0 for value in
+                          (report.own_team_rating, report.rival_team_rating))
+    has_context = any(len(str(value or "").strip()) >= 10 for value in
+                      (report.own_team_note, report.opponent_overview, report.key_takeaways))
+    if evaluated == 0 and not (has_team_rating and has_context):
+        errors.append("Valora al menos un jugador o guarda una nota de equipo y un comentario de contexto antes de entregar.")
     return errors
 
 

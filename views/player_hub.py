@@ -106,12 +106,11 @@ def _render_player(user: dict, player_id: int) -> None:
     _export(payload)
 
 
-def _compare_players(ids: list[int]) -> None:
+def _compare_players(ids: list[int], season_id: int | None = None) -> None:
     if len(ids)!=2:
         return
     with session_scope() as session:
-        active=players_repo.get_active_season(session)
-        payloads=[workspaces.load_player_workspace(session,player_id=pid,season_id=active.id if active else None) for pid in ids]
+        payloads=[workspaces.load_player_workspace(session,player_id=pid,season_id=season_id) for pid in ids]
     st.markdown("### Comparación")
     cols=st.columns(2)
     for col,payload in zip(cols,payloads):
@@ -120,7 +119,8 @@ def _compare_players(ids: list[int]) -> None:
             st.markdown(f"**{p.display_name or p.full_name}**")
             st.metric("Rendimiento",payload["postmatch"]["average"] or "-")
             st.metric("Encaje",payload.get("fit_score") or "-")
-            st.metric("Confianza",f"{payload['postmatch']['confidence']['score']}/100")
+            confidence = payload['postmatch']['confidence']
+            st.metric("Confianza",f"{confidence['score']}/100" if confidence['sample'] else "No evaluable")
             st.caption(f"Estado: {payload['decision'].status if payload.get('decision') else 'Sin decisión'}")
 
 
@@ -206,24 +206,30 @@ def render(user: dict) -> None:
             selected = st.multiselect('Jugadores', available, max_selections=2,
                 format_func=lambda pid:names.get(pid, 'Jugador no disponible'),key='catalog_compare_423')
             if len(selected) == 2:
-                _compare_players(selected)
+                _compare_players(selected, season_id)
             else:
                 st.caption('Elige dos jugadores del catálogo; la selección se conserva al cambiar de filtro.')
         for item in rows:
             p = item['player']
             team = item['team'].name if item['team'] else 'Equipo no confirmado'
+            own_player = item['scope'] == 'Propio'
             with st.container(border=True):
-                left,right = st.columns([4,1])
-                with left:
-                    st.markdown(f'**{p.display_name or p.full_name}** · {p.primary_position or "Posición sin registrar"}')
-                    st.caption(f'{team} · {item["scope"]} · {item["state"]}' +
-                               (f' · Prioridad {item["priority"]}' if item.get('priority') else ''))
-                    avg = f'{item["rating"]:.1f}/10' if item['rating'] is not None else 'Sin nota'
-                    st.caption(f'Rendimiento: {avg} · {item["match_count"]} partidos · {item["authors"]} informadores')
-                    st.caption(f'Señales neutrales: {item["neutral_mentions"]} en {item["neutral_matches"]} partidos ({item["neutral_authors"]} autores) · Seguimiento formal: {item["tracking_count"]} observaciones')
-                with right:
-                    if st.button('Abrir ficha', type='primary', use_container_width=True, key=f'catalog_open_{p.id}'):
-                        _open_player(p.id)
+                st.markdown(f'**{p.display_name or p.full_name}** · {p.primary_position or "Posición sin registrar"}')
+                status_text = item['state'] if item.get('decision') else 'Sin decisión deportiva'
+                st.caption(f'{team} · {"Plantilla propia" if own_player else "Futbolista externo"} · {status_text}' +
+                           (f' · Prioridad {item["priority"]}' if item.get('priority') else ''))
+                avg = f'{item["rating"]:.1f}/10' if item['rating'] is not None else 'Sin calificación'
+                a,b,c = st.columns(3)
+                a.metric('Rendimiento propio' if own_player else 'Rendimiento rival', avg)
+                b.metric('Partidos evaluados', item['match_count'])
+                c.metric('Informadores', item['authors'])
+                if not own_player:
+                    st.caption(f'Señales neutrales: {item["neutral_mentions"]} · Partidos señalados: {item["neutral_matches"]} · Autores: {item["neutral_authors"]}')
+                    st.caption(f'Seguimiento formal: {item["tracking_count"]} observaciones')
+                else:
+                    st.caption('Evolución del equipo propio; las señales externas no se confunden con el rendimiento de la plantilla.')
+                if st.button('Abrir ficha', type='secondary', use_container_width=True, key=f'catalog_open_{p.id}'):
+                    _open_player(p.id)
     if data['pages'] > 1:
         prev, middle, nxt = st.columns([1,2,1])
         if prev.button('← Anterior', disabled=data['page'] == 1, use_container_width=True):

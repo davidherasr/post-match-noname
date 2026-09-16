@@ -17,7 +17,8 @@ def render(user:dict,team_id:int)->None:
         active=players_repo.get_active_season(session)
         data=workspaces.load_team_workspace(session,team_id=team_id,season_id=active.id if active else None)
     team=data["team"]
-    page_header(team.name,"Ficha de rival")
+    own_team = bool(team.is_own_team)
+    page_header(team.name, "Plantilla y rendimiento del equipo propio" if own_team else "Plantilla e información del equipo")
     if data.get("next_vs_own"):
         m=data["next_vs_own"]
         st.markdown(f"**Próximo partido vs No Name:** {m.round_name} · {m.home_team.name} - {m.away_team.name}")
@@ -35,7 +36,7 @@ def render(user:dict,team_id:int)->None:
         p=roster.player;d=data["decisions"].get(p.id)
         with st.container(border=True):
             a,b=st.columns([5,1]);a.markdown(f"**{p.display_name or p.full_name}** · {p.primary_position or '-'}")
-            a.caption(d.status if d else "Observado")
+            a.caption(d.status if d else "Sin decisión deportiva")
             if b.button("Abrir",key=f"teamplayer38_{team.id}_{p.id}",use_container_width=True):
                 st.session_state["workspace_player_id"]=p.id;request_navigation("Jugadores");st.rerun()
     if data.get("readings"):

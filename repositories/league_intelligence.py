@@ -47,10 +47,19 @@ def confidence_score(observations: int, reporter_count: int, dispersion: float, 
     observations = max(0, int(observations or 0))
     reporter_count = max(0, int(reporter_count or 0))
     dispersion = max(0.0, float(dispersion or 0.0))
+    if observations == 0:
+        reporter_count = 0
+        last_observed = None
 
     sample_score = 0 if observations == 0 else 8 if observations == 1 else 20 if observations == 2 else 30 if observations == 3 else 36 if observations == 4 else 40
     reporter_score = 0 if reporter_count == 0 else 5 if reporter_count == 1 else 12 if reporter_count == 2 else 17 if reporter_count == 3 else 20
-    if dispersion <= 0.35:
+    # Agreement cannot be measured without two independent authors. Zero
+    # observations must never be labeled as highly reliable evidence.
+    if observations == 0 or reporter_count == 0:
+        consensus_score, consensus_label = 0, "No evaluable"
+    elif reporter_count < 2:
+        consensus_score, consensus_label = 0, "No comparable"
+    elif dispersion <= 0.35:
         consensus_score, consensus_label = 25, "Muy alto"
     elif dispersion <= 0.75:
         consensus_score, consensus_label = 21, "Alto"
@@ -79,7 +88,7 @@ def confidence_score(observations: int, reporter_count: int, dispersion: float, 
             recency_score, recency_label = 0, "Muy antigua"
 
     score = int(min(100, sample_score + reporter_score + consensus_score + recency_score))
-    label = "Alta" if score >= 75 else "Media" if score >= 50 else "Baja"
+    label = "No evaluable" if observations == 0 else "Alta" if score >= 75 else "Media" if score >= 50 else "Baja"
     return {
         "score": score, "label": label, "sample": observations, "reporters": reporter_count, "dispersion": dispersion,
         "consensus": consensus_label, "recency": recency_label, "days_since": days_since,

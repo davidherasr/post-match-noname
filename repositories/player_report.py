@@ -18,6 +18,7 @@ from repositories import advanced_scouting as advanced_repo
 from repositories import league_intelligence as league_repo
 from repositories import planning as planning_repo
 from repositories import scouting as base_repo
+from repositories.data_governance import official_match_clause
 
 
 def _mean(values):
@@ -114,6 +115,10 @@ def _current_team(session: Session, player_id: int, season_id: int | None, histo
             return roster.team
     if history:
         return history[0]["team"]
+    # Never show a player's current club as their historical club when the
+    # selected season has no documented roster or match evidence.
+    if season_id:
+        return None
     roster = session.scalar(
         select(TeamRoster).options(joinedload(TeamRoster.team))
         .join(Team, Team.id == TeamRoster.team_id)
@@ -124,12 +129,12 @@ def _current_team(session: Session, player_id: int, season_id: int | None, histo
 
 
 def _postmatch_metrics(history: list[dict]) -> dict:
-    rows = [h for h in history if h["evaluation"].general_rating is not None and h["evaluation"].observation_status == "evaluated"]
+    rows = [h for h in history if h["evaluation"].general_rating is not None and float(h["evaluation"].general_rating) > 0 and h["evaluation"].observation_status == "evaluated"]
     ratings = [float(h["evaluation"].general_rating) for h in rows]
     avg = _mean(ratings)
     dispersion = None
-    if ratings:
-        dispersion = math.sqrt(sum((x - avg) ** 2 for x in ratings) / len(ratings)) if len(ratings) > 1 else 0.0
+    if len(ratings) > 1 and len({h["reporter"].id for h in rows}) > 1:
+        dispersion = math.sqrt(sum((x - avg) ** 2 for x in ratings) / len(ratings))
     reporters = len({h["reporter"].id for h in rows})
     last = max((h["match"].match_date for h in rows), default=None)
     confidence = league_repo.confidence_score(len(rows), reporters, float(dispersion or 0), last)
@@ -137,7 +142,7 @@ def _postmatch_metrics(history: list[dict]) -> dict:
         "average": avg,
         "observations": len(rows),
         "reporters": reporters,
-        "dispersion": round(float(dispersion or 0), 2) if rows else None,
+        "dispersion": round(float(dispersion), 2) if dispersion is not None else None,
         "standouts": sum(1 for h in rows if h["evaluation"].standout),
         "last_observed": last,
         "confidence": confidence,
@@ -148,7 +153,7 @@ def _timeline(history: list[dict], observations: list[ScoutObservation]) -> list
     rows: list[dict] = []
     for item in history:
         ev = item["evaluation"]
-        if ev.general_rating is None or ev.observation_status != "evaluated":
+        if ev.general_rating is None or float(ev.general_rating) <= 0 or ev.observation_status != "evaluated":
             continue
         match = item["match"]
         rows.append({
@@ -323,12 +328,37 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
     if not player:
         raise ValueError("Jugador no encontrado.")
     profile = advanced_repo.get_profile(session, player.id)
-    history = base_repo.player_history(session, player.id)
+    history = base_repo.player_history_by_scope(session, player.id, scope="all")
+    if season_id:
+        history = [item for item in history if item["match"].season_id == int(season_id)]
+    own_history = [item for item in history if item["evaluation"].evaluation_scope == "own"
+                   and item["evaluation"].team_id == item["report"].own_team_id]
+    rival_history = [item for item in history if item["evaluation"].evaluation_scope == "rival"
+                     and item["evaluation"].team_id == item["report"].rival_team_id]
     observations = planning_repo.list_observations(session, player_id=player.id, limit=200)
-    submitted = [o for o in observations if o.status == "submitted"]
+    valid_match_ids = set(session.scalars(select(Match.id).where(official_match_clause())).all())
+    submitted = [o for o in observations if o.status == "submitted"
+                 and (o.match_id is None or o.match_id in valid_match_ids)
+                 and (not season_id or (o.match_id is not None and o.match.season_id == int(season_id)))]
     team = _current_team(session, player.id, season_id, history)
-    metrics = _postmatch_metrics(history)
+    from repositories.players import get_own_team
+    own_team = get_own_team(session)
+    is_own_player = bool(own_team and team and own_team.id == team.id)
+    # Keep both evidence streams. The headline follows the player's documented
+    # season/team; never collapse own performance into rival scouting signals.
+    own_metrics = _postmatch_metrics(own_history)
+    rival_metrics = _postmatch_metrics(rival_history)
+    metrics = own_metrics if is_own_player else rival_metrics
     positions = league_repo.observed_position_counts(session, player.id, season_id=season_id)
+    if is_own_player:
+        from collections import defaultdict as _defaultdict
+        position_totals = _defaultdict(int)
+        for item in own_history:
+            ev = item["evaluation"]
+            if ev.observation_status == "evaluated" and ev.general_rating and ev.general_rating > 0:
+                position = (item["participation"].position if item.get("participation") else None) or player.primary_position or "Otro"
+                position_totals[position] += 1
+        positions = [{"position": key, "observations": value} for key, value in position_totals.items()]
     # Add positions coming only from individual tracking without inventing ratings.
     scout_pos = Counter(o.observed_position for o in submitted if o.observed_position)
     known = {str(r["position"]): int(r["observations"]) for r in positions if r.get("position")}
@@ -363,6 +393,12 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
     current_level = decision.current_level if decision and decision.current_level is not None else _mean(o.current_level for o in submitted)
     potential = decision.potential_score if decision and decision.potential_score is not None else _mean(o.potential_score for o in submitted)
     evidence = planning_repo.scouting_evidence_summary(session, player.id, season_id=season_id)
+    if is_own_player:
+        # The generic scouting batch counts rival evaluations by design; the
+        # internal player's evidence is their OWN delivered postmatch history.
+        evidence.update(postmatch_observations=own_metrics["observations"],
+                        postmatch_reporters=own_metrics["reporters"],
+                        postmatch_last=own_metrics["last_observed"])
     internal, comparables = _comparison_pool(session, season_id=season_id, player_id=player.id, role=role, target_scores=criteria_scores, target_fit=fit)
     timeline = _timeline(history, submitted)
     strengths = _text_points(submitted, "strengths")
@@ -379,6 +415,9 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
         "decision": decision,
         "role": role,
         "postmatch": metrics,
+        "own_postmatch": own_metrics,
+        "rival_postmatch": rival_metrics,
+        "is_own_player": is_own_player,
         "scout_average": scout_general,
         "block_scores": block_scores,
         "fit_score": fit,

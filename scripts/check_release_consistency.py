@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.2.3.2"
+EXPECTED = "4.4"
 HEAD_MIGRATION = "0013_data_governance_4_2_3"
 
 
@@ -121,7 +121,7 @@ def main() -> None:
             errors.append(f"Inteligencia transversal 4.2.2 incompleta: falta {token}")
 
     home_text = (ROOT / "views" / "home.py").read_text(encoding="utf-8")
-    if "Abrir lectura deportiva" not in home_text or 'request_navigation("Dirección Deportiva")' not in home_text:
+    if not any(label in home_text for label in ("Abrir lectura deportiva", "Consultar inteligencia deportiva")) or 'request_navigation("Dirección Deportiva")' not in home_text:
         errors.append("Inicio no enlaza directamente con la lectura deportiva de DD")
 
     for legacy_view in ["views/scout.py", "views/director.py", "views/scouted.py", "views/model.py", "views/dashboard.py"]:
@@ -156,7 +156,7 @@ def main() -> None:
 
     if errors:
         raise SystemExit("Release inconsistente:\n- " + "\n- ".join(errors))
-    print(f"OK · No Name PostMatch {EXPECTED} es internamente consistente · Alembic {HEAD_MIGRATION}")
+    print(f"OK · No Name · Área Técnica {EXPECTED} es internamente consistente · Alembic {HEAD_MIGRATION}")
 
 
 if __name__ == "__main__":

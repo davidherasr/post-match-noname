@@ -17,7 +17,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.2.3.2"
+REPORTS_PAGE_API_VERSION = "4.4"
 
 
 
@@ -249,9 +249,18 @@ def _store_one_document(session, report_id: int, version_obj, mode: str) -> str:
 
 
 def _render_finish(report, evaluation_list: list, report_id: int, user: dict, read_only: bool) -> None:
-    valid_rival = [e for e in evaluation_list if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None]
-    valid_own = [e for e in evaluation_list if e.evaluation_scope == "own" and e.observation_status == "evaluated" and e.general_rating is not None]
-    errors = [] if valid_rival else ["Evalúa al menos a un jugador rival."]
+    valid_rival = [e for e in evaluation_list if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None and e.general_rating > 0]
+    valid_own = [e for e in evaluation_list if e.evaluation_scope == "own" and e.observation_status == "evaluated" and e.general_rating is not None and e.general_rating > 0]
+    valid_players = valid_rival + valid_own
+    context_notes = (report.own_team_note, report.opponent_overview, report.key_takeaways)
+    has_context = any(len(str(value or "").strip()) >= 10 for value in context_notes)
+    has_rating = any(value is not None and value > 0 for value in (report.own_team_rating, report.rival_team_rating))
+    errors = [] if valid_players or (has_context and has_rating) else [
+        "Valora a un jugador o guarda una nota de equipo con comentario de contexto."]
+    if not valid_own and not read_only:
+        st.info("Todavía no hay valoraciones individuales propias. Comprueba si falta información antes de entregar.")
+    if not valid_rival and not read_only:
+        st.info("No hay valoraciones individuales del rival. Puedes entregar una lectura colectiva documentada.")
     metrics = st.columns(4)
     metrics[0].metric("Rivales", len(valid_rival)); metrics[1].metric("Propios", len(valid_own))
     metrics[2].metric("Destacados", len([e for e in valid_rival + valid_own if e.standout])); metrics[3].metric("Versión", f"V{report.version}")
@@ -295,7 +304,7 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
                 st.error(str(exc))
 
     if not read_only:
-        st.success("No hay cambios de edición pendientes: has llegado aquí después de guardar el bloque Rival.")
+        st.caption("Revisa el resumen antes de incorporar el informe. Guarda cualquier cambio de la lectura global antes de entregar.")
         c1, c2 = st.columns(2)
         if c1.button("← Revisar No Name", use_container_width=True):
             st.session_state[f"report_stage_{report_id}"] = "own"; st.rerun()
@@ -380,8 +389,14 @@ def _render_report_editor(report_id: int, user: dict) -> None:
     st.caption(f"{report.match.competition.name} · {report.match.round_name} · {report.match.match_date.strftime('%d/%m/%Y')} · {REPORT_STATUSES.get(report.status, report.status)} · V{report.version}")
     if report.review_note:
         st.warning(f"Revisión: {report.review_note}")
-    evaluated_rival = [e for e in evaluation_list if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None]
-    st.progress(len(evaluated_rival) / len(rival_players) if rival_players else 0, text=f"{len(evaluated_rival)} de {len(rival_players)} rivales valorados")
+    evaluated_rival = [e for e in evaluation_list if e.evaluation_scope == "rival" and e.observation_status == "evaluated" and e.general_rating is not None and e.general_rating > 0]
+    evaluated_own = [e for e in evaluation_list if e.evaluation_scope == "own" and e.observation_status == "evaluated" and e.general_rating is not None and e.general_rating > 0]
+    total_known = len(rival_players) + len(own_players)
+    total_evaluated = len(evaluated_rival) + len(evaluated_own)
+    if total_known:
+        st.progress(min(1.0, total_evaluated / total_known), text=f"Jugadores valorados: {total_evaluated}/{total_known} · Guardado por bloques")
+    else:
+        st.caption("No hay participantes identificados: puedes registrar una lectura colectiva documentada.")
 
     if read_only:
         section = st.radio("Sección", ["No Name", "Rival", "Finalizar", "Documentos"], horizontal=True, key=f"readonly_report_section_{report_id}")

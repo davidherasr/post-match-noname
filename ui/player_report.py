@@ -48,9 +48,9 @@ def render_header(payload: dict) -> None:
             </div>
           </div>
           <div class="pm360-kpis">
-            <div class="pm360-kpi"><span>Rendimiento</span><strong>{_fmt(post['average'])}</strong><small>{post['observations']} postpartidos</small></div>
+            <div class="pm360-kpi"><span>{'Rendimiento propio' if payload.get('is_own_player') else 'Rendimiento rival'}</span><strong>{_fmt(post['average'])}</strong><small>{post['observations']} evaluaciones</small></div>
             <div class="pm360-kpi"><span>Encaje No Name</span><strong>{_fmt(payload.get('fit_score'))}</strong><small>{safe_html(role.name if role else 'sin rol')}</small></div>
-            <div class="pm360-kpi"><span>Confianza</span><strong>{confidence['score']}/100</strong><small>{safe_html(confidence['label'])}</small></div>
+            <div class="pm360-kpi"><span>Confianza</span><strong>{str(confidence['score']) + '/100' if confidence['sample'] else '—'}</strong><small>{safe_html(confidence['label'])}</small></div>
           </div>
         </div>
         """,
@@ -115,7 +115,10 @@ def render_summary(payload: dict) -> None:
     with c3:
         st.markdown("#### Recomendación")
         st.metric("Decisión / recomendación", payload.get("recommendation") or "Sin decidir")
-        st.caption(f"Seguimiento individual: {payload['evidence']['specific_observations']} · Fuerza de evidencia: {payload['evidence']['specific_strength']}")
+        if payload.get("is_own_player"):
+            st.caption(f"Postpartidos propios: {payload['own_postmatch']['observations']} · Informadores: {payload['own_postmatch']['reporters']}")
+        else:
+            st.caption(f"Seguimiento individual: {payload['evidence']['specific_observations']} · Fuerza de evidencia: {payload['evidence']['specific_strength']}")
 
     st.markdown("### Perfil observado")
     cols = st.columns(4)
@@ -179,8 +182,9 @@ def render_observations(payload: dict) -> None:
     ev = payload["evidence"]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Postpartidos", post["observations"])
-    c2.metric("Seguimientos", ev["specific_observations"])
-    c3.metric("Observadores distintos", ev["specific_scouts"])
+    c2.metric("Seguimientos", ev["specific_observations"] if not payload.get("is_own_player") else 0)
+    c3.metric("Informadores distintos" if payload.get("is_own_player") else "Observadores distintos",
+              post["reporters"] if payload.get("is_own_player") else ev["specific_scouts"])
     c4.metric("Destacados", post["standouts"])
     conf = post["confidence"]
     st.markdown("#### Por qué confiamos en la muestra")

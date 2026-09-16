@@ -1,3 +1,13 @@
+## 4.4 · Experiencia operativa y fiabilidad deportiva
+
+- Inicio reorganizado por tareas reales del usuario, ultimo y proximo partido y actividad relevante de Direccion Deportiva.
+- Jornada presenta una accion principal visible segun estado y permisos, con asignacion de Informadores y acceso directo al informe.
+- Preparacion admite XI documentado parcialmente y avisa sin inventar titulares; preserva participaciones ya verificadas.
+- Informes: progreso, revision antes de entrega y advertencia de ausencia de notas propias; incorporacion directa conservada.
+- Player 360 separa historial propio y rival, evita consenso artificial sin muestra, y el comparador respeta temporada.
+- Panel de Direccion Deportiva reorganizado y controles de navegacion menos propensos a desbordar; Administracion distingue mantenimiento avanzado.
+- Se mantienen los permisos, el borrado protegido y la exclusion de partidos de prueba/archivados. Sin migracion nueva; head 0013.
+
 ## 4.2.3.2 · Área Técnica, borrado definitivo y selección de Informadores
 
 - Renombrada la marca visible a «No Name · Área Técnica». Oculta numeración de versión y retira mensajes internos de desarrollo de las pantallas habituales.

@@ -56,8 +56,9 @@ def _new_draft(active_season_id: int | None = None) -> dict:
         "match_date": local_today().isoformat(),
         "kickoff_time": "",
         "own_location": "Local",
-        "own_score": 0,
-        "rival_score": 0,
+        "result_known": False,
+        "own_score": None,
+        "rival_score": None,
         "own_formation": None,
         "rival_formation": None,
         "venue": "",
@@ -99,6 +100,9 @@ def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
             "kickoff_time": match.kickoff_at.strftime("%H:%M"),
             "own_location": "Local" if match.home_team_id == own_id else "Visitante",
             "venue": match.venue or "",
+            "result_known": match.home_score is not None and match.away_score is not None,
+            "own_score": match.home_score if match.home_team_id == own_id else match.away_score,
+            "rival_score": match.away_score if match.home_team_id == own_id else match.home_score,
             "own_formation": match.home_formation if match.home_team_id == own_id else match.away_formation,
             "rival_formation": match.away_formation if match.home_team_id == own_id else match.home_formation,
         })
@@ -113,11 +117,12 @@ def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
         rival_starters = [part for part in rival_parts if part.starter]
         own_slots = slots_for(draft["own_formation"])
         rival_slots = slots_for(draft["rival_formation"])
-        if len(own_starters) == 11:
+        current_roster_ids = {row.player_id for row in repo.get_roster(session, own_id, match.season_id)}
+        if own_starters and all(part.player_id in current_roster_ids for part in own_starters):
             draft["own_xi"] = _prefill_own_starters(own_starters, own_slots)
             draft["own_xi_source"] = "Titulares ya registrados en este mismo partido"
             draft["own_xi_formation"] = draft["own_formation"]
-        if len(rival_starters) == 11:
+        if rival_starters:
             draft["rival_xi"] = _prefill_rival_starters(rival_starters, rival_slots)
             draft["rival_xi_source"] = "Titulares ya registrados en este mismo partido"
             draft["rival_xi_formation"] = draft["rival_formation"]
@@ -277,8 +282,10 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         )
         with st.form("postmatch_38_context_header", border=True):
             a, b = st.columns(2)
-            own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
-            rival_score = b.number_input(f"Goles {rival.name if rival else 'rival'}", 0, 30, int(d.get("rival_score", 0)))
+            result_known = st.checkbox("Resultado confirmado", value=bool(d.get("result_known", False)),
+                                       help="Si todavía no conoces el marcador, déjalo sin marcar. No se registrará un 0-0 ficticio.")
+            own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score") or 0), disabled=not result_known)
+            rival_score = b.number_input(f"Goles {rival.name if rival else 'rival'}", 0, 30, int(d.get("rival_score") or 0), disabled=not result_known)
             a, b = st.columns(2)
             formation_options = [None, *FORMATIONS]
             formation_label = lambda name: name or "Desconocida (no inventar)"
@@ -294,7 +301,9 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
             prepare = st.form_submit_button("CONTINUAR", type="primary", use_container_width=True)
         if prepare:
             d.update({
-                "own_score": int(own_score), "rival_score": int(rival_score),
+                "result_known": result_known,
+                "own_score": int(own_score) if result_known else None,
+                "rival_score": int(rival_score) if result_known else None,
                 "own_formation": own_formation, "rival_formation": rival_formation,
                 "reporter_ids": reporter_ids, "venue": venue.strip(),
                 "due_enabled": due_enabled, "due_date": due_date.isoformat(),
@@ -332,8 +341,10 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         kickoff_text = c.text_input("Hora", value=str(d.get("kickoff_time") or ""), placeholder="HH:MM", help="No se propone ninguna hora: debe ser la hora real confirmada.")
         own_location = e.radio("No Name", ["Local", "Visitante"], horizontal=True, index=0 if d.get("own_location") == "Local" else 1)
         a, b = st.columns(2)
-        own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score", 0)))
-        rival_score = b.number_input("Goles rival", 0, 30, int(d.get("rival_score", 0)))
+        result_known = st.checkbox("Resultado confirmado", value=bool(d.get("result_known", False)),
+                                   help="Si aún no hay marcador verificado, no lo rellenes: quedará desconocido.")
+        own_score = a.number_input(f"Goles {own.name}", 0, 30, int(d.get("own_score") or 0), disabled=not result_known)
+        rival_score = b.number_input("Goles rival", 0, 30, int(d.get("rival_score") or 0), disabled=not result_known)
         a, b = st.columns(2)
         formation_options = [None, *FORMATIONS]
         formation_label = lambda name: name or "Desconocida (no inventar)"
@@ -353,7 +364,9 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
             "season_id": season_id, "competition_id": competition_id, "new_competition": new_competition.strip(),
             "rival_id": rival_id, "new_rival": new_rival.strip(), "round_name": round_name.strip(),
             "match_date": match_date.isoformat(), "kickoff_time": parsed_kickoff.isoformat(timespec="minutes"),
-            "own_location": own_location, "own_score": int(own_score), "rival_score": int(rival_score),
+            "own_location": own_location, "result_known": result_known,
+            "own_score": int(own_score) if result_known else None,
+            "rival_score": int(rival_score) if result_known else None,
             "own_formation": own_formation, "rival_formation": rival_formation, "reporter_ids": reporter_ids,
             "due_enabled": False, "ui_step": "own",
         })
@@ -491,11 +504,11 @@ def _own_lineup(user: dict, own, d: dict) -> None:
         save = st.form_submit_button("Guardar XI en el borrador", type="primary", use_container_width=True)
     if save:
         chosen = [x["player_id"] for x in selected_rows if x["player_id"] is not None]
-        if len(chosen) != 11 or len(set(chosen)) != 11:
-            st.error("Selecciona 11 jugadores distintos.")
+        if len(set(chosen)) != len(chosen):
+            st.error("No repitas a un futbolista en las posiciones del XI.")
         else:
             d["own_xi"] = selected_rows
-            st.success("XI preparado. Puedes continuar al siguiente paso cuando esté correcto.")
+            st.success(f"Titulares propios guardados: {len(chosen)}/11. Los que faltan quedan sin identificar.")
 
     if len([x for x in d.get("own_xi", []) if x.get("player_id")]) == 11:
         xi_ids = [x["player_id"] for x in d["own_xi"]]
@@ -597,13 +610,14 @@ def _rival_lineup(own, d: dict) -> None:
             rows.append({"name": name.strip(), "shirt_number": int(shirt) if shirt is not None else None, "position": (retained or slot.code) if slot.code == 'Otro' else slot.code, "role": slot.label})
         save = st.form_submit_button("Guardar XI rival en el borrador", type="primary", use_container_width=True)
     if save:
-        if len([r for r in rows if r["name"]]) != 11:
-            st.error("Completa los 11 titulares del rival.")
+        known = [r["name"].casefold() for r in rows if r["name"]]
+        if len(known) != len(set(known)):
+            st.error("Hay dos titulares rivales con el mismo nombre. Revísalos antes de guardar.")
         else:
             d["rival_xi"] = rows
             st.session_state.pop("postmatch_identity_conflicts_34", None)
             st.session_state.pop("postmatch_identity_resolutions_34", None)
-            st.success("XI rival preparado localmente.")
+            st.success(f"Titulares rivales guardados: {len(known)}/11. Los que faltan quedan sin identificar.")
 
     if len([r for r in d.get("rival_xi", []) if r.get("name")]) == 11:
         names = [r["name"] for r in d["rival_xi"]]
@@ -634,9 +648,9 @@ def _rival_lineup(own, d: dict) -> None:
 
 def _own_rows_for_publish(roster, d: dict) -> list[dict]:
     by_id = {r.player_id: r for r in roster}
-    xi = [dict(x) for x in d.get("own_xi", [])]
-    if len([x for x in xi if x.get("player_id")]) != 11:
-        raise ValueError("Completa el XI de No Name.")
+    xi = [dict(x) for x in d.get("own_xi", []) if x.get("player_id")]
+    if len(xi) > 11 or len({int(x["player_id"]) for x in xi}) != len(xi):
+        raise ValueError("Revisa los titulares propios: no puede haber duplicados ni más de once.")
     rows = {}
     for x in xi:
         pid = int(x["player_id"])
@@ -653,10 +667,39 @@ def _own_rows_for_publish(roster, d: dict) -> list[dict]:
     return list(rows.values())
 
 
+def _preserve_known_own_participants(new_rows: list[dict], existing) -> list[dict]:
+    """Partial input adds evidence without erasing known match participants or draft evaluations.
+
+    A complete newly entered XI is an explicit replacement; existing substitutes
+    not selected again are retained only if they do not collide with the XI.
+    """
+    if not existing:
+        return new_rows
+    selected_ids = {int(row["player_id"]) for row in new_rows}
+    submitted_starters = sum(bool(row.get("starter")) for row in new_rows)
+    extra = []
+    for part in existing:
+        if part.player_id in selected_ids:
+            continue
+        if submitted_starters == 11 and part.starter:
+            continue
+        extra.append({
+            "selected": True, "player_id": part.player_id,
+            "shirt_number": part.shirt_number, "starter": part.starter,
+            "position": part.position, "minute_in": part.minute_in,
+            "minute_out": part.minute_out, "captain": part.captain,
+            "order_index": part.order_index,
+        })
+    total_starters = submitted_starters + sum(bool(row["starter"]) for row in extra)
+    if total_starters > 11:
+        raise ValueError("La alineación parcial se solapa con los titulares ya registrados. Corrige el XI del partido antes de publicar.")
+    return new_rows + extra
+
+
 def _rival_rows_for_publish(d: dict) -> list[dict]:
     xi = [dict(x) for x in d.get("rival_xi", []) if x.get("name")]
-    if len(xi) != 11:
-        raise ValueError("Completa el XI rival.")
+    if len(xi) > 11 or len({x["name"].strip().casefold() for x in xi}) != len(xi):
+        raise ValueError("Revisa los titulares rivales: no puede haber duplicados ni más de once.")
     rows = [{"name":x["name"],"shirt_number":x.get("shirt_number"),"position":x["position"],"starter":True,"minute_in":0,"minute_out":90,"captain":False} for x in xi]
     by_name = {x["name"]: x for x in rows}
     for sub in sorted(d.get("rival_subs", []), key=lambda x: x["minute"]):
@@ -718,8 +761,8 @@ def _publish(user: dict, own, d: dict) -> None:
     rival_ok = len([x for x in d.get("rival_xi", []) if x.get("name")]) == 11
     errors, warnings = _validate_draft_for_publish(d)
     a,b,c,dcol = st.columns(4)
-    a.metric("XI No Name", "11/11" if own_ok else "Pendiente")
-    b.metric("XI rival", "11/11" if rival_ok else "Pendiente")
+    a.metric("Titulares propios", f"{sum(bool(x.get('player_id')) for x in d.get('own_xi', []))}/11")
+    b.metric("Titulares rivales", f"{sum(bool(x.get('name')) for x in d.get('rival_xi', []))}/11")
     c.metric("Cambios propios", len(d.get("own_subs", [])))
     dcol.metric("Cambios rivales", len(d.get("rival_subs", [])))
     if errors:
@@ -763,18 +806,45 @@ def _publish(user: dict, own, d: dict) -> None:
                         due_at = datetime.combine(_to_date(d["due_date"]), _to_time(d["due_time"])) if d.get("due_enabled") else None
                         kickoff_at = datetime.combine(_to_date(d["match_date"]), time.fromisoformat(str(d["kickoff_time"])))
                         if d.get("existing_match_id"):
+                            previous_match = repo.get_match(session, int(d["existing_match_id"]))
+                            if previous_match and not d.get("result_known"):
+                                home_score, away_score = previous_match.home_score, previous_match.away_score
                             match = repo.update_match(
                                 session, int(d["existing_match_id"]), user["id"],
                                 season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]),
                                 window_start=None, window_end=None, kickoff_at=kickoff_at, schedule_status="confirmed",
-                                home_team_id=home_id, away_team_id=away_id, home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None,
+                                home_team_id=home_id, away_team_id=away_id, home_score=home_score, away_score=away_score, venue=d.get("venue") or None,
                                 home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at,
                             )
                         else:
-                            match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=int(home_score), away_score=int(away_score), venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at, kickoff_at=kickoff_at, schedule_status="confirmed")
+                            match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=home_score, away_score=away_score, venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at, kickoff_at=kickoff_at, schedule_status="confirmed")
                         roster = repo.get_roster(session, own.id, season_id)
-                        repo.replace_participations(session, match.id, own.id, _own_rows_for_publish(roster, d), user["id"])
-                        repo.save_named_lineup_fast(session, match_id=match.id, team_id=rival.id, season_id=season_id, rows=rival_rows, actor_id=user["id"], sync_roster=True, identity_resolutions=identity_resolutions)
+                        own_rows = _own_rows_for_publish(roster, d)
+                        previous_own = repo.get_participations(session, match.id, own.id)
+                        own_rows = _preserve_known_own_participants(own_rows, previous_own)
+                        if own_rows:
+                            repo.replace_participations(session, match.id, own.id, own_rows, user["id"])
+                        # Never clear an existing verified rival lineup because the
+                        # postmatch form has fewer known names. Unknown ≠ absent.
+                        if rival_rows:
+                            existing = repo.get_participations(session, match.id, rival.id)
+                            if len(rival_rows) < 11 and existing:
+                                from core.utils import normalize_name
+                                known_names = {normalize_name(row["name"]) for row in rival_rows}
+                                rival_rows = [
+                                    {"name": part.player.full_name,
+                                     "shirt_number": part.shirt_number,
+                                     "position": part.position,
+                                     "starter": part.starter,
+                                     "minute_in": part.minute_in,
+                                     "minute_out": part.minute_out,
+                                     "captain": part.captain}
+                                    for part in existing
+                                    if normalize_name(part.player.full_name) not in known_names
+                                ] + rival_rows
+                            repo.save_named_lineup_fast(session, match_id=match.id, team_id=rival.id,
+                                season_id=season_id, rows=rival_rows, actor_id=user["id"],
+                                sync_roster=True, identity_resolutions=identity_resolutions)
                         if d.get("reporter_ids"):
                             repo.assign_reporters(session, match.id, d["reporter_ids"], user["id"], due_at=due_at, required=True)
                         repo.close_postmatch_draft(session, st.session_state.get(CLOUD_DRAFT_KEY), user["id"])
@@ -858,10 +928,10 @@ def render(user: dict) -> None:
     st.progress((list(step_names).index(step) + 1) / len(step_names), text=f"Preparación · {step_names[step]} de 4")
     st.caption("  →  ".join((f"**{label}**" if key == step else label) for key, label in step_names.items()))
     if d.get("existing_match_id"):
-        st.caption('Completa las alineaciones y selecciona Informadores para publicar el partido.')
+        st.caption('Indica los titulares conocidos y selecciona Informadores. Los nombres que faltan podrán incorporarse después.')
     own_count = len({int(x['player_id']) for x in d.get('own_xi', []) if x.get('player_id')})
     rival_count = len({str(x['name']).strip().casefold() for x in d.get('rival_xi', []) if x.get('name')})
-    st.caption(f"Requisitos: XI No Name {own_count}/11 · XI rival {rival_count}/11 · Informadores {len(d.get('reporter_ids', []))}.")
+    st.caption(f"Información: titulares propios {own_count}/11 · rivales {rival_count}/11 · Informadores {len(d.get('reporter_ids', []))}.")
     if step != 'publish':
         ready, _ = _validate_draft_for_publish(d)
         st.button('4 · PUBLICAR POSTPARTIDO — completar requisitos primero' if ready else '4 · Revisar y PUBLICAR POSTPARTIDO →',
@@ -880,8 +950,7 @@ def render(user: dict) -> None:
         if st.button("← Partido"):
             d["ui_step"] = "match"; st.rerun()
         _own_lineup(user, own, d)
-        own_ok = len([x for x in d.get("own_xi", []) if x.get("player_id")]) == 11
-        if st.button("CONTINUAR AL RIVAL", type="primary", use_container_width=True, disabled=not own_ok):
+        if st.button("CONTINUAR AL RIVAL", type="primary", use_container_width=True):
             d["ui_step"] = "rival"; st.rerun()
         return
 
@@ -889,8 +958,7 @@ def render(user: dict) -> None:
         if st.button("← No Name"):
             d["ui_step"] = "own"; st.rerun()
         _rival_lineup(own, d)
-        rival_ok = len([x for x in d.get("rival_xi", []) if x.get("name")]) == 11
-        if st.button("CONTINUAR A PUBLICAR", type="primary", use_container_width=True, disabled=not rival_ok):
+        if st.button("CONTINUAR A PUBLICAR", type="primary", use_container_width=True):
             d["ui_step"] = "publish"; st.rerun()
         return
 

@@ -1,8 +1,16 @@
-# No Name · Área Técnica 4.2.3.2
+# No Name · Área Técnica 4.4.0
 
 Aplicación interna de No Name para postpartido, lectura compartida del staff, Dirección Deportiva y seguimiento individual de jugadores externos. La capa visible se organiza en **Inicio · Jornada · Jugadores · Dirección Deportiva · Administración**.
 
-## Novedades 4.2.3.2
+## Novedades 4.4.0
+
+- Inicio se convierte en centro operativo por roles con tareas reales, ultimo y proximo partido, actividad DD y accesos directos.
+- Jornada prioriza la accion correcta segun estado y permiso; postpartido admite alineaciones parciales verificadas sin inventar titulares.
+- Player Report 360 separa rendimiento propio y rival, respeta temporada en el comparador y distingue datos insuficientes del consenso.
+- DD reorganiza accesos y evita controles segmentados extensos; Administracion separa mantenimiento avanzado del trabajo ordinario.
+- No hay nueva migracion: sigue `0013_data_governance_4_2_3`.
+
+## Cambios anteriores 4.2.3.2
 
 - Administración → Datos → Eliminación definitiva: selección con casillas y controles en español por temporadas, partidos, equipos y jugadores; simulación de dependencias, confirmación irreversible y borrado SQL transaccional con auditoría. Los jugadores ligados a un equipo eliminado solo se proponen para selección explícita; nunca se borran automáticamente por similitud de nombre.
 - Asignaciones de Informadores con selección reactiva y botón guardar operativo, sin esperar al envío de un formulario.

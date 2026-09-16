@@ -7,10 +7,10 @@ def test_streamlit_magic_pages_directory_is_gone():
 
 
 def test_release_contract_is_401_everywhere():
-    assert Path("VERSION").read_text(encoding="utf-8").strip() == "4.2.3.2"
-    assert 'APP_VERSION = "4.2.3.2"' in Path("core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.2.3.2"' in Path("views/reports.py").read_text(encoding="utf-8")
-    assert 'expected_api = "4.2.3.2"' in Path("app.py").read_text(encoding="utf-8")
+    assert Path("VERSION").read_text(encoding="utf-8").strip() == "4.4"
+    assert 'APP_VERSION = "4.4"' in Path("core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.4"' in Path("views/reports.py").read_text(encoding="utf-8")
+    assert 'expected_api = "4.4"' in Path("app.py").read_text(encoding="utf-8")
 
 
 def test_database_startup_has_safe_connection_handling():

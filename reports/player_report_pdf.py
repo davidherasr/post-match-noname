@@ -106,7 +106,7 @@ def _footer(canvas, doc, club_name: str, version: str, label: str):
     canvas.setStrokeColor(HexColor("#D7DEE7")); canvas.line(14*mm, 11*mm, PAGE_W-14*mm, 11*mm)
     canvas.setFillColor(HexColor("#64748B")); canvas.setFont("Helvetica", 6.5)
     canvas.drawString(14*mm, 6.5*mm, f"{club_name.upper()} · DOCUMENTO INTERNO")
-    canvas.drawCentredString(PAGE_W/2, 6.5*mm, f"{label} · {version}")
+    canvas.drawCentredString(PAGE_W/2, 6.5*mm, label)
     canvas.drawRightString(PAGE_W-14*mm, 6.5*mm, f"PÁGINA {doc.page}")
     canvas.restoreState()
 
@@ -118,7 +118,7 @@ def _doc(settings: dict, label: str):
     buffer=BytesIO()
     doc=BaseDocTemplate(buffer,pagesize=A4,leftMargin=14*mm,rightMargin=14*mm,topMargin=14*mm,bottomMargin=16*mm)
     frame=Frame(doc.leftMargin,doc.bottomMargin,doc.width,doc.height,id="main")
-    doc.addPageTemplates([PageTemplate(id="main",frames=[frame],onPage=lambda c,d:_footer(c,d,club,"3.7.0",label))])
+    doc.addPageTemplates([PageTemplate(id="main",frames=[frame],onPage=lambda c,d:_footer(c,d,club,"",label))])
     return buffer,doc,_styles(primary,dark),primary,dark,club
 
 
@@ -132,7 +132,7 @@ def _hero(payload: dict, styles, primary, dark):
     left=Table([ident],colWidths=[20*mm,78*mm]); left.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),2*mm)]))
     kpis=Table([
         [Paragraph("RENDIMIENTO",styles["kpilabel"]),Paragraph("ENCAJE",styles["kpilabel"]),Paragraph("CONFIANZA",styles["kpilabel"])],
-        [Paragraph(_fmt(post["average"]),styles["kpi"]),Paragraph(_fmt(payload.get("fit_score")),styles["kpi"]),Paragraph(f'{post["confidence"]["score"]}/100',styles["kpi"])],
+        [Paragraph(_fmt(post["average"]),styles["kpi"]),Paragraph(_fmt(payload.get("fit_score")),styles["kpi"]),Paragraph(f'{post["confidence"]["score"]}/100' if post["confidence"]["sample"] else "No evaluable",styles["kpi"])],
         [Paragraph(f'{post["observations"]} postpartidos',styles["kpilabel"]),Paragraph(_safe(role.name if role else "sin rol"),styles["kpilabel"]),Paragraph(_safe(post["confidence"]["label"]),styles["kpilabel"])],
     ],colWidths=[26*mm]*3)
     kpis.setStyle(TableStyle([("BOX",(0,0),(-1,-1),.5,HexColor("#E5E7EB")),("INNERGRID",(0,0),(-1,-1),.25,HexColor("#EEF1F4")),("BACKGROUND",(0,0),(-1,-1),HexColor("#FAFBFC")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),2*mm),("BOTTOMPADDING",(0,0),(-1,-1),2*mm)]))
@@ -190,11 +190,18 @@ def generate_player_360_pdf(payload: dict, settings: dict) -> bytes:
     role=payload.get("role")
     if role:
         story += [_section(f"Modelo No Name · {role.position} · {role.name}",styles),_criteria_block(payload,styles)]
-    story += [_section("Perfil Scout",styles)]
-    blocks=payload["block_scores"]
-    profile_data=[["Técnico",_fmt(blocks.get("Técnico")),"Táctico",_fmt(blocks.get("Táctico")),"Físico",_fmt(blocks.get("Físico")),"Mental",_fmt(blocks.get("Mental"))],
-                  ["Nivel actual",_fmt(payload.get("current_level")),"Proyección",_fmt(payload.get("potential_score")),"Media Scout",_fmt(payload.get("scout_average")),"Evidencia",payload["evidence"]["specific_strength"]]]
-    pt=Table(profile_data,colWidths=[22*mm,20*mm]*4); pt.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,HexColor("#DDE2E8")),("BACKGROUND",(0,0),(-1,-1),colors.white),("FONTSIZE",(0,0),(-1,-1),7.2),("FONTNAME",(0,0),(-1,-1),"Helvetica"),("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),("TOPPADDING",(0,0),(-1,-1),2*mm),("BOTTOMPADDING",(0,0),(-1,-1),2*mm)])); story.append(pt)
+    if payload.get("is_own_player"):
+        story += [_section("Rendimiento de la plantilla", styles)]
+        own = payload["own_postmatch"]
+        story.append(Paragraph(
+            f"Postpartidos evaluados: {own['observations']} · Informadores: {own['reporters']} · "
+            f"Media: {_fmt(own['average'])}. No corresponde a seguimiento de mercado.", styles["body"]))
+    else:
+        story += [_section("Seguimiento de jugador externo",styles)]
+        blocks=payload["block_scores"]
+        profile_data=[["Técnico",_fmt(blocks.get("Técnico")),"Táctico",_fmt(blocks.get("Táctico")),"Físico",_fmt(blocks.get("Físico")),"Mental",_fmt(blocks.get("Mental"))],
+                      ["Nivel actual",_fmt(payload.get("current_level")),"Proyección",_fmt(payload.get("potential_score")),"Media seguimiento",_fmt(payload.get("scout_average")),"Evidencia",payload["evidence"]["specific_strength"]]]
+        pt=Table(profile_data,colWidths=[22*mm,20*mm]*4); pt.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.35,HexColor("#DDE2E8")),("BACKGROUND",(0,0),(-1,-1),colors.white),("FONTSIZE",(0,0),(-1,-1),7.2),("FONTNAME",(0,0),(-1,-1),"Helvetica"),("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),("TOPPADDING",(0,0),(-1,-1),2*mm),("BOTTOMPADDING",(0,0),(-1,-1),2*mm)])); story.append(pt)
 
     story += [_section("Posiciones observadas",styles)]
     if payload["positions"]:

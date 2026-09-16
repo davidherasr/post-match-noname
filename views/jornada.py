@@ -414,8 +414,7 @@ def _director_match_reading(match, user: dict, *, is_own_match: bool) -> None:
         c3.metric("Rival · consenso", "—" if reading["rival_weighted"] is None else f"{reading['rival_weighted']:.2f}")
         st.caption(
             f"No Name: {sporting_repo.consensus_label(reading.get('own_dispersion'), len(reports))} · "
-            f"Rival: {sporting_repo.consensus_label(reading.get('rival_dispersion'), len(reports))}. "
-            "Los jugadores de No Name se leen como rendimiento de plantilla, nunca como candidatos a seguimiento de mercado."
+            f"Rival: {sporting_repo.consensus_label(reading.get('rival_dispersion'), len(reports))}."
         )
         with st.expander("Ver opiniones del staff", expanded=False):
             for report in reports:
@@ -567,7 +566,7 @@ def _manage_postmatch_assignments_4231(match, user: dict, assignments: list) -> 
     options = {item.id: item.full_name for item in reporters}
     active = [assignment for assignment in assignments if assignment.status != "waived"]
     selected_default = [assignment.user_id for assignment in active if assignment.user_id in options]
-    with st.expander("Informadores asignados · gestionar postpartido", expanded=not bool(active)):
+    with st.expander("Informadores asignados · gestionar postpartido", expanded=not bool(active) or bool(st.session_state.get(f"assignment_focus_44_{match.id}"))):
         if not active:
             st.error("Postpartido sin informadores: nadie recibirá una tarea ni verá «Abrir informe». Asígnalos aquí sin volver a publicar el partido.")
         else:
@@ -636,17 +635,38 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     if tc2.button(f"Ver {match.away_team.short_name or match.away_team.name}",use_container_width=True,key=f"team_away38_{match.id}"):
         st.session_state["workspace_team_id"]=match.away_team_id; st.rerun()
 
-    primary_done=False
-    if data["is_own_match"] and is_schedule_confirmed(match) and can_admin(user) and match.status in {"scheduled","draft"}:
-        if st.button("Preparar partido",type="primary",use_container_width=True,key=f"prepare38_{match.id}"):
-            st.session_state["postmatch_existing_match_id"]=match.id; st.session_state["match_hub_mode"]="postmatch"; st.rerun()
-        primary_done=True
-    elif data["is_own_match"] and can_report(user) and data.get("my_assignment") and data["my_assignment"].status!="waived":
-        if st.button("Abrir informe",type="primary",use_container_width=True,key=f"report38_{match.id}"):
-            st.session_state["match_hub_mode"]="report"; st.rerun()
-        primary_done=True
+    primary_done = False
+    active_assignments = [item for item in data["assignments"] if item.status != "waived"]
+    if data["is_own_match"] and can_admin(user) and match.status in {"scheduled", "draft"} and is_schedule_confirmed(match):
+        if st.button("Preparar partido", type="primary", use_container_width=True, key=f"prepare38_{match.id}"):
+            st.session_state["postmatch_existing_match_id"] = match.id
+            st.session_state["match_hub_mode"] = "postmatch"
+            st.rerun()
+        primary_done = True
+    elif data["is_own_match"] and match.status == "published" and can_admin(user) and not active_assignments:
+        if st.button("Asignar Informadores", type="primary", use_container_width=True,
+                     key=f"assign44_{match.id}"):
+            st.session_state[f"assignment_focus_44_{match.id}"] = True
+            st.rerun()
+        primary_done = True
+    elif data["is_own_match"] and can_report(user) and data.get("my_assignment") and data["my_assignment"].status != "waived":
+        my_report = next((item for item in data["reports"] if item.reporter_id == user["id"]), None)
+        label = ("Ver informe" if my_report and my_report.status in {"approved", "final", "incorporated", "submitted"}
+                 else "Continuar informe" if my_report else "Rellenar informe")
+        if st.button(label, type="primary", use_container_width=True, key=f"report38_{match.id}"):
+            st.session_state["match_hub_mode"] = "report"
+            st.rerun()
+        primary_done = True
+    neutral_focus_key = f"neutral_reading_focus_44_{match.id}"
+    neutral_focus = bool(st.session_state.get(neutral_focus_key))
     if not primary_done and not is_schedule_confirmed(match) and can_admin(user):
         st.info("Confirma una hora real para habilitar el trabajo operativo.")
+    if not data["is_own_match"] and can_report(user) and is_schedule_confirmed(match):
+        if st.button("Volver al estudio del partido" if neutral_focus else "Registrar o consultar mi lectura",
+                     type="primary" if not neutral_focus else "secondary",
+                     use_container_width=True, key=f"neutral_primary_44_{match.id}"):
+            st.session_state[neutral_focus_key] = not neutral_focus
+            st.rerun()
     if data["is_own_match"] and match.status == "published":
         if can_admin(user):
             _manage_postmatch_assignments_4231(match, user, data["assignments"])
@@ -658,9 +678,11 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     _schedule_form(match,user)
 
     if not data["is_own_match"]:
-        _neutral_match_study(match,user)
+        if neutral_focus and can_report(user) and is_schedule_confirmed(match):
+            _neutral_staff_opinion(match, user, players)
+        else:
+            _neutral_match_study(match,user)
 
-    # Contextual help is available on the relevant buttons; no development notes on the public screen.
 
     if data["is_own_match"]:
         st.markdown("### Estado del postpartido")
@@ -677,7 +699,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
         if neutral_reading["players"]:
             st.caption(f"{len(neutral_reading['players'])} jugadores han sido señalados al menos una vez.")
 
-    if not data["is_own_match"]:
+    if not data["is_own_match"] and not neutral_focus:
         _neutral_staff_opinion(match, user, players)
     _director_match_reading(match, user, is_own_match=data["is_own_match"])
     if data["is_own_match"] and can_track_players(user):

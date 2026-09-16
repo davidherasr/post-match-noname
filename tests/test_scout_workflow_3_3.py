@@ -133,7 +133,7 @@ def test_publish_validation_blocks_incomplete_or_duplicate_lineups():
         "own_subs": [], "rival_subs": [], "reporter_ids": [],
     }
     errors, warnings = validate_postmatch_draft(invalid)
-    assert any("11 jugadores" in e for e in errors)
+    # La 4.4 permite un XI parcial documentado, pero nunca un duplicado.
+    assert any("titulares documentados" in w for w in warnings)
     assert any("repetido" in e for e in errors)
     assert any("Informador" in e for e in errors)
-    assert warnings == []

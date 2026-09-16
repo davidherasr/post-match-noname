@@ -159,9 +159,9 @@ def render(user: dict) -> None:
         st.error("No tienes permiso de administración."); return
     page_header("Administración","Usuarios, roles, calendario y datos. Las decisiones deportivas se realizan desde Dirección Deportiva.")
     pending_section = st.session_state.pop('admin_section_423', None)
-    if pending_section in {'Usuarios', 'Club', 'Datos', 'Configuración'}:
+    if pending_section in {'Usuarios', 'Club', 'Datos', 'Configuración', 'Mantenimiento avanzado'}:
         st.session_state['admin_section_current_423'] = pending_section
-    section=st.selectbox("Sección",["Usuarios","Club","Datos","Configuración"],key="admin_section_current_423")
+    section=st.selectbox("Sección",["Usuarios","Club","Datos","Configuración","Mantenimiento avanzado"],key="admin_section_current_423")
     from views import admin as legacy_admin
     from views import catalog as legacy_catalog
     if section=="Usuarios": legacy_admin._section_users(user)
@@ -174,15 +174,17 @@ def render(user: dict) -> None:
         _real_data_status(user)
         _data_search(user)
         _quality(user)
+    elif section == "Mantenimiento avanzado":
+        st.warning("Estas operaciones pueden afectar al histórico. Comprueba las dependencias y dispone de una copia restaurable antes de borrar registros.")
         with st.expander('Corrección excepcional de informes incorporados', expanded=False):
             _report_corrections_423(user)
         with st.expander("Eliminación definitiva de datos", expanded=False):
             from views import permanent_deletion
             permanent_deletion.render(user)
+        _technical(user)
     else:
         config=st.radio("Configurar",["Temporadas","Competiciones","Equipos","Plantillas"],horizontal=True,key="admin_config38")
         if config=="Temporadas": legacy_catalog._section_seasons(user)
         elif config=="Competiciones": legacy_catalog._section_competitions(user)
         elif config=="Equipos": legacy_catalog._section_teams(user)
         else: legacy_catalog._section_rosters(user)
-    _technical(user)
