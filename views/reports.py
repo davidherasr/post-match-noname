@@ -21,7 +21,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.4.3"
+REPORTS_PAGE_API_VERSION = "4.4.4"
 
 
 
@@ -177,9 +177,7 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
 
     saved_snapshot = st.session_state.get(saved_key, {})
     evaluated_saved = sum(1 for values in saved_snapshot.values() if float(values[0] or 0.0) > 0)
-    pending_saved = max(0, len(players) - evaluated_saved)
-    progress = evaluated_saved / len(players) if players else 0.0
-    st.caption(f"{team_name} · {evaluated_saved} valoraciones guardadas de {len(players)} participantes conocidos. Puntúa solo a quien hayas podido evaluar.")
+    st.caption(f"{team_name} · {evaluated_saved} valoraciones aportadas. No necesitas puntuar a toda la plantilla.")
     only_pending = st.toggle(
         "Solo pendientes", value=False, key=f"only_pending_341_{report.id}_{team_id}",
         help="Muestra únicamente jugadores que todavía no estaban valorados en el último guardado.",
@@ -188,7 +186,7 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
     pending_ids = {pid for pid, values in saved_snapshot.items() if float(values[0] or 0.0) <= 0}
     visible_players = [p for p in players if (not only_pending or int(p.player_id) in pending_ids)]
     if only_pending and not visible_players:
-        st.success("Todos los jugadores de este equipo tienen nota guardada.")
+        st.info("No quedan jugadores sin valorar entre los participantes conocidos.")
 
     for heading, group in [("Titulares", [p for p in visible_players if p.starter]), ("Suplentes utilizados", [p for p in visible_players if not p.starter])]:
         if not group:
@@ -203,12 +201,10 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
                 f'<div class="pm-eval-name"><strong>{safe_html(display_name)}</strong> <span>{safe_html(shirt)} · {safe_html(_participation_meta(part))}</span></div>',
                 unsafe_allow_html=True,
             )
-            rating_col, note_col = st.columns([1.15, 1.5], gap="small")
-            with rating_col:
-                _render_exact_rating(prefix + "rating", display_name, read_only=read_only)
+            _render_exact_rating(prefix + "rating", display_name, read_only=read_only)
             if float(st.session_state.get(prefix + "rating", 0.0) or 0.0) <= 0 and _minutes_played(part) < 10:
-                rating_col.caption("Minutos insuficientes · no computará como valoración")
-            note_col.text_input(
+                st.caption("Minutos insuficientes · no computará como valoración")
+            st.text_input(
                 f"Observación · {display_name} (opcional)", key=prefix + "note", disabled=read_only,
                 placeholder="Comentario opcional…", label_visibility="collapsed",
             )
@@ -511,12 +507,11 @@ def _render_quick_report(report, participations: list, evaluations: dict, user: 
     if len(chosen) > 3:
         st.warning("Para una lectura breve, selecciona hasta tres futbolistas. En el modo detallado puedes valorar toda la plantilla.")
     with st.form(f"quick_report_form_443_{report.id}"):
-        c1, c2 = st.columns(2)
         o, od = rating_choices(report.own_team_rating)
         r, rd = rating_choices(report.rival_team_rating)
-        own_choice = c1.pills("¿Cómo valoras a No Name?", o, default=od,
+        own_choice = st.pills("¿Cómo valoras a No Name?", o, default=od,
             selection_mode="single", help="Pulsa el botón entero; 'Sin evaluar' no cuenta en la media.")
-        rival_choice = c2.pills(f"¿Cómo valoras a {report.rival_team.name}?", r, default=rd,
+        rival_choice = st.pills(f"¿Cómo valoras a {report.rival_team.name}?", r, default=rd,
             selection_mode="single", help="Solo si puedes emitir una valoración real.")
         conclusion = st.text_area("Una idea del partido (opcional)", value=report.key_takeaways or "",
             height=70, placeholder="Qué merece recordar el cuerpo técnico…")
@@ -527,11 +522,10 @@ def _render_quick_report(report, participations: list, evaluations: dict, user: 
             name = part.player.display_name or part.player.full_name
             is_rival = part.team_id == report.rival_team_id
             st.markdown(f"**{name}** · {'Rival' if is_rival else 'No Name'}")
-            rc, nc = st.columns([1, 1.5])
             opts, default = rating_choices(current.general_rating if current else None)
-            grade = rc.pills(f"Nota · {name}", opts, default=default, selection_mode="single",
+            grade = st.pills(f"Nota · {name}", opts, default=default, selection_mode="single",
                 help="Selecciona del 1 al 10 o deja sin evaluar.")
-            short_note = nc.text_input(f"Apunte · {name}", value=current.short_note or "" if current else "",
+            short_note = st.text_input(f"Apunte · {name}", value=current.short_note or "" if current else "",
                 placeholder="Qué observaste (opcional)")
             follow = False
             if is_rival and can_track_players(user):
@@ -740,38 +734,69 @@ def _render_work(user: dict) -> None:
 def _render_archive(user: dict) -> None:
     title = "Informes" if can_direct(user) else "Mis informes"
     page_header(title, "Filtra primero y abre solo el informe que necesites. El editor no se carga hasta pulsar Abrir.")
+    opened = st.session_state.get("archive_open_report_33")
+    if opened:
+        if st.button("← Volver a la lista de informes", key="archive_back_444"):
+            st.session_state.pop("archive_open_report_33", None)
+            st.rerun()
+        _render_report_editor(int(opened), user)
+        return
     with session_scope() as session:
         seasons = repo.list_seasons(session)
         teams = repo.list_teams(session, active_only=True)
         users = repo.list_users(session, active_only=True) if can_direct(user) else []
-    c1, c2, c3, c4 = st.columns(4)
     season_opts = [None] + [s.id for s in seasons]
-    season_id = c1.selectbox("Temporada", season_opts, format_func=lambda x: "Todas" if x is None else next(s.name for s in seasons if s.id == x))
+    season_id = st.selectbox("Temporada", season_opts, format_func=lambda x: "Todas" if x is None else next(s.name for s in seasons if s.id == x), key="archive_season_444")
     status_keys = [None] + list(REPORT_STATUSES)
-    status = c2.selectbox("Estado", status_keys, format_func=lambda x: "Todos" if x is None else REPORT_STATUSES[x])
+    status = st.selectbox("Estado", status_keys, format_func=lambda x: "Todos" if x is None else REPORT_STATUSES[x], key="archive_status_444")
     rival_opts = [None] + [t.id for t in teams if not t.is_own_team and not t.is_test and t.archived_at is None]
-    rival_id = c3.selectbox("Rival", rival_opts, format_func=lambda x: "Todos" if x is None else next(t.name for t in teams if t.id == x))
-    round_query = c4.text_input("Jornada", placeholder="Ej. Jornada 8")
+    with st.expander("Más filtros", expanded=False):
+        rival_id = st.selectbox("Rival", rival_opts, format_func=lambda x: "Todos" if x is None else next(t.name for t in teams if t.id == x), key="archive_rival_444")
+        round_query = st.text_input("Jornada", placeholder="Ej. Jornada 8", key="archive_round_444")
+        users = users
+        reporter_id = None if can_direct(user) else user["id"]
+        if users:
+            reporter_opts = [None] + [u.id for u in users]
+            reporter_id = st.selectbox("Informador", reporter_opts, format_func=lambda x: "Todos" if x is None else next(u.full_name for u in users if u.id == x), key="archive_reporter_444")
+    # Defaults remain active even when the advanced filters are collapsed.
+    rival_id = st.session_state.get("archive_rival_444", None)
+    round_query = st.session_state.get("archive_round_444", "")
     reporter_id = None if can_direct(user) else user["id"]
     if users:
-        reporter_opts = [None] + [u.id for u in users]
-        reporter_id = st.selectbox("Informador", reporter_opts, format_func=lambda x: "Todos" if x is None else next(u.full_name for u in users if u.id == x))
+        reporter_id = st.session_state.get("archive_reporter_444", None)
+    filters = (season_id, status, rival_id, round_query, reporter_id)
+    if st.session_state.get("archive_filters_444") != filters:
+        st.session_state["archive_filters_444"] = filters
+        st.session_state["archive_page_444"] = 1
+    page = int(st.session_state.get("archive_page_444", 1))
+    page_size = 15
     with measure("Filtrar archivo de informes", "archive"):
         with session_scope() as session:
-            reports = repo.list_reports(session, reporter_id=reporter_id, status=status, season_id=season_id, rival_team_id=rival_id, limit=80)
-    if round_query.strip():
-        needle = round_query.strip().casefold()
-        reports = [r for r in reports if needle in (r.match.round_name or "").casefold()]
+            reports = repo.list_reports(session, reporter_id=reporter_id, status=status, season_id=season_id,
+                rival_team_id=rival_id, round_name=round_query, limit=page_size + 1,
+                offset=(page-1) * page_size)
+    has_next = len(reports) > page_size
+    reports = reports[:page_size]
     if not reports:
+        if page > 1:
+            st.session_state["archive_page_444"] = 1
+            st.rerun()
         st.info("No hay informes con esos filtros."); return
-    st.dataframe(pd.DataFrame([{"Partido": f"{r.match.home_team.name} - {r.match.away_team.name}", "Fecha": r.match.match_date, "Informador": r.reporter.full_name, "Estado": REPORT_STATUSES.get(r.status,r.status), "V": r.version} for r in reports]), hide_index=True, use_container_width=True)
-    labels = {r.id: f"{r.match.match_date.strftime('%d/%m/%Y')} · {r.match.home_team.name} - {r.match.away_team.name} · {r.reporter.full_name}" for r in reports}
-    selected = st.selectbox("Informe", list(labels), format_func=lambda rid: labels[rid])
-    if st.button("Abrir informe", type="primary", use_container_width=True):
-        st.session_state["archive_open_report_33"] = selected
-    opened = st.session_state.get("archive_open_report_33")
-    if opened in labels:
-        st.divider(); _render_report_editor(opened, user)
+    st.caption(f"Página {page} · {len(reports)} informes. Filtros aplicados en la consulta, antes de paginar.")
+    for item in reports:
+        with st.container(border=True):
+            st.markdown(f"**{item.match.home_team.name} – {item.match.away_team.name}**")
+            st.caption(f"{item.match.match_date:%d/%m/%Y} · {item.reporter.full_name} · {REPORT_STATUSES.get(item.status, item.status)}")
+            if st.button("Abrir informe", use_container_width=True, key=f"archive_open_444_{item.id}"):
+                st.session_state["archive_open_report_33"] = item.id
+                st.rerun()
+    prev, nxt = st.columns(2)
+    if prev.button("← Anterior", disabled=page == 1, key="archive_prev_444", use_container_width=True):
+        st.session_state["archive_page_444"] = page - 1
+        st.rerun()
+    if nxt.button("Siguiente →", disabled=not has_next, key="archive_next_444", use_container_width=True):
+        st.session_state["archive_page_444"] = page + 1
+        st.rerun()
 
 
 

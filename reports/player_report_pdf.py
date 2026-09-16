@@ -210,11 +210,20 @@ def generate_player_360_pdf(payload: dict, settings: dict) -> bytes:
     story += [PageBreak(),_section("Evolución de observaciones",styles)]
     timeline=payload["timeline"]
     if timeline:
-        data=[["Fecha","Fuente","Partido","POS","Nota","Observador","Apunte"]]
-        for row in reversed(timeline):
-            data.append([str(row["date"]),row["source"],row["match"],row["position"] or "-",f'{row["rating"]:.1f}',row["observer"],Paragraph(_safe(row["note"] or ""),styles["small"])])
-        t=Table(data,colWidths=[18*mm,25*mm,40*mm,14*mm,12*mm,28*mm,41*mm],repeatRows=1)
-        t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.25,HexColor("#DDE2E8")),("BACKGROUND",(0,0),(-1,0),HexColor("#F1F5F9")),("FONTSIZE",(0,0),(-1,-1),6.3),("VALIGN",(0,0),(-1,-1),"TOP"),("TOPPADDING",(0,0),(-1,-1),1.4*mm),("BOTTOMPADDING",(0,0),(-1,-1),1.4*mm)])); story.append(t)
+        # Narrative cards: an entire 1,500-character note must never be squeezed
+        # into a 41 mm-wide cell, producing a page-high seven-column table row.
+        for number, row in enumerate(reversed(timeline), start=1):
+            heading = (f"<b>{number}. {_safe(row['date'])} · {_safe(row['match'])}</b>"
+                f"<br/>{_safe(row['source'])} · {_safe(row.get('position') or 'Posición no registrada')}"
+                f" · Nota {_fmt(row.get('rating'))} · {_safe(row['observer'])}")
+            story.append(Paragraph(heading, styles["body"]))
+            note = (row.get("note") or "").strip()
+            if note:
+                # Flowable paragraphs split naturally across pages when long.
+                story.append(Paragraph(_safe(note).replace("\n", "<br/>"), styles["body"]))
+            else:
+                story.append(Paragraph("Sin apunte adicional.", styles["small"]))
+            story.append(Spacer(1, 3*mm))
     else: story.append(Paragraph("Sin evolución disponible.",styles["body"]))
 
     story += [_section("Comparación contextual",styles)]
@@ -222,7 +231,11 @@ def generate_player_360_pdf(payload: dict, settings: dict) -> bytes:
         story.append(Paragraph(f"<b>{_safe(title)}</b>",styles["body"]))
         rows=payload[key]
         if rows:
-            data=[["Jugador","Encaje","Nivel","Proyección","Estado","Similitud"]]+[[r["name"],_fmt(r["fit"]),_fmt(r["current_level"]),_fmt(r["potential"]),r["status"],"-" if r.get("similarity") is None else f'{r["similarity"]}%'] for r in rows]
+            data=[["Jugador","Encaje","Nivel","Proyección","Estado","Similitud"]]+[[
+                Paragraph(_safe(r["name"]), styles["small"]),_fmt(r["fit"]),
+                _fmt(r["current_level"]),_fmt(r["potential"]),
+                Paragraph(_safe(r["status"]), styles["small"]),
+                "-" if r.get("similarity") is None else f'{r["similarity"]}%'] for r in rows]
             t=Table(data,colWidths=[50*mm,20*mm,20*mm,22*mm,32*mm,22*mm]); t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.25,HexColor("#DDE2E8")),("BACKGROUND",(0,0),(-1,0),HexColor("#F1F5F9")),("FONTSIZE",(0,0),(-1,-1),6.8)])); story.append(t)
         else: story.append(Paragraph("Sin perfiles comparables con datos suficientes.",styles["small"]))
         story.append(Spacer(1,2*mm))
@@ -235,6 +248,11 @@ def generate_player_360_pdf(payload: dict, settings: dict) -> bytes:
         ["Fecha nacimiento",p.date_of_birth.strftime("%d/%m/%Y") if p.date_of_birth else "-","Pie",p.preferred_foot or "-"],
         ["Nacionalidad",p.nationality or "-","Decisión",payload.get("recommendation") or "Sin decidir"],
     ]
+    # Plain strings in ReportLab tables do not wrap. Player names (and other
+    # user-entered fields) must be Paragraphs so they cannot run into labels.
+    data = [[label, Paragraph(_safe(value), styles["small"]), label2,
+             Paragraph(_safe(value2), styles["small"])]
+            for label, value, label2, value2 in data]
     dt=Table(data,colWidths=[28*mm,61*mm,28*mm,61*mm]); dt.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.25,HexColor("#DDE2E8")),("BACKGROUND",(0,0),(-1,-1),colors.white),("FONTSIZE",(0,0),(-1,-1),7.2),("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),("TOPPADDING",(0,0),(-1,-1),2*mm),("BOTTOMPADDING",(0,0),(-1,-1),2*mm)])); story.append(dt)
     story.append(Spacer(1,2*mm)); story.append(Paragraph("Solo se incluyen los datos registrados por el cuerpo técnico; no se estiman datos no observados.",styles["small"]))
     doc.build(story); return buffer.getvalue()

@@ -4,9 +4,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_405_contract():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.3"
-    assert 'APP_VERSION = "4.4.3"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.4.3"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.4"
+    assert 'APP_VERSION = "4.4.4"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.4.4"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
 
 
 def test_navigation_changes_are_deferred_until_before_radio_instantiation():

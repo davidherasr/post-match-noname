@@ -78,6 +78,11 @@ def render(user: dict) -> None:
     roles = roles_for(user)
     with session_scope() as session:
         data = workspaces.load_home_workspace(session, user_id=user["id"], roles=roles)
+        received_requests = []
+        if "reporter" in roles and data.get("active_season"):
+            from repositories import observation_requests as requests_repo
+            received_requests = requests_repo.list_requests(session,
+                season_id=data["active_season"].id, reporter_id=user["id"], active_only=True)
 
     st.markdown("### Mi trabajo")
     tasks = data.get("tasks") or []
@@ -86,12 +91,15 @@ def render(user: dict) -> None:
     elif not data.get("own_team"):
         st.warning("No se ha configurado el equipo propio. Administración debe seleccionarlo.")
     elif not tasks:
-        st.info("No se han encontrado tareas pendientes para tus permisos en la temporada activa.")
+        if received_requests:
+            st.caption(f"Sin postpartidos asignados pendientes; tienes {len(received_requests)} petición(es) voluntaria(s) de DD debajo.")
+        else:
+            st.info("No se han encontrado tareas pendientes para tus permisos en la temporada activa.")
     else:
         st.caption(f"{data.get('task_count', len(tasks))} tareas pendientes · Se muestran primero las que requieren atención.")
-        visible_limit = 8
+        visible_limit = 1
         if len(tasks) > visible_limit:
-            show_all = st.checkbox("Mostrar todas las tareas", key="home_all_tasks_44")
+            show_all = st.checkbox(f"Mostrar otras {len(tasks)-visible_limit} tareas", key="home_all_tasks_44")
         else:
             show_all = True
         for i, task in enumerate(tasks if show_all else tasks[:visible_limit]):

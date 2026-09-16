@@ -97,19 +97,37 @@ def _render_player(user: dict, player_id: int) -> None:
         active=players_repo.get_active_season(session)
         requested_season = st.session_state.get('catalog_season_423')
         payload=workspaces.load_player_workspace(session,player_id=player_id,season_id=requested_season if requested_season else (active.id if active else None))
-    player_ui.render_vertical_profile(payload,next_action=None)
+        pending_question = None
+        if payload.get('season_id') and can_direct(user):
+            from repositories import observation_requests as requests_repo
+            pending = requests_repo.list_requests(session,season_id=payload['season_id'],active_only=True)
+            pending_question = next((r.question for r in pending if r.player_id == player_id),None)
+    player_ui.render_vertical_profile(payload,next_action={'question':pending_question} if pending_question else None)
     if can_direct(user) and not payload.get("is_own_player") and payload.get("season_id"):
         with st.expander("Pedir opinión al cuerpo técnico", expanded=False):
             from views.observation_requests import composer
             composer(user, payload["season_id"], selected_player_id=payload["player"].id,
                      key_prefix=f"dd_player_{player_id}")
-    _decision_editor(user,payload)
-    with st.expander("Ver dossier completo",expanded=False):
+    if can_direct(user):
+        with st.expander('Registrar o modificar decisión deportiva', expanded=False):
+            _decision_editor(user,payload)
+    sections = ['Rendimiento', 'Evidencias', 'Modelo No Name', 'Comparación', 'Datos', 'Documentos']
+    section = st.pills('Consultar la ficha', sections, selection_mode='single',
+        key=f'player_profile_section_444_{player_id}') or sections[0]
+    if section == 'Rendimiento':
+        player_ui.render_monthly_profile(payload)
+        player_ui.render_season_profile(payload)
+    elif section == 'Evidencias':
         player_ui.render_evolution(payload)
         player_ui.render_observations(payload)
+    elif section == 'Modelo No Name':
+        player_ui.render_model(payload)
+    elif section == 'Comparación':
         player_ui.render_comparison(payload)
+    elif section == 'Datos':
         player_ui.render_data(payload)
-    _export(payload)
+    else:
+        _export(payload)
 
 
 def _compare_players(ids: list[int], season_id: int | None = None) -> None:

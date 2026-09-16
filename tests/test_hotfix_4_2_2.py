@@ -23,11 +23,11 @@ def _reset_database_caches() -> None:
 
 
 def test_release_422_versions_and_head_are_consistent():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.3"
-    assert 'APP_VERSION = "4.4.3"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.4.3"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.4"
+    assert 'APP_VERSION = "4.4.4"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.4.4"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
     consistency = (ROOT / "scripts/check_release_consistency.py").read_text(encoding="utf-8")
-    assert 'EXPECTED = "4.4.3"' in consistency
+    assert 'EXPECTED = "4.4.4"' in consistency
     assert f'HEAD_MIGRATION = "{HEAD}"' in consistency
 
 

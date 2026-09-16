@@ -1,8 +1,17 @@
-# No Name · Área Técnica 4.4.3
+# No Name · Área Técnica 4.4.4
 
 Aplicación interna para el cuerpo técnico de No Name. Navegación: **Inicio · Jornada · Jugadores · Informes · Dirección Deportiva · Administración**, según permisos.
 
-## Novedades 4.4.3 · Lectura breve y peticiones deportivas
+## Novedades 4.4.4 · Navegación, selección y experiencia visual
+
+- DD deja de mutar el estado de un widget instanciado: una clave lógica distinta y callbacks previos al render evitan el error al abrir Jugadores de interés y Peticiones.
+- «Jugadores de interés» es una selección expresa de DD (o seguimiento/petición abiertos), no todos los señalados. Descubrimiento separado con media ≥8 y dos partidos por defecto; muestra visible y promoción manual, respetando descartes.
+- Cualquier Informador puede registrar voluntariamente una lectura de cualquier **partido neutral oficial** de Jornada sin asignación; confirma que lo vio, no inventa XI ni crea informe propio duplicado. El postpartido de No Name mantiene asignaciones.
+- Calendario con navegación reactiva, retorno a jornada actual, primera jornada y filtro por equipos. Archivo de informes filtrado en SQL y paginado, apertura directa de la ficha; «Jornada 1» ya no coincide con «Jornada 10».
+- Pulido visual de Inicio, DD, ficha de equipo, Player360, notas en ancho completo, campograma y PDF 360. Los apuntes largos se muestran a ancho completo y los nombres largos del PDF envuelven el texto.
+- Sin migración nueva: **Alembic head 0015**. Leer `UPGRADE_4_4_4.md` y `VALIDACION_4_4_4.md`. Esta release no ha sido ejecutada en Streamlit Cloud ni contra Supabase real.
+
+## Historial 4.4.3 · Lectura breve y peticiones deportivas
 
 - Lectura breve **predeterminada**, misma tabla de informes que el modo detallado: dos notas colectivas de pulsación completa, comentario opcional, hasta tres jugadores identificados y entrega con regreso inmediato a Inicio. Las notas históricas decimales y el informe completo se conservan. La falta de evaluación no equivale a cero.
 - Seguimiento formal únicamente por **check explícito** del Informador que tenga permiso independiente: ningún ocho preselecciona ni inicia seguimiento. La nota es la misma que en su postpartido.

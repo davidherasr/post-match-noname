@@ -155,7 +155,7 @@ def test_44_navigation_and_advanced_admin_contracts():
     players = (ROOT / "views/player_hub.py").read_text(encoding="utf-8")
     jornada = (ROOT / "views/jornada.py").read_text(encoding="utf-8")
     assert "Mi trabajo" in home and "Último partido" in home and "Próximo partido" in home
-    assert "Mostrar todas las tareas" in home
+    assert "Mostrar otras" in home and "Mi trabajo" in home
     assert "st.segmented_control" not in squad
     assert '"Mantenimiento avanzado"' in admin
     assert "_technical(user)" in admin

@@ -170,10 +170,14 @@ def render_evolution(payload: dict) -> None:
         return
     chart = pd.DataFrame([{"Fecha": x["date"], "Nota": x["rating"]} for x in timeline]).set_index("Fecha")
     st.line_chart(chart, y="Nota", height=250)
-    st.dataframe(pd.DataFrame([{
-        "Fecha": x["date"], "Fuente": x["source"], "Partido": x["match"], "POS": x["position"] or "-",
-        "Nota": x["rating"], "Observador": x["observer"], "Apunte": x["note"],
-    } for x in reversed(timeline)]), hide_index=True, use_container_width=True)
+    for index, entry in enumerate(reversed(timeline)):
+        with st.container(border=True):
+            st.markdown(f"**{entry['match']}** · {entry['date']}")
+            st.caption(f"{entry['source']} · {entry['observer']} · "
+                       f"{entry['position'] or 'Posición desconocida'} · Nota {entry['rating']:g}")
+            if entry.get('note'):
+                with st.expander("Leer observación completa", expanded=False):
+                    st.write(entry['note'])
 
 
 def render_observations(payload: dict) -> None:
@@ -284,20 +288,20 @@ def render_decision_block(payload: dict, next_action=None) -> None:
         if decision:
             st.caption(f"Prioridad {decision.priority} · actualizado {decision.updated_at.strftime('%d/%m/%Y') if decision.updated_at else '-'}")
     with c2:
-        if next_action:
+        if isinstance(next_action, dict):
+            st.markdown("**Petición de opinión abierta**")
+            st.caption(next_action.get('question') or 'Pregunta deportiva pendiente de respuesta.')
+        elif next_action:
             match = next_action.match
             when = match.kickoff_at.strftime("%d/%m/%Y · %H:%M") if match.kickoff_at else f"{match.match_date.strftime('%d/%m/%Y')} · horario pendiente"
             st.markdown(f"**Próxima acción:** {safe_html(next_action.title)}")
             st.caption(f"{match.home_team.name} - {match.away_team.name} · {when} · Responsable: {next_action.assignee.full_name}")
         else:
-            st.caption("No hay una próxima acción programada.")
+            st.caption("Sin petición de opinión abierta registrada para esta ficha.")
 
 
 def render_vertical_profile(payload: dict, *, next_action=None) -> None:
     """3.8 executive player page: important information first, dossier behind it."""
     render_header(payload)
     render_summary(payload)
-    render_model(payload)
-    render_monthly_profile(payload)
-    render_season_profile(payload)
     render_decision_block(payload, next_action=next_action)

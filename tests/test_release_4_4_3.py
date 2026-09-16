@@ -1,4 +1,4 @@
-"""4.4.3 regression: voluntary DD requests, provenance, fast reports, neutral edits."""
+"""4.4.4 regression: voluntary DD requests, provenance, fast reports, neutral edits."""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -56,7 +56,7 @@ def _seed(session):
 
 
 def test_release_navigation_and_direct_click_scores():
-    assert (ROOT / 'VERSION').read_text().strip() == '4.4.3'
+    assert (ROOT / 'VERSION').read_text().strip() == '4.4.4'
     assert 'Informes' in navigation_for({'id':1, 'roles':['reporter'], 'role':'reporter'})
     assert 'Informes' in navigation_for({'id':1, 'roles':['director'], 'role':'director'})
     assert 'Informes' not in navigation_for({'id':1, 'roles':['admin'], 'role':'admin'})
@@ -65,7 +65,7 @@ def test_release_navigation_and_direct_click_scores():
     assert 'default=[]' in code and 'Sin evaluar' in code
     assert '"postmatch_tracking_wizard"' in code
     neutral=(ROOT/'views/jornada.py').read_text()
-    assert 'home_choice = c1.pills' in neutral and 'rating = rating_from_choice' in neutral
+    assert 'home_choice = st.pills' in neutral and 'rating = rating_from_choice' in neutral
 
 
 def test_dd_creates_voluntary_request_and_rejects_ineligible_players_and_roles(session_factory):

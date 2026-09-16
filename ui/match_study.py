@@ -58,7 +58,7 @@ def render_campogram(formation: str, players_by_slot: list[dict], *, title: str 
       .nn-box{{position:absolute;left:25%;width:50%;height:14%;border:1px solid rgba(120,120,120,.45)}}
       .nn-box-top{{top:-1px}} .nn-box-bottom{{bottom:-1px}}
       .nn-player{{position:absolute;transform:translate(-50%,-50%);width:28%;text-align:center;z-index:2}}
-      .nn-dot{{display:inline-flex;width:34px;height:34px;align-items:center;justify-content:center;border-radius:50%;background:var(--primary-color,#1f77b4);color:white;font-size:.78rem;font-weight:800;border:2px solid rgba(255,255,255,.9);box-shadow:0 2px 6px rgba(0,0,0,.2)}}
+      .nn-dot{{display:inline-flex;width:34px;height:34px;align-items:center;justify-content:center;border-radius:50%;background:var(--pm-primary,#B91C1C);color:white;font-size:.78rem;font-weight:800;border:2px solid rgba(255,255,255,.9);box-shadow:0 2px 6px rgba(0,0,0,.2)}}
       .nn-name{{display:block;margin-top:3px;padding:2px 5px;background:rgba(255,255,255,.88);color:#111;border-radius:7px;font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 4px rgba(0,0,0,.12)}}
       @media(max-width:700px){{.nn-pitch{{height:470px}}.nn-player{{width:34%}}.nn-name{{font-size:.66rem}}}}
     </style>

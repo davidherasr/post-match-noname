@@ -471,6 +471,16 @@ def _tracking_workspace(user: dict, season) -> None:
                     st.error(str(exc))
 
 
+def _sync_dd_navigation() -> None:
+    """Widget callbacks execute before Streamlit instantiates the next page."""
+    st.session_state["dd_area_42"] = st.session_state.get("dd_area_select_444") or "Mi mesa de trabajo"
+
+
+def _navigate_dd(area: str) -> None:
+    # The logical destination is independent of the instantiated widget key.
+    st.session_state["dd_area_42"] = area
+
+
 def render(user: dict) -> None:
     if not can_direct(user):
         st.error("No tienes permiso de Dirección Deportiva."); return
@@ -486,20 +496,25 @@ def render(user: dict) -> None:
                 "Lectura deportiva", "Seguimiento", "Plantilla y modelo", "Criterio del staff"]
     if st.session_state.get("dd_area_42") not in sections:
         st.session_state["dd_area_42"] = sections[0]
-    section = st.selectbox("Área de trabajo", sections, key="dd_area_42",
-        help="La mesa reúne novedades; el análisis, planificación y configuración están separados.")
+    # Never write to a widget's session_state after it has been instantiated:
+    # the old DD dashboard buttons did exactly that and crashed in Cloud.
+    if st.session_state.get("dd_area_select_444") != st.session_state["dd_area_42"]:
+        st.session_state["dd_area_select_444"] = st.session_state["dd_area_42"]
+    section = st.pills("Áreas de Dirección Deportiva", sections, key="dd_area_select_444",
+        on_change=_sync_dd_navigation, selection_mode="single") or sections[0]
     if section == "Mi mesa de trabajo":
         st.markdown("### Hoy en Dirección Deportiva")
         requests_view.director_board(user, season.id, compact=True)
-        a,b,c = st.columns(3)
-        if a.button("Jugadores de interés", use_container_width=True, key="dd_desktop_players_443"):
-            st.session_state["dd_area_42"] = "Jugadores de interés"; st.rerun()
-        if b.button("Pedir una opinión", use_container_width=True, key="dd_desktop_requests_443"):
-            st.session_state["dd_area_42"] = "Peticiones de opinión"; st.rerun()
-        if c.button("Análisis deportivo", use_container_width=True, key="dd_desktop_intel_443"):
-            st.session_state["dd_area_42"] = "Lectura deportiva"; st.rerun()
-        with st.expander("Actividad de seguimiento reciente"):
-            _tracking_workspace(user, season)
+        st.markdown("#### Acciones deportivas")
+        st.button("Consultar jugadores seleccionados", use_container_width=True,
+                  key="dd_desktop_players_443", on_click=_navigate_dd, args=("Jugadores de interés",))
+        st.button("Pedir o revisar opiniones", use_container_width=True,
+                  key="dd_desktop_requests_443", on_click=_navigate_dd, args=("Peticiones de opinión",))
+        st.button("Analizar partidos y equipos", use_container_width=True,
+                  key="dd_desktop_intel_443", on_click=_navigate_dd, args=("Lectura deportiva",))
+        st.button("Consultar actividad de seguimiento", use_container_width=True,
+                  key="dd_desktop_tracking_444", on_click=_navigate_dd, args=("Seguimiento",),
+                  help="Abre el seguimiento cuando lo necesites sin cargar sus formularios en la portada.")
         return
     if section == "Jugadores de interés":
         requests_view.interest_list(user, season.id)

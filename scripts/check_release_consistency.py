@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.4.3"
+EXPECTED = "4.4.4"
 HEAD_MIGRATION = "0015_observation_requests_4_4_3"
 
 

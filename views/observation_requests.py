@@ -8,6 +8,7 @@ from sqlalchemy.orm import joinedload
 from core.database import session_scope
 from core.navigation import request_navigation
 from core.permissions import can_direct, can_report
+from core.interest import explicitly_selected, qualifies_for_discovery
 from models.entities import Match, Participation, Player, TeamRoster
 from repositories import observation_requests as requests_repo
 from repositories import players as players_repo
@@ -96,20 +97,33 @@ def director_board(user: dict, season_id: int, *, compact: bool = False) -> None
     if not entries:
         st.info("Todavía no hay peticiones. Puedes pedir una opinión desde la ficha de un jugador externo.")
         return
-    for req, recip, answers in (entries[:5] if compact else entries):
+    if compact:
+        st.caption("Últimas peticiones; consulta el resto desde «Peticiones de opinión».")
+    else:
+        kind = st.selectbox("Ver peticiones", ["Abiertas", "Con respuesta", "Cerradas", "Todas"],
+                            key="dd_request_view_444")
+        entries = [row for row in entries if
+            (kind == "Todas" or kind == "Abiertas" and row[0].status == "open" or
+             kind == "Con respuesta" and bool(row[2]) or kind == "Cerradas" and row[0].status == "closed")]
+        if not entries:
+            st.caption("No hay peticiones con ese filtro.")
+    for req, recip, answers in (entries[:3] if compact else entries):
         with st.container(border=True):
             st.markdown(f"**{_name(req.player)}** · {'Abierta' if req.status == 'open' else 'Cerrada'}")
             st.caption(f"{req.priority} · Solicitada por {req.creator.full_name} · "
                 f"{req.created_at.strftime('%d/%m/%Y')}")
-            st.write(req.question)
-            st.caption("Informadores: " + (" · ".join(f"{r.user.full_name}: "
-                f"{'Pendiente' if r.status == 'pending' else 'Respondida' if r.status == 'answered' else 'Declinada'}" for r in recip) or "Sin destinatarios"))
+            if compact:
+                st.caption(f"{len(answers)} respuesta(s) · {sum(r.status == 'pending' for r in recip)} pendiente(s)")
+            else:
+                st.write(req.question)
+                st.caption("Informadores: " + (" · ".join(f"{r.user.full_name}: "
+                    f"{'Pendiente' if r.status == 'pending' else 'Respondida' if r.status == 'answered' else 'Declinada'}" for r in recip) or "Sin destinatarios"))
             for answer in answers[:2 if compact else None]:
                 origin = f" · {answer.match.home_team.name} – {answer.match.away_team.name}" if answer.match else ""
                 grade = f" · nota {answer.evaluation.general_rating:g}" if answer.evaluation and answer.evaluation.general_rating else (
                     f" · señal {answer.neutral_signal.rating:g}" if answer.neutral_signal and answer.neutral_signal.rating else "")
                 st.write(f"**{answer.user.full_name}**: {requests_repo.RESULTS.get(answer.result,answer.result)}{origin}{grade}")
-                if answer.note:
+                if answer.note and not compact:
                     st.caption(answer.note)
             _player_link(req.player_id, f"dd_req_player_443_{req.id}_{compact}")
             if not compact and req.status == "open":
@@ -122,8 +136,8 @@ def director_board(user: dict, season_id: int, *, compact: bool = False) -> None
                             st.rerun()
                         except Exception as exc:
                             st.error(str(exc))
-    if compact and len(entries) > 5:
-        st.caption("Consulta el resto desde Dirección Deportiva → Peticiones de opinión.")
+    if compact and len(entries) > 3:
+        st.caption(f"{len(entries)-3} peticiones adicionales en el área «Peticiones de opinión».")
 
 
 def _matches_for_request(session, req):
@@ -194,15 +208,29 @@ def reporter_inbox(user: dict, season_id: int, *, compact: bool = False) -> None
         return
     st.markdown("### Peticiones de opinión" if not compact else "#### Dirección Deportiva te pregunta")
     st.caption("Son voluntarias. Puedes responder cuando coincidas con el jugador o indicar que no lo has visto.")
-    for req in (pending[:4] if compact else pending):
+    show_all = bool(st.session_state.get("home_all_requests_444")) if compact else True
+    for req in (pending[:2] if compact and not show_all else pending):
         with st.container(border=True):
             st.markdown(f"**{_name(req.player)}**")
             st.caption(f"{req.creator.full_name} · {req.priority} · {req.created_at.strftime('%d/%m/%Y')}")
             st.write(req.question)
+            if st.button("No pude verlo", key=f"request_quick_unseen_444_{req.id}",
+                         use_container_width=True, help="Informa de que no puedes aportar una valoración; no crea ninguna nota."):
+                try:
+                    with session_scope() as session:
+                        requests_repo.respond(session, actor_id=user["id"], request_id=req.id,
+                                             result="not_seen", match_id=None, note="")
+                    st.toast("Respuesta enviada a Dirección Deportiva.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
             with st.expander("Responder a esta petición", expanded=False):
                 _answer_form(user, req, key_prefix=f"inbox_{compact}")
-    if compact and len(pending) > 4:
-        st.caption(f"Hay {len(pending)-4} peticiones más. Puedes consultarlas en Inicio.")
+    if compact and len(pending) > 2:
+        if st.button("Mostrar menos peticiones" if show_all else f"Ver las {len(pending)} peticiones",
+                     use_container_width=True, key="requests_show_all_444"):
+            st.session_state["home_all_requests_444"] = not show_all
+            st.rerun()
 
 
 def match_prompts(user: dict, match_id: int) -> None:
@@ -225,7 +253,7 @@ def match_prompts(user: dict, match_id: int) -> None:
 
 
 def interest_list(user: dict, season_id: int) -> None:
-    """One operational list across requests, actual staff signals and DD decisions."""
+    """Shortlist chosen by DD, separate from evidence-driven discovery."""
     if not can_direct(user):
         return
     from repositories import sporting_reading, tracking, planning
@@ -248,23 +276,45 @@ def interest_list(user: dict, season_id: int) -> None:
     for req in reqs:
         req_by_player[req.player_id] = req_by_player.get(req.player_id, 0) + 1
     st.markdown("### Jugadores de interés")
-    st.caption("Se incluyen jugadores con señales, seguimiento, petición abierta o decisión registrada. No son recomendaciones automáticas.")
+    st.caption("Selección deportiva: decisiones expresas de DD, peticiones abiertas o seguimiento formal. Una señal aislada no incorpora automáticamente a un jugador.")
     search = st.text_input("Buscar en el listado", key="dd_interest_search_443")
-    status = st.selectbox("Situación", ["Todos", "Con petición", "Con seguimiento", "Con señales", "Con decisión"],
-        key="dd_interest_status_443")
-    selected = [p for p in players.values() if search.casefold() in _name(p).casefold() and (
-        status == "Todos" or status == "Con petición" and p.id in req_by_player or
-        status == "Con seguimiento" and p.id in by_player or
-        status == "Con señales" and p.id in signals or status == "Con decisión" and p.id in decisions)]
-    st.caption(f"{len(selected)} jugadores según los filtros.")
-    for p in sorted(selected, key=lambda item: _name(item).casefold())[:60]:
+    scope = st.selectbox("Mostrar", ["Selección DD", "Descubrir candidatos por nota"],
+        key="dd_interest_scope_444")
+    if scope == "Descubrir candidatos por nota":
+        minimum_matches = st.selectbox("Muestra mínima", [2, 1, 3, 4],
+            format_func=lambda value: f"{value} partido{'s' if value != 1 else ''}",
+            help="La media mínima es 8/10. Una sola actuación tiene menor respaldo y se indica expresamente.",
+            key="dd_interest_sample_444")
+        selected = [p for p in players.values() if search.casefold() in _name(p).casefold()
+            and qualifies_for_discovery(signals.get(p.id), minimum_matches=minimum_matches)
+            and not (p.id in decisions and decisions[p.id].status == "Descartado")
+            and not explicitly_selected(decision_status=decisions[p.id].status if p.id in decisions else None,
+                has_open_request=p.id in req_by_player, has_formal_tracking=p.id in by_player)]
+        st.caption("Candidatos por filtro de nota ≥8/10; no son incorporaciones automáticas a la selección ni decisiones de fichaje.")
+    else:
+        status = st.selectbox("Situación", ["Todos", "Con petición", "Con seguimiento", "Con decisión"],
+            key="dd_interest_status_443")
+        selected = [p for p in players.values() if search.casefold() in _name(p).casefold() and
+            explicitly_selected(decision_status=decisions[p.id].status if p.id in decisions else None,
+                has_open_request=p.id in req_by_player, has_formal_tracking=p.id in by_player)
+            and (status == "Todos" or
+                 status == "Con petición" and p.id in req_by_player or
+                 status == "Con seguimiento" and p.id in by_player or
+                 status == "Con decisión" and p.id in decisions and
+                     decisions[p.id].status in {"Interesante", "Seguimiento", "Prioritario"})]
+    st.caption(f"{len(selected)} jugadores encontrados.")
+    for p in sorted(selected, key=lambda item: (
+            -(signals[item.id]["weighted_rating"] or 0) if item.id in signals else 0,
+            _name(item).casefold()))[:60]:
         with st.container(border=True):
             a, b = st.columns([3,1])
             a.markdown(f"**{_name(p)}** · {p.primary_position or 'Posición desconocida'}")
             signal = signals.get(p.id)
             if signal:
+                a.caption(f"Media {signal['weighted_rating']:.1f}/10" if signal['weighted_rating'] is not None else "Sin nota suficiente")
                 a.caption(f"{signal['match_count']} partido(s) · {signal['mentions']} señal(es) · "
-                    f"{signal['staff_count']} informadores")
+                    f"{signal['staff_count']} informadores" +
+                    (" · muestra de un único partido" if signal['match_count'] == 1 else ""))
             else:
                 a.caption("Sin señales neutrales disponibles")
             if p.id in by_player:
@@ -275,5 +325,18 @@ def interest_list(user: dict, season_id: int) -> None:
                 a.caption(f"DD: {decisions[p.id].status}")
             with b:
                 _player_link(p.id, f"dd_interest_open_443_{p.id}")
+                if scope == "Descubrir candidatos por nota":
+                    if st.button("Añadir a selección", key=f"dd_interest_select_444_{p.id}",
+                                 use_container_width=True):
+                        try:
+                            with session_scope() as session:
+                                planning.upsert_season_decision(session, user["id"],
+                                    season_id=int(season_id), player_id=p.id,
+                                    status="Interesante", priority=3,
+                                    director_note="Seleccionado expresamente tras revisar la evidencia.")
+                            st.success("Jugador añadido a la selección de Dirección Deportiva.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
     if len(selected) > 60:
         st.caption("Se muestran 60 jugadores. Utiliza la búsqueda para localizar el resto.")

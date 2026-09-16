@@ -4,6 +4,7 @@ from repositories.data_governance import official_match_clause
 
 import json
 import math
+import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Sequence
@@ -500,7 +501,7 @@ def reopen_report(session: Session, report_id: int, actor_id: int, reason: str) 
     return return_report(session, report_id, actor_id, reason.strip())
 
 
-def list_reports(session: Session, reporter_id: int | None = None, status: str | None = None, limit: int | None = None, match_id: int | None = None, season_id: int | None = None, competition_id: int | None = None, rival_team_id: int | None = None, offset: int = 0) -> list[Report]:
+def list_reports(session: Session, reporter_id: int | None = None, status: str | None = None, limit: int | None = None, match_id: int | None = None, season_id: int | None = None, competition_id: int | None = None, rival_team_id: int | None = None, offset: int = 0, round_name: str | None = None) -> list[Report]:
     stmt = select(Report).options(joinedload(Report.match).joinedload(Match.home_team), joinedload(Report.match).joinedload(Match.away_team), joinedload(Report.match).joinedload(Match.competition), joinedload(Report.match).joinedload(Match.season), joinedload(Report.reporter), joinedload(Report.reviewer), joinedload(Report.rival_team), joinedload(Report.own_team))
     stmt = stmt.where(Report.match_id.in_(select(Match.id).where(official_match_clause())))
     if reporter_id:
@@ -517,6 +518,17 @@ def list_reports(session: Session, reporter_id: int | None = None, status: str |
         if not season_id:
             stmt = stmt.join(Match, Report.match_id == Match.id)
         stmt = stmt.where(Match.competition_id == competition_id)
+    if round_name and round_name.strip():
+        if not season_id and not competition_id:
+            stmt = stmt.join(Match, Report.match_id == Match.id)
+        # A fully specified round must not accidentally match Jornada 10–19
+        # when the user searches for "Jornada 1". Short free-text queries may
+        # still search by substring.
+        term = round_name.strip()
+        if re.fullmatch(r"(?:J(?:ornada)?\s*)\d+", term, re.IGNORECASE):
+            stmt = stmt.where(Match.round_name.ilike(term))
+        else:
+            stmt = stmt.where(Match.round_name.ilike(f"%{term}%"))
     stmt = stmt.order_by(desc(Report.updated_at)).offset(offset)
     if limit:
         stmt = stmt.limit(limit)

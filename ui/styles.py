@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 import streamlit as st
 
 
@@ -130,10 +131,10 @@ def apply_global_styles(primary: str = "#B91C1C", secondary: str = "#111827") ->
           div[data-testid="stForm"] {{ padding: 11px; border-radius: 11px; }}
           div[data-testid="stTextArea"] textarea {{ min-height: 72px !important; }}
           .pm360-hero {{ display:block; padding:12px; }}
-          .pm360-kpis {{ min-width:0; grid-template-columns:repeat(3,1fr); margin-top:12px; }}
-          .pm360-kpi {{ padding:8px 4px; }}
-          .pm360-kpi strong {{ font-size:1.15rem; }}
-          .pm360-kpi span, .pm360-kpi small {{ font-size:.64rem; }}
+          .pm360-kpis {{ min-width:0; grid-template-columns:1fr; margin-top:12px; }}
+          .pm360-kpi {{ padding:10px 12px; text-align:left; }}
+          .pm360-kpi strong {{ font-size:1.25rem; }}
+          .pm360-kpi span, .pm360-kpi small {{ font-size:.8rem; }}
           .pm360-name {{ font-size:1.25rem; }}
           .pm360-avatar {{ width:52px; height:52px; }}
           .pm360-radar {{ min-height:260px; }}
@@ -149,6 +150,6 @@ def apply_global_styles(primary: str = "#B91C1C", secondary: str = "#111827") ->
 
 
 def page_header(title: str, subtitle: str | None = None) -> None:
-    st.markdown(f'<div class="pm-page-title">{title}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="pm-page-title">{escape(str(title))}</div>', unsafe_allow_html=True)
     if subtitle:
-        st.markdown(f'<div class="pm-page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="pm-page-subtitle">{escape(str(subtitle))}</div>', unsafe_allow_html=True)

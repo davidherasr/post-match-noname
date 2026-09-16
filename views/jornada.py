@@ -29,9 +29,10 @@ def _match_title(match) -> str:
     return f"{match.home_team.name} - {match.away_team.name}"
 
 
-def _open_match(match_id: int) -> None:
+def _open_match(match_id: int, *, voluntary_reading: bool = False) -> None:
     st.session_state["workspace_match_id"] = int(match_id)
     st.session_state.pop("match_hub_mode", None)
+    st.session_state[f"neutral_reading_focus_44_{int(match_id)}"] = voluntary_reading
     st.rerun()
 
 
@@ -313,10 +314,12 @@ def _match_player_label(pid: int, player_map: dict, shirts: dict, status: dict) 
 
 
 def _neutral_staff_opinion(match, user: dict, players: list) -> None:
-    if not can_report(user) or not is_schedule_confirmed(match):
+    if not can_report(user):
         return
     st.markdown("### Tu lectura del partido")
-    st.caption("Partido neutral: valora a los dos equipos y señala únicamente a los jugadores que realmente te hayan llamado la atención. No estás iniciando un seguimiento.")
+    st.caption("Participación voluntaria: no necesitas asignación del Administrador. Solo registra lo que hayas visto; no inicia seguimiento formal.")
+    if not is_schedule_confirmed(match):
+        st.warning("El horario no está confirmado. Esta lectura no confirma la fecha ni la participación de ningún jugador.")
     player_map, player_team, shirts, status = _player_context_for_match(match, players)
     with session_scope() as session:
         existing = sporting_repo.get_match_opinion(session, match.id, user["id"])
@@ -339,12 +342,11 @@ def _neutral_staff_opinion(match, user: dict, players: list) -> None:
         help="Señalar aquí no abre un seguimiento. Solo crea una señal para la lectura conjunta de Dirección Deportiva.",
     )
     with st.form(f"neutral_opinion_42_{match.id}_{user['id']}"):
-        c1, c2 = st.columns(2)
         home_choices, home_default = rating_choices(existing.home_team_rating if existing else None)
         away_choices, away_default = rating_choices(existing.away_team_rating if existing else None)
-        home_choice = c1.pills(f"Nota {match.home_team.name}", home_choices, default=home_default,
+        home_choice = st.pills(f"Nota {match.home_team.name}", home_choices, default=home_default,
             selection_mode="single", help="Pulsa el botón entero; Sin evaluar no computa como cero.")
-        away_choice = c2.pills(f"Nota {match.away_team.name}", away_choices, default=away_default,
+        away_choice = st.pills(f"Nota {match.away_team.name}", away_choices, default=away_default,
             selection_mode="single", help="Solo valora lo que has visto.")
         home_rating = rating_from_choice(home_choice)
         away_rating = rating_from_choice(away_choice)
@@ -357,20 +359,26 @@ def _neutral_staff_opinion(match, user: dict, players: list) -> None:
             st.markdown("**Jugadores destacados**")
             for pid in selected:
                 previous = existing_by_player.get(pid)
-                c1, c2 = st.columns([1, 3])
                 rating_options, rating_default = rating_choices(previous.rating if previous else None)
-                rating_choice = c1.pills(f"Nota · {player_map[pid].display_name or player_map[pid].full_name}",
+                rating_choice = st.pills(f"Nota · {player_map[pid].display_name or player_map[pid].full_name}",
                     rating_options, default=rating_default, selection_mode="single",
                     key=f"neutral_player_rate_443_{match.id}_{user['id']}_{pid}")
                 rating = rating_from_choice(rating_choice)
-                note = c2.text_input(
+                note = st.text_input(
                     f"Apunte · {player_map[pid].display_name or player_map[pid].full_name}",
                     value=previous.note or "" if previous else "",
                     key=f"neutral_player_note_42_{match.id}_{user['id']}_{pid}",
                 )
                 player_rows.append({"player_id": pid, "team_id": player_team[pid], "rating": rating, "note": note})
+        confirm_viewed = st.checkbox("Confirmo que he visto el partido y que esta es mi opinión.",
+            value=False, help="No completa alineaciones, fecha ni horario desconocidos.") if not existing else True
+        # Form widgets only send values when submitted. Do not disable the
+        # submit button based on a checkbox inside the same form.
         save = st.form_submit_button("Guardar mi lectura", type="primary", use_container_width=True)
     if save:
+        if not confirm_viewed:
+            st.error("Confirma que has visto el partido antes de guardar tu lectura.")
+            return
         try:
             with session_scope() as session:
                 sporting_repo.save_neutral_opinion(
@@ -702,7 +710,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     neutral_focus = bool(st.session_state.get(neutral_focus_key))
     if not primary_done and not is_schedule_confirmed(match) and can_admin(user):
         st.info("Confirma una hora real para habilitar el trabajo operativo.")
-    if not data["is_own_match"] and can_report(user) and is_schedule_confirmed(match):
+    if not data["is_own_match"] and can_report(user):
         if st.button("Volver al estudio del partido" if neutral_focus else "Registrar o consultar mi lectura",
                      type="primary" if not neutral_focus else "secondary",
                      use_container_width=True, key=f"neutral_primary_44_{match.id}"):
@@ -732,7 +740,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     _schedule_form(match,user)
 
     if not data["is_own_match"]:
-        if neutral_focus and can_report(user) and is_schedule_confirmed(match):
+        if neutral_focus and can_report(user):
             _neutral_staff_opinion(match, user, players)
         else:
             _neutral_match_study(match,user)
@@ -753,14 +761,17 @@ def _render_match_hub(user: dict, match_id: int) -> None:
         if neutral_reading["players"]:
             st.caption(f"{len(neutral_reading['players'])} jugadores han sido señalados al menos una vez.")
 
-    if not data["is_own_match"] and not neutral_focus:
-        _neutral_staff_opinion(match, user, players)
     _director_match_reading(match, user, is_own_match=data["is_own_match"])
     if data["is_own_match"] and can_track_players(user):
         with st.expander("Seguimiento individual de un rival · opcional", expanded=False):
             _individual_tracking_form(match, user, players)
     else:
         _individual_tracking_form(match, user, players)
+
+
+def _set_round_444(key: str, value: str) -> None:
+    """Safe Streamlit callback: update the selector before it is instantiated."""
+    st.session_state[key] = value
 
 
 def render(user: dict) -> None:
@@ -780,26 +791,47 @@ def render(user: dict) -> None:
         default=workspaces.default_round(session,active.id,own.id if own else None)
     if not rounds:
         st.info("Todavía no hay calendario cargado."); return
-    current=st.session_state.get("round_39")
-    if current not in rounds: current=default if default in rounds else rounds[0]
+    # A single widget state: no stale season-agnostic round and no post-render
+    # mutation of a selectbox key (StreamlitWidgetAlreadyInstantiatedError).
+    round_key = "round_selected_444"
+    if st.session_state.get("round_season_444") != active.id:
+        st.session_state["round_season_444"] = active.id
+        st.session_state[round_key] = default if default in rounds else rounds[0]
+    elif st.session_state.get(round_key) not in rounds:
+        st.session_state[round_key] = default if default in rounds else rounds[0]
+    current = st.session_state[round_key]
+    idx = rounds.index(current)
+    st.caption(f"Temporada {active.name} · {len(rounds)} jornadas disponibles")
+    first, today = st.columns(2)
+    first.button("Primera jornada", key="round_first_444", use_container_width=True,
+                 disabled=current == rounds[0], on_click=_set_round_444,
+                 args=(round_key, rounds[0]))
+    today.button("Ir a la jornada actual", key="round_today_444", use_container_width=True,
+                 disabled=current == default, on_click=_set_round_444,
+                 args=(round_key, default if default in rounds else rounds[0]))
+    c1,c2,c3=st.columns([1,5,1])
+    c1.button("←", disabled=idx==0, use_container_width=True, key="round_prev_444",
+        on_click=_set_round_444, args=(round_key, rounds[max(0, idx-1)]), help="Jornada anterior")
+    current=c2.selectbox("Seleccionar jornada", rounds, key=round_key)
     idx=rounds.index(current)
-    c1,c2,c3=st.columns([1,4,1])
-    if c1.button("←",disabled=idx==0,use_container_width=True,key="round_prev_38"):
-        st.session_state["round_39"]=rounds[idx-1]; st.rerun()
-    selected=c2.selectbox("Jornada",rounds,index=idx,label_visibility="collapsed",key="round_select_38")
-    if selected!=current:
-        st.session_state["round_39"]=selected; st.rerun()
-    if c3.button("→",disabled=idx==len(rounds)-1,use_container_width=True,key="round_next_38"):
-        st.session_state["round_39"]=rounds[idx+1]; st.rerun()
+    c3.button("→",disabled=idx==len(rounds)-1,use_container_width=True,key="round_next_444",
+        on_click=_set_round_444, args=(round_key,rounds[min(len(rounds)-1,idx+1)]),help="Jornada siguiente")
+    view_filter = st.selectbox("Partidos", ["Todos", "No Name", "Otros equipos"], key="round_scope_444")
+    name_filter = st.text_input("Buscar equipo", placeholder="Nombre del club…", key="round_search_444")
     with session_scope() as session:
         data=workspaces.load_round_workspace(session,season_id=active.id,round_name=current,user_id=user["id"])
-    st.markdown(f"### {current}")
-    for match in data["matches"]:
+    filtered = [m for m in data["matches"] if
+        (view_filter == "Todos" or
+         (view_filter == "No Name") == bool(data["own_team"] and data["own_team"].id in {m.home_team_id,m.away_team_id}))
+        and (not name_filter or name_filter.casefold() in f"{m.home_team.name} {m.away_team.name}".casefold())]
+    st.markdown(f"### {current} · {len(filtered)} partido(s)")
+    if not filtered:
+        st.info("No hay encuentros con estos filtros. Prueba con 'Todos' o borra la búsqueda.")
+    for match in filtered:
         own_match=bool(data["own_team"] and data["own_team"].id in {match.home_team_id,match.away_team_id})
         with st.container(border=True):
-            a,b=st.columns([5,1])
             prefix="⚽ " if own_match else ""
-            a.markdown(f"**{prefix}{_match_title(match)}**")
+            st.markdown(f"**{prefix}{_match_title(match)}**")
             bits=[]
             if match.match_date == local_today():
                 bits.append("HOY")
@@ -810,9 +842,15 @@ def render(user: dict) -> None:
                 known_count=int(bool(match.home_formation_known))+int(bool(match.away_formation_known))
                 bits.append(f"formaciones {known_count}/2")
             if ac.get("total"): bits.append(f"📋 {ac.get('total')} informadores")
-            a.caption(" · ".join(bits))
-            if b.button("Abrir",type="primary" if own_match else "secondary",use_container_width=True,key=f"open_round39_{match.id}"):
+            st.caption(" · ".join(bits))
+            if st.button("Abrir partido",type="primary" if own_match else "secondary",
+                         use_container_width=True,key=f"open_round39_{match.id}"):
                 _open_match(match.id)
+            if not own_match and can_report(user):
+                if st.button("Realizar lectura voluntaria", use_container_width=True,
+                             key=f"voluntary_neutral_444_{match.id}",
+                             help="Puedes aportar tu opinión sin asignación previa de Administración."):
+                    _open_match(match.id, voluntary_reading=True)
     if can_admin(user):
         with st.expander("Importar calendario / mantenimiento excepcional"):
             st.caption("Estas herramientas quedan fuera del flujo diario.")

@@ -50,7 +50,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name · Área Técnica se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la versión 4.4.3; "
+        "Sustituye **todo el contenido del repositorio** por la versión 4.4.4; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -167,13 +167,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.4.3"
+    expected_api = "4.4.4"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.4.3 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.4.4 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"

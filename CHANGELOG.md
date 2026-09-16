@@ -1,3 +1,13 @@
+## 4.4.4 · Corrección de navegación y revisión visual
+
+- Hotfix DD `StreamlitWidgetAlreadyInstantiatedError`: estado lógico independiente del widget, navegación mediante callbacks anteriores a la nueva instanciación, botones que ya no asignan claves widget al hacer clic.
+- Jugadores de interés: selección DD explícita, petición/seguimiento existentes; descubrimiento por media ≥8 con muestra de dos partidos por defecto; alta manual y descartes protegidos.
+- Jornada: salto a primera/actual, flechas y selector con estado seguro y reinicio por temporada, filtro equipos; cualquier Informador abre lectura voluntaria neutral sin asignación; confirmación de haber visto partido validada tras pulsar Guardar, nunca botón bloqueado por checkbox dentro de formulario.
+- Archivo Informes: filtro SQL antes de límite/paginación y coincidencia exacta para jornada numérica, tarjetas con apertura directa, editor en pantalla dedicada.
+- Inicio y DD: tareas prioritarias, peticiones menos densas y respuestas rápidas «No pude verlo», enlace a seguimiento sin cargar su área entera; lista de interés separada de señales masivas.
+- Player360: secciones consultables separadas y evidencia larga detrás de detalle; ficha de equipo simplificada con búsqueda y XI desplegable; PDF 360 convierte observaciones largas en párrafos de ancho completo y envuelve nombres/campos para que no se solapen; token corporativo de campograma y textos de cabecera escapados.
+- 7 pruebas nuevas, 162 pruebas locales superadas; ningún cambio de esquema, Alembic sigue 0015. No se han validado navegador real, Cloud o PostgreSQL de producción.
+
 ## 4.4.3 · Lectura breve, coordinación y evidencia
 
 - Modo rápido de postpartido predeterminado: dos notas, conclusión y hasta tres jugadores elegidos voluntariamente; vista detallada preservada. Calificaciones `st.pills` 1–10 y Sin evaluar, con botones de tamaño táctil, sin controles +/- ni obligación de evaluar XI completo.
