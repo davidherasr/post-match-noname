@@ -315,13 +315,13 @@ def assign_reporters(session: Session, match_id: int, user_ids: Sequence[int], a
     assert_role(session, actor_id, "admin")
     current = {a.user_id: a for a in session.scalars(select(ReportAssignment).where(ReportAssignment.match_id == match_id)).all()}
     result = []
-    for uid in user_ids:
-        user = session.get(User, int(uid))
-        if not user or not user.active or not user_has_role(session, user.id, "reporter"):
-            continue
+    for uid in dict.fromkeys(int(value) for value in user_ids):
+        user = session.get(User, uid)
+        if not user or not user.active or user.deleted_at is not None or not user_has_role(session, user.id, "reporter"):
+            raise ValueError(f"No se pudo asignar el usuario ID {uid}: debe ser una cuenta activa con rol Informador.")
         item = current.pop(user.id, None)
         if item is None:
-            item = ReportAssignment(match_id=match_id, user_id=user.id, assigned_by=actor_id)
+            item = ReportAssignment(match_id=match_id, user_id=user.id, assigned_by=actor_id, status="pending")
             session.add(item)
         item.due_at = due_at
         item.required = required

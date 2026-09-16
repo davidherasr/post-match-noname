@@ -1,3 +1,12 @@
+## 4.2.3.1 · Hotfix de asignaciones y bandeja del Informador
+
+- Corrige el fallo detectado en Cloud 4.2.3: publicación sin informadores permitida por un aviso no bloqueante; el partido aparecía como «Informes 0/0» y no generaba ninguna tarea.
+- La publicación nueva requiere seleccionar al menos un usuario Informador. Una selección inválida provoca error explícito y revierte la transacción, no se descarta silenciosamente.
+- En Jornada, un Administrador puede asignar o reasignar informadores en un postpartido **ya publicado**, conservando el partido, XI, resultados, informes e histórico; no hay que volver a publicar.
+- Inicio muestra tareas reales de informes con botón «Rellenar informe» que abre el editor directamente, y explica cuándo un Informador no tiene asignaciones.
+- Jornada explica al Informador sin asignación por qué no aparece el botón. El contador separa informes registrados y asignaciones activas.
+- Sin migración nueva: head Alembic 0013, mismos datos y Secrets. No se ha accedido a Supabase productivo.
+
 ## 4.2.3 · Catálogo DD, datos de prueba y postpartidos directos
 
 - Admin → Club: equipo propio único por ID y gestión de pruebas/archivos reversibles y auditados (teams/matches); no se identifican registros por coincidencia de nombre.

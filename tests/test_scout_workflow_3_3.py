@@ -135,4 +135,5 @@ def test_publish_validation_blocks_incomplete_or_duplicate_lineups():
     errors, warnings = validate_postmatch_draft(invalid)
     assert any("11 jugadores" in e for e in errors)
     assert any("repetido" in e for e in errors)
-    assert warnings
+    assert any("Informador" in e for e in errors)
+    assert warnings == []

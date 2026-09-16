@@ -555,6 +555,49 @@ def _individual_tracking_form(match, user: dict, players: list) -> None:
         except Exception as exc:
             st.error(str(exc))
 
+
+def _manage_postmatch_assignments_4231(match, user: dict, assignments: list) -> None:
+    """Recover already published postmatches without deleting or republishing them."""
+    if not can_admin(user) or match.status != "published":
+        return
+    from repositories import users as users_repo
+    with session_scope() as session:
+        reporters = [item for item in users_repo.list_users(session, active_only=True)
+                     if item.deleted_at is None and users_repo.user_has_role(session, item.id, "reporter")]
+    options = {item.id: item.full_name for item in reporters}
+    active = [assignment for assignment in assignments if assignment.status != "waived"]
+    selected_default = [assignment.user_id for assignment in active if assignment.user_id in options]
+    with st.expander("Informadores asignados · gestionar postpartido", expanded=not bool(active)):
+        if not active:
+            st.error("Postpartido sin informadores: nadie recibirá una tarea ni verá «Abrir informe». Asígnalos aquí sin volver a publicar el partido.")
+        else:
+            st.caption(f"{len(active)} asignación(es) registradas. Los informes ya entregados no se eliminan al actualizar el reparto.")
+        unavailable = [assignment.user_id for assignment in active if assignment.user_id not in options]
+        if unavailable:
+            st.warning("Hay asignaciones a cuentas no disponibles (IDs: " + ", ".join(map(str, unavailable)) + "). Revisa estos usuarios antes de modificar el reparto.")
+        if not options:
+            st.warning("No existen usuarios activos con rol Informador. Administración → Usuarios permite asignar el rol.")
+            return
+        with st.form(f"manage_published_reporters_4231_{match.id}"):
+            selected_ids = st.multiselect("Informadores que deben completar este postpartido", list(options),
+                                          default=selected_default,
+                                          format_func=lambda uid: f"{options[uid]} · ID {uid}")
+            st.caption("Selecciona al menos uno. La operación crea o actualiza asignaciones auditadas; no duplica el partido, informes ni jugadores.")
+            save = st.form_submit_button("Guardar asignaciones y activar tareas", type="primary",
+                                         use_container_width=True, disabled=not selected_ids)
+        if save:
+            try:
+                with session_scope() as session:
+                    assigned = matches_repo.assign_reporters(session, match.id, selected_ids, user["id"],
+                                                              due_at=match.report_due_at, required=True)
+                    if len(assigned) != len(set(selected_ids)):
+                        raise RuntimeError("No se han creado todas las asignaciones; la operación se ha revertido.")
+                st.success("Asignaciones guardadas. Los Informadores verán la tarea en Inicio y el botón «Abrir informe» en Jornada.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"No se pudieron guardar las asignaciones: {exc}")
+
+
 def _render_match_hub(user: dict, match_id: int) -> None:
     mode=st.session_state.get("match_hub_mode")
     if st.button("← Volver a la jornada",key=f"back_match_38_{match_id}"):
@@ -602,6 +645,13 @@ def _render_match_hub(user: dict, match_id: int) -> None:
         primary_done=True
     if not primary_done and not is_schedule_confirmed(match) and can_admin(user):
         st.info("Confirma una hora real para habilitar el trabajo operativo.")
+    if data["is_own_match"] and match.status == "published":
+        if can_admin(user):
+            _manage_postmatch_assignments_4231(match, user, data["assignments"])
+        elif can_report(user) and not data.get("my_assignment"):
+            st.warning("Este postpartido está publicado, pero tu usuario no tiene asignación. Pide a Administración que abra este partido y utilice «Informadores asignados · gestionar postpartido». Tu rol Informador por sí solo no te asigna todos los encuentros.")
+        elif can_report(user) and data["my_assignment"].status == "waived":
+            st.info("Tu asignación para este partido consta como «No requerido». Administración puede reactivarla desde la ficha del encuentro.")
 
     _schedule_form(match,user)
 
@@ -615,7 +665,8 @@ def _render_match_hub(user: dict, match_id: int) -> None:
 
     if data["is_own_match"]:
         st.markdown("### Estado del postpartido")
-        st.markdown(f"**Informes** · {len(data['reports'])}/{len(data['assignments']) or len(data['reports'])}")
+        active_assignments = [a for a in data["assignments"] if a.status != "waived"]
+        st.markdown(f"**Informes** · {len(data['reports'])} registrados / {len(active_assignments)} informadores asignados")
         from core.constants import REPORT_STATUSES
         for report in data["reports"][:8]:
             st.caption(f"{report.reporter.full_name} · {REPORT_STATUSES.get(report.status, report.status)}")
@@ -630,7 +681,11 @@ def _render_match_hub(user: dict, match_id: int) -> None:
     if not data["is_own_match"]:
         _neutral_staff_opinion(match, user, players)
     _director_match_reading(match, user, is_own_match=data["is_own_match"])
-    _individual_tracking_form(match, user, players)
+    if data["is_own_match"] and can_track_players(user):
+        with st.expander("Seguimiento individual de un rival · opcional", expanded=False):
+            _individual_tracking_form(match, user, players)
+    else:
+        _individual_tracking_form(match, user, players)
 
 
 def render(user: dict) -> None:

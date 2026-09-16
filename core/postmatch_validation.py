@@ -23,5 +23,5 @@ def validate_postmatch_draft(draft: dict) -> tuple[list[str], list[str]]:
         if not str(sub.get("in_name") or "").strip():
             warnings.append("Hay un cambio rival sin nombre de entrada; se omitirá.")
     if not draft.get("reporter_ids"):
-        warnings.append("No hay informadores asignados; el partido se publicará igualmente.")
+        errors.append("Selecciona al menos un Informador para poder publicar y generar su tarea.")
     return errors, warnings

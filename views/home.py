@@ -19,6 +19,13 @@ def _open_match(match_id: int) -> None:
 
 
 
+def _open_report(match_id: int) -> None:
+    st.session_state["workspace_match_id"] = int(match_id)
+    st.session_state["match_hub_mode"] = "report"
+    request_navigation("Jornada")
+    st.rerun()
+
+
 def _open_director_reading() -> None:
     st.session_state["dd_area_42"] = "Lectura deportiva"
     st.session_state["dd_reading_area_421"] = "Jugadores señalados"
@@ -56,7 +63,10 @@ def render(user: dict) -> None:
     st.markdown("### Tus tareas")
     tasks = data.get("tasks") or []
     if not tasks:
-        st.success("No tienes acciones pendientes.")
+        if "reporter" in roles_for(user):
+            st.info("No tienes postpartidos pendientes asignados. Si esperabas un informe, comprueba en Jornada que el partido esté publicado y pide a Administración que te asigne como Informador.")
+        else:
+            st.success("No tienes acciones pendientes.")
     for i, task in enumerate(tasks[:12]):
         with st.container(border=True):
             c1, c2 = st.columns([5, 1])
@@ -64,8 +74,12 @@ def render(user: dict) -> None:
             due = task.get("due")
             if due:
                 c1.caption(f"Fecha objetivo: {due.strftime('%d/%m/%Y · %H:%M') if hasattr(due, 'hour') else due.strftime('%d/%m/%Y')}")
-            if task.get("match_id") and c2.button("Abrir", use_container_width=True, key=f"home_task_{i}_{task['match_id']}"):
-                _open_match(task["match_id"])
+            button_label = "Rellenar informe" if task.get("kind") == "report" else "Abrir"
+            if task.get("match_id") and c2.button(button_label, use_container_width=True, key=f"home_task_{i}_{task['match_id']}"):
+                if task.get("kind") == "report":
+                    _open_report(task["match_id"])
+                else:
+                    _open_match(task["match_id"])
 
     if can_direct(user):
         dd = data.get("director") or {}
