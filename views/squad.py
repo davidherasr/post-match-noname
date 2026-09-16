@@ -8,10 +8,12 @@ from core.navigation import request_navigation
 from core.constants import POSITIONS
 from core.database import session_scope
 from core.permissions import can_direct, can_track_players
-from core.presentation import NEED_STATES, normalize_need_state
+from core.presentation import NEED_STATES, PLAYER_STATES, normalize_need_state
 from repositories import planning as planning_repo
 from repositories import players as players_repo
 from repositories import sporting_reading as sporting_repo
+from repositories import tracking as tracking_repo
+from views import observation_requests as requests_view
 from ui.styles import page_header
 
 
@@ -280,6 +282,7 @@ def _map_own_players(user: dict, season, role) -> None:
         own=players_repo.get_own_team(session)
         roster=players_repo.get_roster(session,own.id,season.id) if own else []
         decisions=planning_repo.list_season_decisions(session,season.id)
+    decision_by_player={d.player_id:d for d in decisions}
     mapped={d.player_id for d in decisions if d.model_role_id==role.id}
     options=[r.player_id for r in roster if r.player_id not in mapped]
     if not options: return
@@ -289,7 +292,14 @@ def _map_own_players(user: dict, season, role) -> None:
         if st.button("Asignar al rol",use_container_width=True,key=f"map_own_save38_{role.id}") and selected:
             with session_scope() as session:
                 for pid in selected:
-                    planning_repo.upsert_season_decision(session,user["id"],season_id=season.id,player_id=pid,status="Observado",priority=3,model_role_id=role.id)
+                    previous=decision_by_player.get(pid)
+                    planning_repo.upsert_season_decision(session,user["id"],season_id=season.id,player_id=pid,
+                        status=previous.status if previous else "Sin decisión",
+                        priority=previous.priority if previous else 3,model_role_id=role.id,
+                        director_note=previous.director_note if previous else None,
+                        fit_score=previous.fit_score if previous else None,
+                        current_level=previous.current_level if previous else None,
+                        potential_score=previous.potential_score if previous else None)
             st.success("Plantilla mapeada."); st.rerun()
 
 
@@ -338,6 +348,129 @@ def _role_detail(user: dict, season, role_id: int) -> None:
             st.caption(f"{player.display_name or player.full_name} · {match.round_name} · {match.home_team.name} - {match.away_team.name} · {match.match_date.strftime('%d/%m/%Y')}")
 
 
+def _tracking_workspace(user: dict, season) -> None:
+    """Director's actual activity, decisions and exceptional duplicate correction."""
+    st.markdown("### Seguimiento de jugadores")
+    st.caption("Información registrada por el cuerpo técnico y decisiones de Dirección Deportiva.")
+    with session_scope() as session:
+        activity = tracking_repo.tracking_activity(session, season.id, limit=40)
+        duplicates = tracking_repo.duplicate_groups(session, season.id)
+        decisions = {d.player_id: d for d in planning_repo.list_season_decisions(session, season.id)}
+        roles = planning_repo.list_model_roles(session)
+    if not activity:
+        st.info("Aún no hay seguimientos individuales registrados esta temporada.")
+    else:
+        identified = {item["player"].id for item in activity}
+        undecided = {pid for pid in identified if pid not in decisions}
+        a, b, c = st.columns(3)
+        a.metric("Jugadores con seguimiento", len(identified))
+        b.metric("Sin decisión deportiva", len(undecided))
+        c.metric("Seguimientos recientes", len(activity))
+        st.caption("Actividad reciente de la temporada activa. Una persona y un partido cuentan una sola vez por jugador.")
+    query = st.text_input("Buscar en los seguimientos", placeholder="Nombre del futbolista o del informador", key="tracking_search_442").strip().casefold()
+    criterion = st.selectbox("Filtrar por decisión", ["Todos", "Pendientes de decisión", "Con decisión"], key="tracking_status_filter_442")
+    shown = [item for item in activity
+             if (not query or query in (item["player"].display_name or item["player"].full_name).casefold()
+                 or query in item["author"].full_name.casefold())
+             and (criterion == "Todos" or (item["player"].id not in decisions) == (criterion == "Pendientes de decisión"))]
+    if activity and not shown:
+        st.info("No hay seguimientos que coincidan con los filtros.")
+    for entry in shown:
+        obs, player, author, match = (entry[key] for key in ("observation", "player", "author", "match"))
+        name = player.display_name or player.full_name
+        action = "amplió su postpartido con un seguimiento de" if obs.player_evaluation_id else "registró un seguimiento de"
+        with st.container(border=True):
+            st.markdown(f"**{author.full_name} {action} {name}**")
+            st.caption(f"{match.home_team.name} – {match.away_team.name} · "
+                       f"{obs.general_rating:g}/10" if obs.general_rating is not None else
+                       f"{match.home_team.name} – {match.away_team.name} · Sin nota")
+            if obs.summary:
+                st.write(obs.summary)
+            if obs.recommendation and obs.recommendation != "Sin conclusión":
+                st.caption(f"Propuesta del informador: {obs.recommendation}")
+            if obs.player_evaluation_id is None and obs.mission_id is None:
+                with st.expander("Eliminar observación registrada por error"):
+                    st.caption("Acción excepcional: borra esta ampliación, no al jugador ni otros partidos.")
+                    reason = st.text_input("Motivo concreto del error", key=f"bad_obs_reason_443_{obs.id}")
+                    confirm = st.checkbox("Confirmo la eliminación y dispongo de una copia de seguridad",
+                        key=f"bad_obs_confirm_443_{obs.id}")
+                    if st.button("Eliminar este registro", use_container_width=True,
+                            disabled=not confirm or len(reason.strip()) < 8,
+                            key=f"bad_obs_delete_443_{obs.id}"):
+                        try:
+                            with session_scope() as session:
+                                tracking_repo.delete_erroneous_observation(session,
+                                    observation_id=obs.id, actor_id=user["id"], reason=reason)
+                            st.success("Registro retirado. La corrección queda auditada.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+            current = decisions.get(player.id)
+            if current:
+                st.caption(f"Decisión actual: {current.status}" +
+                           (f" · {current.director_note}" if current.director_note else ""))
+            left, right = st.columns(2)
+            if left.button("Abrir ficha", key=f"tracking_player_442_{obs.id}", use_container_width=True):
+                _open_player(player.id)
+            with right:
+                with st.popover("Decisión deportiva", use_container_width=True):
+                    choices = ["Sin decisión"] + PLAYER_STATES
+                    current_status = current.status if current and current.status in choices else "Sin decisión"
+                    with st.form(f"decision_tracking_442_{obs.id}"):
+                        status = st.selectbox("Estado", choices, index=choices.index(current_status))
+                        priority = st.selectbox("Prioridad", [1, 2, 3], index=max(0, min(2, (current.priority if current else 3) - 1)),
+                                                format_func=lambda v: {1: "Alta", 2: "Media", 3: "Baja"}[v])
+                        role_ids = [None] + [r.id for r in roles]
+                        role_index = role_ids.index(current.model_role_id) if current and current.model_role_id in role_ids else 0
+                        role_id = st.selectbox("Rol del modelo", role_ids, index=role_index,
+                            format_func=lambda value: "Sin asignar" if value is None else next(f"{r.position} · {r.name}" for r in roles if r.id == value))
+                        note = st.text_area("Justificación", value=current.director_note or "" if current else "", height=90)
+                        saved = st.form_submit_button("Guardar decisión", type="primary", use_container_width=True)
+                    if saved:
+                        try:
+                            with session_scope() as session:
+                                planning_repo.upsert_season_decision(session, user["id"],
+                                    season_id=season.id, player_id=player.id, status=status,
+                                    priority=priority, model_role_id=role_id, director_note=note,
+                                    fit_score=current.fit_score if current else None,
+                                    current_level=current.current_level if current else None,
+                                    potential_score=current.potential_score if current else None)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+    with st.expander(f"Revisar observaciones duplicadas ({len(duplicates)})"):
+        if not duplicates:
+            st.success("No se han detectado observaciones repetidas por jugador, partido y autor.")
+        else:
+            st.warning("Eliminar un duplicado es irreversible. Comprueba los registros y haz una copia restaurable antes de confirmar. No se elimina el postpartido original.")
+        for number, group in enumerate(duplicates, 1):
+            player, match, author = group["player"], group["match"], group["author"]
+            st.markdown(f"**{player.display_name or player.full_name} · "
+                        f"{match.home_team.name} – {match.away_team.name} · {author.full_name}**")
+            rows = group["observations"]
+            choice = st.selectbox("Registro a eliminar", list(range(len(rows))),
+                format_func=lambda index: (f"Registro {index + 1} · "
+                    f"{rows[index].general_rating:g}/10 · " if rows[index].general_rating is not None else
+                    f"Registro {index + 1} · Sin nota · ") +
+                    ((rows[index].summary or "Sin comentario")[:110]), key=f"dup_selection_442_{number}")
+            st.caption("Compara los comentarios y la fecha de cada registro antes de eliminarlo.")
+            for index, observation in enumerate(rows, 1):
+                date = observation.created_at.strftime("%d/%m/%Y %H:%M") if observation.created_at else "Fecha desconocida"
+                st.write(f"**Registro {index}** · {date} · {observation.summary or 'Sin comentario'}")
+            confirmed = st.checkbox("He verificado las diferencias y dispongo de una copia de seguridad",
+                                    key=f"dup_confirm_442_{number}")
+            if st.button("Eliminar únicamente el registro seleccionado", disabled=not confirmed,
+                         use_container_width=True, key=f"dup_delete_442_{number}"):
+                try:
+                    with session_scope() as session:
+                        tracking_repo.delete_duplicate_observation(session,
+                            observation_id=rows[choice].id, actor_id=user["id"])
+                    st.success("Duplicado eliminado. El otro registro y el postpartido permanecen intactos.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+
 def render(user: dict) -> None:
     if not can_direct(user):
         st.error("No tienes permiso de Dirección Deportiva."); return
@@ -348,16 +481,41 @@ def render(user: dict) -> None:
     opened=st.session_state.get("workspace_role_id")
     if opened:
         _role_detail(user,season,int(opened)); return
-    page_header("Dirección Deportiva","Criterio conjunto, rendimiento de No Name, lectura de la liga y decisiones de plantilla.")
-    section = st.selectbox(
-        "Área de trabajo", ["Lectura deportiva", "Plantilla y modelo", "Criterio del staff"],
-        key="dd_area_42", help="Inteligencia deportiva, planificación de plantilla o ponderación del staff.",
-    )
+    page_header("Dirección Deportiva", "Peticiones al staff, evidencia disponible y decisiones deportivas.")
+    sections = ["Mi mesa de trabajo", "Jugadores de interés", "Peticiones de opinión",
+                "Lectura deportiva", "Seguimiento", "Plantilla y modelo", "Criterio del staff"]
+    if st.session_state.get("dd_area_42") not in sections:
+        st.session_state["dd_area_42"] = sections[0]
+    section = st.selectbox("Área de trabajo", sections, key="dd_area_42",
+        help="La mesa reúne novedades; el análisis, planificación y configuración están separados.")
+    if section == "Mi mesa de trabajo":
+        st.markdown("### Hoy en Dirección Deportiva")
+        requests_view.director_board(user, season.id, compact=True)
+        a,b,c = st.columns(3)
+        if a.button("Jugadores de interés", use_container_width=True, key="dd_desktop_players_443"):
+            st.session_state["dd_area_42"] = "Jugadores de interés"; st.rerun()
+        if b.button("Pedir una opinión", use_container_width=True, key="dd_desktop_requests_443"):
+            st.session_state["dd_area_42"] = "Peticiones de opinión"; st.rerun()
+        if c.button("Análisis deportivo", use_container_width=True, key="dd_desktop_intel_443"):
+            st.session_state["dd_area_42"] = "Lectura deportiva"; st.rerun()
+        with st.expander("Actividad de seguimiento reciente"):
+            _tracking_workspace(user, season)
+        return
+    if section == "Jugadores de interés":
+        requests_view.interest_list(user, season.id)
+        return
+    if section == "Peticiones de opinión":
+        requests_view.director_board(user, season.id)
+        requests_view.composer(user, season.id, key_prefix="dd_hub")
+        return
     if section == "Lectura deportiva":
         _sporting_overview(user, season)
         return
     if section == "Criterio del staff":
         _staff_criterion(user)
+        return
+    if section == "Seguimiento":
+        _tracking_workspace(user, season)
         return
 
     _configure_model(user)

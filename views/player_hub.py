@@ -43,7 +43,8 @@ def _decision_editor(user: dict, payload: dict) -> None:
         criteria = planning_repo.list_model_criteria(session, role_id) if role_id else []
     with st.form(f"dd_decision38_{player.id}_{role_id}"):
         c1,c2=st.columns(2)
-        state=c1.selectbox("Estado",PLAYER_STATES,index=PLAYER_STATES.index(existing.status) if existing and existing.status in PLAYER_STATES else 0)
+        states=["Sin decisión"]+PLAYER_STATES
+        state=c1.selectbox("Estado",states,index=states.index(existing.status) if existing and existing.status in states else 0)
         priority=c2.selectbox("Prioridad",[1,2,3],index=(existing.priority-1) if existing and existing.priority in {1,2,3} else 1,format_func=lambda x:{1:"Alta",2:"Media",3:"Baja"}[x])
         scores={}
         existing_scores={row["id"]:row.get("score") for row in payload.get("criteria",[]) if row.get("score") is not None}
@@ -97,6 +98,11 @@ def _render_player(user: dict, player_id: int) -> None:
         requested_season = st.session_state.get('catalog_season_423')
         payload=workspaces.load_player_workspace(session,player_id=player_id,season_id=requested_season if requested_season else (active.id if active else None))
     player_ui.render_vertical_profile(payload,next_action=None)
+    if can_direct(user) and not payload.get("is_own_player") and payload.get("season_id"):
+        with st.expander("Pedir opinión al cuerpo técnico", expanded=False):
+            from views.observation_requests import composer
+            composer(user, payload["season_id"], selected_player_id=payload["player"].id,
+                     key_prefix=f"dd_player_{player_id}")
     _decision_editor(user,payload)
     with st.expander("Ver dossier completo",expanded=False):
         player_ui.render_evolution(payload)

@@ -49,6 +49,8 @@ def can_admin(user: dict | None) -> bool:
 
 def navigation_for(user: dict | None) -> list[str]:
     items = ["Inicio", "Jornada", "Jugadores"]
+    if can_report(user) or can_direct(user):
+        items.append("Informes")
     if can_direct(user):
         items.append("Dirección Deportiva")
     if can_admin(user):

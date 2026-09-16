@@ -1,3 +1,21 @@
+## 4.4.3 · Lectura breve, coordinación y evidencia
+
+- Modo rápido de postpartido predeterminado: dos notas, conclusión y hasta tres jugadores elegidos voluntariamente; vista detallada preservada. Calificaciones `st.pills` 1–10 y Sin evaluar, con botones de tamaño táctil, sin controles +/- ni obligación de evaluar XI completo.
+- Informes entregados incorporados al instante y redirigidos a Inicio; rechazo opcional de asignación anterior conservado. Seguimiento solo tras marcar explícitamente rival y disponer de permiso; nota y autor originales sin doble contabilidad.
+- DD recibe mesa operativa, lista de jugadores de interés, peticiones puntuales a Informadores y respuesta voluntaria con coincidencia de partido documentada frente a plantilla sin XI; enlaces a nota o señal del mismo partido.
+- Historial de solicitudes con autor, prioridad, destinatarios, estados, pregunta, contexto, respuesta y cierre; controles de permisos DD/Informador y auditoría. No hay misiones Scout ni notificaciones externas.
+- Archivo de informes conectado a la navegación real; lectura neutral con botones completos y guardado que preserva identidad de señales ya enlazadas; ficha de externo DD corregida; roles del modelo dejan de introducir falsos «Observado» al asignarlos.
+- DD puede borrar excepcionalmente una observación independiente errónea con motivo y auditoría; no las ligadas al postpartido. Nuevo esquema aditivo Alembic 0015; no muta filas productivas al desplegar por sí mismo.
+
+## 4.4.2 · Seguimiento como ampliación del postpartido
+
+- Entrega directa conservada. Tras incorporar el informe, permiso individual habilita selección voluntaria de rivales ya evaluados, con sugerencia de nota ≥8 y opción «Finalizar sin añadir seguimientos». No genera seguimientos automáticos.
+- Misma nota y contexto del postpartido, con observación complementaria enlazada por FK; reutiliza coincidencias anteriores por jugador/partido/autor. Las vías históricas de observación también reutilizan registros de ese encuentro.
+- Player Report 360 y PDF fusionan valoración y seguimiento vinculados en una única línea lógica; repeticiones históricas no se suman en contadores ni se borran en migración.
+- Dirección Deportiva incorpora una bandeja de actividad atribuida a cada autor, filtros, acceso a fichas, decisiones deportivas y una herramienta explícita/auditada de eliminación de duplicados (solo duplicados, nunca la última evidencia ni la vinculada al postpartido).
+- Migración aditiva `0014_unified_player_evidence_4_4_2`: `scout_observations.player_evaluation_id` nullable, FK y unicidad. No modifica observaciones antiguas automáticamente. Requiere backup y prueba en PostgreSQL antes de producción.
+- Validación local descrita en `VALIDACION_4_4_2.md`; Cloud, interfaz real y PostgreSQL no verificados.
+
 ## 4.4.1 · Valoración rápida y postpartidos opcionales
 
 - Selector directo 1–10 / Sin evaluar para notas individuales y colectivas; notas decimales previas preservadas sin redondeo silencioso.

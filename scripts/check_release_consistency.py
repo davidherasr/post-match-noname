@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.4.1"
-HEAD_MIGRATION = "0013_data_governance_4_2_3"
+EXPECTED = "4.4.3"
+HEAD_MIGRATION = "0015_observation_requests_4_4_3"
 
 
 def read_version() -> str:
@@ -61,7 +61,7 @@ def main() -> None:
         "views/home.py", "views/jornada.py", "views/player_hub.py", "views/squad.py", "views/admin_hub.py",
         "views/reports.py", "views/postmatch.py", "views/team_hub.py",
         "repositories/workspaces.py", "repositories/player_report.py", "repositories/planning.py",
-        "repositories/sporting_reading.py", "repositories/scouting.py", "repositories/calendar.py",
+        "repositories/sporting_reading.py", "repositories/tracking.py", "repositories/scouting.py", "repositories/calendar.py",
         "ui/player_report.py", "ui/match_study.py", "reports/player_report_pdf.py",
         "core/permissions.py", "core/presentation.py", "core/calendar_import.py", "core/clock.py",
         f"alembic/versions/{HEAD_MIGRATION}.py",
@@ -89,10 +89,16 @@ def main() -> None:
     if 'ROLE_SCOUT' in permissions_text:
         errors.append("Permisos conserva Scout como rol activo")
 
-    migration = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
+    migration = (ROOT / "alembic" / "versions" / "0013_data_governance_4_2_3.py").read_text(encoding="utf-8")
     for token in ["is_test", "archived_at", "archived_previous_status"]:
         if token not in migration:
             errors.append(f"Migración 0013 incompleta: falta {token}")
+    linked_migration = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
+    evidence_migration = (ROOT / "alembic" / "versions" / "0014_unified_player_evidence_4_4_2.py").read_text(encoding="utf-8")
+    if "player_evaluation_id" not in evidence_migration or "0013_data_governance_4_2_3" not in evidence_migration:
+        errors.append("Migración 0014 incompleta: falta enlace de evidencia al postpartido")
+    if "player_observation_requests" not in linked_migration or "0014_unified_player_evidence_4_4_2" not in linked_migration:
+        errors.append("Migración 0015 incompleta: falta peticiones y relaciones de seguimiento")
 
     jornada_text = (ROOT / "views" / "jornada.py").read_text(encoding="utf-8")
     for token in [

@@ -72,11 +72,12 @@ def test_multi_role_profile_and_scout_mission_with_repeated_observations(session
         second = planning_repo.create_observation(session, player_id=player.id, reviewer_id=scout.id, match_id=match.id, source_type="spontaneous")
         planning_repo.save_observation(session, second.id, scout.id, observed_position="DC", general_rating=8.5, current_level=8.0, model_fit_score=8.5, summary="Segunda específica", recommendation="Prioritario", submit=True)
         rows = planning_repo.list_observations(session, player_id=player.id)
-        assert len(rows) == 2
-        assert session.query(ScoutObservation).filter(ScoutObservation.profile_id == first.profile_id).count() == 2
+        assert second.id == first.id
+        assert len(rows) == 1
+        assert session.query(ScoutObservation).filter(ScoutObservation.profile_id == first.profile_id).count() == 1
         evidence = planning_repo.scouting_evidence_summary(session, player.id, season_id=season.id)
-        assert evidence["specific_observations"] == 2
-        assert evidence["specific_strength"] in {"Media", "Alta"}
+        assert evidence["specific_observations"] == 1  # Repeated submissions reuse one event.
+        assert evidence["specific_strength"] == "Inicial"
 
 
 def test_model_roles_needs_shadow_squad_and_opportunity(session_factory):

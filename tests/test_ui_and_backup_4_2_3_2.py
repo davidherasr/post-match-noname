@@ -76,5 +76,5 @@ def test_technical_export_includes_all_current_mapped_tables(session_factory):
 def test_brand_and_release_no_public_postmatch():
     from core.config import APP_NAME, APP_VERSION
     assert APP_NAME == 'No Name · Área Técnica'
-    assert APP_VERSION == '4.4.1'
+    assert APP_VERSION == '4.4.3'
     assert 'PostMatch' not in (ROOT / 'app.py').read_text(encoding='utf-8')

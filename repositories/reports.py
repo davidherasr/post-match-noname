@@ -381,8 +381,13 @@ def validate_report_for_finalization(session: Session, report_id: int) -> list[s
                           (report.own_team_rating, report.rival_team_rating))
     has_context = any(len(str(value or "").strip()) >= 10 for value in
                       (report.own_team_note, report.opponent_overview, report.key_takeaways))
-    if evaluated == 0 and not (has_team_rating and has_context):
-        errors.append("Valora al menos un jugador o guarda una nota de equipo y un comentario de contexto antes de entregar.")
+    # A volunteer's real team assessment is enough: context and complete squads
+    # are optional. No empty/zero-only reports can be submitted.
+    has_player_note = bool(session.scalar(select(PlayerEvaluation.id).where(
+        PlayerEvaluation.report_id == report_id,
+        func.length(func.trim(PlayerEvaluation.short_note)) >= 5).limit(1)))
+    if evaluated == 0 and not has_team_rating and not has_player_note and not has_context:
+        errors.append("Deja al menos una valoración o una observación real antes de entregar.")
     return errors
 
 

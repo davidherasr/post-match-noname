@@ -150,28 +150,53 @@ def _postmatch_metrics(history: list[dict]) -> dict:
 
 
 def _timeline(history: list[dict], observations: list[ScoutObservation]) -> list[dict]:
+    """One visible event per player/match/author, with a single authoritative grade.
+
+    Legacy duplicate rows are preserved in the database for audited DD review;
+    they are not multiplied in the PDF or player chronology.
+    """
     rows: list[dict] = []
+    grouped: dict[tuple, list[ScoutObservation]] = defaultdict(list)
+    for obs in observations:
+        if obs.status == "submitted":
+            key = (obs.match_id, obs.reviewer_id) if obs.match_id is not None else ("standalone", obs.id)
+            grouped[key].append(obs)
+
+    def best(items: list[ScoutObservation], evaluation_id: int | None = None) -> ScoutObservation:
+        # A linked and documented observation is the preferred enrichment.
+        return max(items, key=lambda o: (
+            bool(evaluation_id and o.player_evaluation_id == evaluation_id),
+            bool(o.player_evaluation_id),
+            sum(bool(v) for v in (o.summary, o.strengths, o.weaknesses, o.recommendation)),
+            o.updated_at or o.created_at,
+        ))
+
     for item in history:
         ev = item["evaluation"]
         if ev.general_rating is None or float(ev.general_rating) <= 0 or ev.observation_status != "evaluated":
             continue
         match = item["match"]
+        key = (match.id, item["reporter"].id)
+        supplements = grouped.pop(key, [])
+        supplement = best(supplements, ev.id) if supplements else None
+        notes = [str(ev.short_note or "").strip()]
+        if supplement and supplement.summary and supplement.summary.strip() not in notes:
+            notes.append(supplement.summary.strip())
         rows.append({
             "date": match.match_date,
-            "source": "Postpartido",
+            "source": "Postpartido + seguimiento" if supplement else "Postpartido",
             "rating": float(ev.general_rating),
-            "position": item["participation"].position if item.get("participation") else None,
+            "position": (item["participation"].position if item.get("participation") else None) or (supplement.observed_position if supplement else None),
             "match": f"{match.home_team.name} - {match.away_team.name}",
             "observer": item["reporter"].full_name,
-            "note": ev.short_note or "",
+            "note": "\n".join(note for note in notes if note),
         })
-    for obs in observations:
-        if obs.status != "submitted" or obs.general_rating is None:
-            continue
+    for group in grouped.values():
+        obs = best(group)
         rows.append({
             "date": obs.observed_at.date() if hasattr(obs.observed_at, "date") else obs.observed_at,
             "source": "Seguimiento individual" if obs.source_type == "specific" else ("Apunte rápido histórico" if obs.source_type == "match_scan" else "Observación individual"),
-            "rating": float(obs.general_rating),
+            "rating": float(obs.general_rating) if obs.general_rating is not None else None,
             "position": obs.observed_position,
             "match": "-" if not obs.match else f"{obs.match.home_team.name} - {obs.match.away_team.name}",
             "observer": obs.reviewer.full_name,
@@ -340,6 +365,15 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
     submitted = [o for o in observations if o.status == "submitted"
                  and (o.match_id is None or o.match_id in valid_match_ids)
                  and (not season_id or (o.match_id is not None and o.match.season_id == int(season_id)))]
+    # A previous release could save the same match/player/author several times.
+    # Keep all physical rows for audit, use one representative for every metric.
+    deduped: dict[tuple, ScoutObservation] = {}
+    for o in submitted:
+        key = (o.reviewer_id, o.match_id) if o.match_id is not None else ("standalone", o.id)
+        old = deduped.get(key)
+        if old is None or (bool(o.player_evaluation_id), bool(o.summary), o.updated_at) > (bool(old.player_evaluation_id), bool(old.summary), old.updated_at):
+            deduped[key] = o
+    submitted = list(deduped.values())
     team = _current_team(session, player.id, season_id, history)
     from repositories.players import get_own_team
     own_team = get_own_team(session)

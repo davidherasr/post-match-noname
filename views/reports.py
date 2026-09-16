@@ -9,17 +9,19 @@ from core.constants import ASSIGNMENT_STATUSES, PDF_MODES, REPORT_STATUSES
 from core.database import session_scope
 from core.evaluation_rules import AUTO_STANDOUT_THRESHOLD
 from core.performance import measure
-from core.permissions import can_direct, can_report
+from core.permissions import can_direct, can_report, can_track_players
 from core.navigation import request_navigation
 from core.score_picker import rating_choices, rating_from_choice
 from core.utils import safe_html
 from repositories import scouting as repo
+from repositories import tracking as tracking_repo
+from repositories import observation_requests as observation_repo
 from services.report_service import generate_report_pdf, report_filename
 from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.4.1"
+REPORTS_PAGE_API_VERSION = "4.4.3"
 
 
 
@@ -177,7 +179,7 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
     evaluated_saved = sum(1 for values in saved_snapshot.values() if float(values[0] or 0.0) > 0)
     pending_saved = max(0, len(players) - evaluated_saved)
     progress = evaluated_saved / len(players) if players else 0.0
-    st.progress(progress, text=f"{team_name}: {evaluated_saved}/{len(players)} valorados · {pending_saved} pendientes")
+    st.caption(f"{team_name} · {evaluated_saved} valoraciones guardadas de {len(players)} participantes conocidos. Puntúa solo a quien hayas podido evaluar.")
     only_pending = st.toggle(
         "Solo pendientes", value=False, key=f"only_pending_341_{report.id}_{team_id}",
         help="Muestra únicamente jugadores que todavía no estaban valorados en el último guardado.",
@@ -186,7 +188,7 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
     pending_ids = {pid for pid, values in saved_snapshot.items() if float(values[0] or 0.0) <= 0}
     visible_players = [p for p in players if (not only_pending or int(p.player_id) in pending_ids)]
     if only_pending and not visible_players:
-        st.success("No quedan jugadores pendientes en este equipo.")
+        st.success("Todos los jugadores de este equipo tienen nota guardada.")
 
     for heading, group in [("Titulares", [p for p in visible_players if p.starter]), ("Suplentes utilizados", [p for p in visible_players if not p.starter])]:
         if not group:
@@ -270,12 +272,13 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
     context_notes = (report.own_team_note, report.opponent_overview, report.key_takeaways)
     has_context = any(len(str(value or "").strip()) >= 10 for value in context_notes)
     has_rating = any(value is not None and value > 0 for value in (report.own_team_rating, report.rival_team_rating))
-    errors = [] if valid_players or (has_context and has_rating) else [
-        "Valora a un jugador o guarda una nota de equipo con comentario de contexto."]
+    has_note = any(len(str(e.short_note or "").strip()) >= 5 for e in evaluation_list)
+    errors = [] if valid_players or has_rating or has_context or has_note else [
+        "Deja al menos una valoración o un apunte real antes de entregar."]
     if not valid_own and not read_only:
-        st.info("Todavía no hay valoraciones individuales propias. Comprueba si falta información antes de entregar.")
+        st.caption("No hay notas individuales propias. Son opcionales si has dejado una lectura real.")
     if not valid_rival and not read_only:
-        st.info("No hay valoraciones individuales del rival. Puedes entregar una lectura colectiva documentada.")
+        st.caption("No hay notas individuales del rival. Puedes entregar una lectura colectiva.")
     metrics = st.columns(4)
     metrics[0].metric("Rivales", len(valid_rival)); metrics[1].metric("Propios", len(valid_own))
     metrics[2].metric("Destacados", len([e for e in valid_rival + valid_own if e.standout])); metrics[3].metric("Versión", f"V{report.version}")
@@ -325,6 +328,14 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
                 st.error(str(exc))
 
     if not read_only:
+        selected_tracking = []
+        if can_track_players(user) and valid_rival:
+            eligible_by_id = {int(e.id): e for e in valid_rival}
+            selected_tracking = st.multiselect(
+                "Ampliar seguimiento individual (opcional)", list(eligible_by_id), default=[],
+                format_func=lambda eid: f"{eligible_by_id[eid].player.display_name or eligible_by_id[eid].player.full_name} · {eligible_by_id[eid].general_rating:g}/10",
+                key=f"optin_follow_443_{report_id}",
+                help="Nadie está marcado por defecto. Reutiliza la nota de este partido, sin duplicarla.")
         st.caption("Revisa el resumen antes de incorporar el informe. Guarda cualquier cambio de la lectura global antes de entregar.")
         c1, c2 = st.columns(2)
         if c1.button("← Revisar No Name", use_container_width=True):
@@ -347,6 +358,9 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
                         with measure("Entregar informe", "report"):
                             with session_scope() as session:
                                 repo.submit_report(session, report_id, user["id"])
+                                for evaluation_id in selected_tracking:
+                                    tracking_repo.enrich_postmatch_evaluation(
+                                        session, evaluation_id=int(evaluation_id), author_id=user["id"])
                     st.session_state.pop(confirm_key,None)
                     _invalidate_workspace(report_id)
                     st.session_state["report_submission_notice"] = {
@@ -354,6 +368,7 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
                         "title": f"{report.match.home_team.name} – {report.match.away_team.name}",
                     }
                     st.session_state["_pending_report_ui_cleanup"] = int(report_id)
+                    st.session_state.pop("postmatch_tracking_wizard", None)
                     st.session_state.pop("match_hub_mode", None)
                     st.session_state.pop("workspace_match_id", None)
                     st.session_state.pop("archive_open_report_33", None)
@@ -404,7 +419,183 @@ def _render_documents(report_id: int) -> None:
                     st.warning(str(exc))
 
 
+def _finish_tracking_step(report_id: int) -> None:
+    st.session_state.pop("postmatch_tracking_wizard", None)
+    st.session_state.pop("match_hub_mode", None)
+    st.session_state.pop("workspace_match_id", None)
+    st.session_state.pop("archive_open_report_33", None)
+    request_navigation("Inicio")
+    st.rerun()
+
+
+def _render_postmatch_tracking_step(report_id: int, user: dict) -> None:
+    """Optional one-time post-delivery enrichment; a selection is never automatic."""
+    try:
+        with session_scope() as session:
+            candidates = tracking_repo.report_tracking_candidates(session, report_id, user["id"])
+            existing = {ev.id: tracking_repo.match_observations(session, ev.player_id, user["id"], ev.report.match_id)
+                        for ev in candidates}
+    except Exception as exc:
+        st.error(str(exc))
+        if st.button("Volver a Inicio", key=f"track_invalid_{report_id}"):
+            _finish_tracking_step(report_id)
+        return
+    st.markdown("## Seguimiento individual · opcional")
+    st.success("El postpartido ya está entregado e incorporado. No tienes que volver a puntuar a ningún jugador.")
+    st.caption("Selecciona expresamente cualquier jugador que quieras seguir. Una nota alta nunca lo marca por ti.")
+    by_id = {ev.id: ev for ev in candidates}
+    selected = st.multiselect("Jugadores a seguir", list(by_id), default=[],
+            format_func=lambda eid: f"{by_id[eid].player.display_name or by_id[eid].player.full_name} · {by_id[eid].general_rating:g}/10",
+            help="Las notas y los comentarios del postpartido se reutilizan: no se crea otra valoración del partido.",
+            key=f"track_choices_442_{report_id}")
+    with st.form(f"postmatch_tracking_step_442_{report_id}"):
+        details = {}
+        for eid in selected:
+            ev = by_id[eid]
+            previous = next((o for o in existing[eid] if o.player_evaluation_id == eid), None)
+            previous = previous or (existing[eid][0] if existing[eid] else None)
+            with st.container(border=True):
+                st.markdown(f"**{ev.player.display_name or ev.player.full_name} · {ev.general_rating:g}/10**")
+                if len(existing[eid]) > 1:
+                    st.warning("Hay observaciones repetidas en el histórico. Se reutilizará la existente; DD puede resolver los duplicados.")
+                summary = st.text_area("Conclusión del seguimiento", value=(previous.summary if previous and previous.summary else ev.short_note or ""),
+                    key=f"follow_summary_442_{report_id}_{eid}", height=90)
+                strengths = st.text_area("Fortalezas", value=previous.strengths or "" if previous else "",
+                    key=f"follow_strength_442_{report_id}_{eid}", height=60)
+                weaknesses = st.text_area("Dudas / riesgos", value=previous.weaknesses or "" if previous else "",
+                    key=f"follow_weak_442_{report_id}_{eid}", height=60)
+                action_options = ["Sin conclusión", "Volver a ver", "Seguimiento", "Prioritario", "Descartado"]
+                chosen = previous.recommendation if previous and previous.recommendation in action_options else "Sin conclusión"
+                action = st.selectbox("Siguiente acción propuesta", action_options,
+                    index=action_options.index(chosen), key=f"follow_next_442_{report_id}_{eid}")
+                details[eid] = (summary, strengths, weaknesses, action)
+        save = st.form_submit_button("Guardar seguimientos y volver a Inicio", type="primary", use_container_width=True)
+    if save:
+        try:
+            with session_scope() as session:
+                for eid in selected:
+                    summary, strengths, weaknesses, action = details[eid]
+                    tracking_repo.enrich_postmatch_evaluation(session, evaluation_id=eid, author_id=user["id"],
+                        summary=summary, strengths=strengths, weaknesses=weaknesses, recommendation=action)
+            st.session_state["tracking_saved_notice_442"] = f"Seguimiento guardado para {len(selected)} jugador(es)."
+            _finish_tracking_step(report_id)
+        except Exception as exc:
+            st.error(f"No se han guardado los seguimientos: {exc}")
+    if st.button("Finalizar sin añadir seguimientos", use_container_width=True,
+                 key=f"skip_followup_442_{report_id}"):
+        _finish_tracking_step(report_id)
+
+
+def _render_quick_report(report, participations: list, evaluations: dict, user: dict) -> None:
+    """One optional single-page entrypoint, reusing Report + PlayerEvaluation only."""
+    st.markdown("### Tu lectura breve")
+    draft_notice = st.session_state.pop(f"quick_draft_notice_443_{report.id}", None)
+    if draft_notice:
+        st.success(draft_notice)
+    st.caption("Valora únicamente lo que has visto. No es necesario puntuar a toda la plantilla.")
+    # DD's optional request is visible at the match, before opening the fast form.
+    from views.observation_requests import match_prompts
+    match_prompts(user, report.match_id)
+    eligible_parts = {int(part.player_id): part for part in participations}
+    ordered = sorted(eligible_parts, key=lambda pid: (
+        0 if eligible_parts[pid].team_id == report.own_team_id else 1,
+        not eligible_parts[pid].starter, eligible_parts[pid].shirt_number or 999,
+        eligible_parts[pid].player.full_name))
+    previous = [pid for pid in ordered if pid in evaluations and (
+        evaluations[pid].general_rating or evaluations[pid].short_note)]
+    chosen = st.multiselect("Jugadores que quieres valorar o señalar (opcional)", ordered,
+        default=previous, key=f"quick_players_443_{report.id}",
+        format_func=lambda pid: f"{eligible_parts[pid].player.display_name or eligible_parts[pid].player.full_name} · "
+            f"{'No Name' if eligible_parts[pid].team_id == report.own_team_id else report.rival_team.name}",
+        help="Solo los jugadores identificados en este encuentro; no se infiere su participación a partir de la plantilla.")
+    if len(chosen) > 3:
+        st.warning("Para una lectura breve, selecciona hasta tres futbolistas. En el modo detallado puedes valorar toda la plantilla.")
+    with st.form(f"quick_report_form_443_{report.id}"):
+        c1, c2 = st.columns(2)
+        o, od = rating_choices(report.own_team_rating)
+        r, rd = rating_choices(report.rival_team_rating)
+        own_choice = c1.pills("¿Cómo valoras a No Name?", o, default=od,
+            selection_mode="single", help="Pulsa el botón entero; 'Sin evaluar' no cuenta en la media.")
+        rival_choice = c2.pills(f"¿Cómo valoras a {report.rival_team.name}?", r, default=rd,
+            selection_mode="single", help="Solo si puedes emitir una valoración real.")
+        conclusion = st.text_area("Una idea del partido (opcional)", value=report.key_takeaways or "",
+            height=70, placeholder="Qué merece recordar el cuerpo técnico…")
+        rows = []
+        for pid in chosen:
+            part = eligible_parts[pid]
+            current = evaluations.get(pid)
+            name = part.player.display_name or part.player.full_name
+            is_rival = part.team_id == report.rival_team_id
+            st.markdown(f"**{name}** · {'Rival' if is_rival else 'No Name'}")
+            rc, nc = st.columns([1, 1.5])
+            opts, default = rating_choices(current.general_rating if current else None)
+            grade = rc.pills(f"Nota · {name}", opts, default=default, selection_mode="single",
+                help="Selecciona del 1 al 10 o deja sin evaluar.")
+            short_note = nc.text_input(f"Apunte · {name}", value=current.short_note or "" if current else "",
+                placeholder="Qué observaste (opcional)")
+            follow = False
+            if is_rival and can_track_players(user):
+                follow = st.checkbox(f"Quiero ampliar el seguimiento de {name}", value=False,
+                    key=f"quick_follow_443_{report.id}_{pid}",
+                    help="No se selecciona automáticamente por nota 8 o superior; reutiliza esta misma evaluación.")
+            rows.append((part, rating_from_choice(grade), short_note.strip(), follow))
+        st.caption("Puedes guardar el borrador o entregar. No necesitas rellenar la plantilla completa.")
+        save = st.form_submit_button("Guardar borrador", use_container_width=True)
+        submit = st.form_submit_button("Entregar lectura", type="primary", use_container_width=True)
+    if not (save or submit):
+        return
+    if len(chosen) > 3:
+        st.error("Reduce la selección a tres jugadores o usa el modo detallado.")
+        return
+    try:
+        for part, grade, note, follow in rows:
+            if not grade and len(note) < 5:
+                raise ValueError(f"Si seleccionas a {part.player.display_name or part.player.full_name}, añade nota o un apunte de al menos cinco caracteres.")
+            if follow and (part.team_id != report.rival_team_id or grade <= 0):
+                raise ValueError("Para ampliar seguimiento debes puntuar explícitamente al rival. No hay selección automática.")
+        with session_scope() as session:
+            saved = repo.save_report_summary(session, report.id,
+                rival_level=report.rival_level, opponent_overview=report.opponent_overview,
+                own_team_note=report.own_team_note, key_takeaways=conclusion.strip() or None,
+                standout_player_id=report.standout_player_id, actor_id=user["id"],
+                expected_revision=report.revision,
+                own_team_rating=rating_from_choice(own_choice),
+                rival_team_rating=rating_from_choice(rival_choice))
+            follow_ids = []
+            for part, grade, note, follow in rows:
+                record = repo.upsert_evaluation(session, report.id, part.player_id,
+                    part.team_id, part.id, actor_id=user["id"],
+                    observation_status="evaluated" if grade > 0 else "observed",
+                    general_rating=grade if grade > 0 else None, short_note=note or None,
+                    standout=grade >= AUTO_STANDOUT_THRESHOLD, pdf_include=grade > 0)
+                if follow:
+                    follow_ids.append(int(record.id))
+            if submit:
+                repo.submit_report(session, report.id, user["id"])
+                for eid in follow_ids:
+                    tracking_repo.enrich_postmatch_evaluation(session, evaluation_id=eid, author_id=user["id"])
+        _invalidate_workspace(report.id)
+        if submit:
+            st.session_state["report_submission_notice"] = {
+                "match_id": int(report.match_id),
+                "title": f"{report.match.home_team.name} – {report.match.away_team.name}"}
+            st.session_state["_pending_report_ui_cleanup"] = int(report.id)
+            st.session_state.pop("postmatch_tracking_wizard", None)
+            st.session_state.pop("match_hub_mode", None)
+            st.session_state.pop("workspace_match_id", None)
+            st.session_state.pop("archive_open_report_33", None)
+            request_navigation("Inicio")
+        else:
+            st.session_state[f"quick_draft_notice_443_{report.id}"] = "Borrador guardado correctamente."
+        st.rerun()
+    except Exception as exc:
+        st.error(f"No se ha guardado la lectura: {exc}")
+
+
 def _render_report_editor(report_id: int, user: dict) -> None:
+    if st.session_state.get("postmatch_tracking_wizard") == int(report_id):
+        _render_postmatch_tracking_step(report_id, user)
+        return
     report, participations, evaluation_list = _load_report_editor(report_id)
     if not report:
         st.error("Informe no encontrado."); return
@@ -423,7 +614,7 @@ def _render_report_editor(report_id: int, user: dict) -> None:
     total_known = len(rival_players) + len(own_players)
     total_evaluated = len(evaluated_rival) + len(evaluated_own)
     if total_known:
-        st.progress(min(1.0, total_evaluated / total_known), text=f"Jugadores valorados: {total_evaluated}/{total_known} · Guardado por bloques")
+        st.caption(f"{total_evaluated} valoraciones individuales registradas · completar la plantilla es opcional.")
     else:
         st.caption("No hay participantes identificados: puedes registrar una lectura colectiva documentada.")
 
@@ -436,7 +627,21 @@ def _render_report_editor(report_id: int, user: dict) -> None:
         return
 
     stage_key = f"report_stage_{report_id}"
-    stage = st.session_state.get(stage_key, "own")
+    stage = st.session_state.get(stage_key, "quick")
+    if stage == "quick":
+        if st.button("Abrir informe detallado", key=f"detailed_open_443_{report_id}",
+                     help="Solo si quieres puntuar titulares, suplentes y añadir comentarios por equipo."):
+            st.session_state[stage_key] = "own"
+            st.rerun()
+        _render_quick_report(report, participations, evaluations, user)
+        return
+    if st.button("← Volver a la lectura breve", key=f"quick_open_443_{report_id}"):
+        if any(bool(st.session_state.get(_dirty_key(report.id, team_id), False))
+               for team_id in (report.own_team_id, report.rival_team_id)):
+            st.warning("Guarda o deshaz los cambios del informe detallado antes de cambiar de modo.")
+        else:
+            st.session_state[stage_key] = "quick"
+            st.rerun()
     step_labels = {"own": "1 · No Name", "rival": "2 · Rival", "finish": "3 · Entregar"}
     st.caption(" → ".join((f"**{label}**" if key == stage else label) for key, label in step_labels.items()))
     if stage == "own":
@@ -499,7 +704,11 @@ def _render_work(user: dict) -> None:
     if not can_report(user):
         st.error("Para valorar partidos necesitas el rol Informador.")
         return
-    page_header("Valorar partido", "Carga una vez, puntúa sin consultas y guarda cada plantilla en un único lote.")
+    page_header("Valorar partido", "Valora únicamente lo que hayas observado y guarda cuando estés listo.")
+    pending_tracking = st.session_state.get("postmatch_tracking_wizard")
+    if pending_tracking:
+        _render_postmatch_tracking_step(int(pending_tracking), user)
+        return
     matches, assignments, reports = _available_work_matches(user)
     if not matches:
         st.info("No tienes partidos asignados."); return

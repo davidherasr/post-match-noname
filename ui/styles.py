@@ -103,7 +103,18 @@ def apply_global_styles(primary: str = "#B91C1C", secondary: str = "#111827") ->
         .pm360-criterion span small {{ display:block; color:var(--pm-muted); font-size:.72rem; margin-top:2px; }}
         .pm360-criterion strong {{ white-space:nowrap; color:#1D4ED8; }}
 
-        /* On narrow screens, reduce decorative spacing rather than shrinking controls. */
+        /* Whole-click rating buttons. Wrap at narrow widths instead of shrinking targets. */
+        div[data-testid="stPills"] button,
+        div[data-testid="stPills"] [role="button"] {{
+          min-width: 48px; min-height: 46px; padding: 9px 13px;
+          border: 1px solid var(--pm-border); border-radius: 10px;
+          font-size: 1rem; font-weight: 750;
+        }}
+        div[data-testid="stPills"] button[aria-pressed="true"],
+        div[data-testid="stPills"] [aria-selected="true"] {{
+          background: var(--pm-primary); border-color: var(--pm-primary); color: #fff;
+        }}
+                /* On narrow screens, reduce decorative spacing rather than shrinking controls. */
         @media (max-width: 720px) {{
           .block-container {{ padding-left: .85rem !important; padding-right: .85rem !important; padding-top: 1rem !important; }}
           .pm-card {{ padding: 12px; border-radius: 11px; }}

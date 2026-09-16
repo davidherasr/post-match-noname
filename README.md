@@ -1,4 +1,25 @@
-# No Name · Área Técnica 4.4.1
+# No Name · Área Técnica 4.4.3
+
+Aplicación interna para el cuerpo técnico de No Name. Navegación: **Inicio · Jornada · Jugadores · Informes · Dirección Deportiva · Administración**, según permisos.
+
+## Novedades 4.4.3 · Lectura breve y peticiones deportivas
+
+- Lectura breve **predeterminada**, misma tabla de informes que el modo detallado: dos notas colectivas de pulsación completa, comentario opcional, hasta tres jugadores identificados y entrega con regreso inmediato a Inicio. Las notas históricas decimales y el informe completo se conservan. La falta de evaluación no equivale a cero.
+- Seguimiento formal únicamente por **check explícito** del Informador que tenga permiso independiente: ningún ocho preselecciona ni inicia seguimiento. La nota es la misma que en su postpartido.
+- Dirección Deportiva incorpora mesa, jugadores de interés y **peticiones de opinión voluntarias** a uno o varios Informadores, con identidad, temporada, pregunta, prioridad y partido objetivo opcional. Inicio y Match Hub muestran avisos contextualizados; respuestas con procedencia, vinculación a valoración original y estados/auditoría; no se reintroducen misiones Scout.
+- «Informes» ya está conectado al menú de Informador/DD. Las notas en partidos neutrales también son botones completos, y editar su lectura preserva el ID de una señal ya enlazada a una respuesta.
+- Corrección de mapeo del rol del modelo: no inventa estado «Observado», preserva la decisión y los datos anteriores. DD puede retirar, con auditoría y motivo, una observación independiente errónea sin borrar la nota original del postpartido.
+- Migración nueva, aditiva y no destructiva: **0015_observation_requests_4_4_3**. Respaldo PostgreSQL y bucket antes de desplegar; instrucciones completas en `UPGRADE_4_4_3.md` y alcance de pruebas en `VALIDACION_4_4_3.md`.
+
+## Historial 4.4.2 · Evidencia unificada y seguimiento visible
+
+- El informe de No Name sigue incorporándose directamente al entregarlo. Si el Informador tiene permiso individual de seguimiento, a continuación se ofrece **un paso opcional** con los rivales ya puntuados; se sugieren notas ≥8, pero **nunca se crea un seguimiento sin selección y guardado explícitos**. El usuario puede terminar sin añadir ninguno.
+- Para el mismo futbolista, partido y autor, la valoración del postpartido es la **nota única de referencia**. El seguimiento amplía comentario, fortalezas, riesgos y recomendación enlazándose a esa valoración en lugar de capturar una segunda nota. En Player Report 360 y su PDF aparece **una sola línea lógica «Postpartido + seguimiento»**.
+- Reabrir un seguimiento del mismo partido reutiliza el registro existente; también se protegen los guardados por APIs históricas. Los duplicados anteriores **no se eliminan durante el despliegue**: DD puede examinarlos y eliminar un duplicado específico con confirmación, auditoría y protección del registro vinculado al postpartido.
+- Dirección Deportiva dispone de un área **Seguimiento** con actividad real del staff (quién ha documentado a quién, partido y nota), filtro, acceso al jugador, decisiones por temporada y revisión excepcional de duplicados. No se restauran misiones Scout ni permisos heredados.
+- Nuevo enlace opcional y restricción única en `scout_observations.player_evaluation_id`, mediante migración aditiva `0014_unified_player_evidence_4_4_2`. Consulta `UPGRADE_4_4_2.md` y `VALIDACION_4_4_2.md`; requiere **respaldo completo de PostgreSQL y del bucket** antes de desplegar.
+
+# Historial: versión 4.4.1
 
 Aplicación interna de No Name para postpartido, lectura compartida del staff, Dirección Deportiva y seguimiento individual de jugadores externos. La capa visible se organiza en **Inicio · Jornada · Jugadores · Dirección Deportiva · Administración**.
 

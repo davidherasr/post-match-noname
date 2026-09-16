@@ -352,15 +352,17 @@ def list_player_cards(
     for roster in session.scalars(roster_stmt.order_by(desc(TeamRoster.updated_at))).unique().all():
         roster_map.setdefault(roster.player_id, roster)
 
-    tracking_counts: dict[int, int] = defaultdict(int)
+    tracking_events: dict[int, set[tuple]] = defaultdict(set)
     tracking_rows = session.execute(
-        select(ScoutedPlayerProfile.player_id, func.count(ScoutObservation.id))
+        select(ScoutedPlayerProfile.player_id, ScoutObservation.id,
+               ScoutObservation.reviewer_id, ScoutObservation.match_id)
         .join(ScoutObservation, ScoutObservation.profile_id == ScoutedPlayerProfile.id)
         .where(ScoutedPlayerProfile.player_id.in_(ids), ScoutObservation.status == "submitted")
-        .group_by(ScoutedPlayerProfile.player_id)
     ).all()
-    for pid, count in tracking_rows:
-        tracking_counts[int(pid)] = int(count or 0)
+    for pid, oid, reviewer, mid in tracking_rows:
+        key = (int(reviewer), int(mid)) if mid is not None else ("standalone", int(oid))
+        tracking_events[int(pid)].add(key)
+    tracking_counts = {pid: len(events) for pid, events in tracking_events.items()}
 
     rating_map: dict[int, tuple[float | None, int, int]] = {}
     rating_rows = session.execute(

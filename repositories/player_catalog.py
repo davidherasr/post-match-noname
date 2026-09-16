@@ -156,13 +156,20 @@ def search_players(session: Session, *, season_id: int | None,
         .group_by(MatchOpinionPlayer.player_id))
     if season: signals = signals.where(Match.season_id == season)
     signal_map = {row[0]:row for row in session.execute(signals).all()}
-    tracking = (select(ScoutedPlayerProfile.player_id, func.count(ScoutObservation.id))
+    tracking = (select(ScoutedPlayerProfile.player_id, ScoutObservation.id,
+                       ScoutObservation.reviewer_id, ScoutObservation.match_id)
         .join(ScoutObservation, ScoutObservation.profile_id == ScoutedPlayerProfile.id)
         .where(ScoutedPlayerProfile.player_id.in_(ids), ScoutObservation.status == 'submitted',
-              or_(ScoutObservation.match_id.is_(None), ScoutObservation.match_id.in_(select(Match.id).where(official_match_clause()))))
-        .group_by(ScoutedPlayerProfile.player_id))
-    if season: tracking = tracking.where(ScoutObservation.match_id.in_(select(Match.id).where(official_match_clause(), Match.season_id == season)))
-    track_map = dict(session.execute(tracking).all())
+              or_(ScoutObservation.match_id.is_(None),
+                  ScoutObservation.match_id.in_(select(Match.id).where(official_match_clause())))))
+    if season:
+        tracking = tracking.where(ScoutObservation.match_id.in_(
+            select(Match.id).where(official_match_clause(), Match.season_id == season)))
+    track_events: dict[int, set[tuple]] = {}
+    for pid, oid, reviewer, mid in session.execute(tracking).all():
+        key = (int(reviewer), int(mid)) if mid is not None else ("standalone", int(oid))
+        track_events.setdefault(int(pid), set()).add(key)
+    track_map = {pid: len(events) for pid, events in track_events.items()}
     output = []
     for pid in ids:
         player = players[pid]

@@ -10,6 +10,7 @@ from core.clock import local_today
 from core.constants import FORMATIONS, POSITIONS
 from core.formations import available_lineup_player_ids, slots_for
 from core.database import session_scope
+from core.score_picker import rating_choices, rating_from_choice
 from core.permissions import can_admin, can_direct, can_report, can_track_players
 from core.presentation import status_badge
 from core.schedule import is_schedule_confirmed
@@ -19,6 +20,7 @@ from repositories import planning as planning_repo
 from repositories import players as players_repo
 from repositories import workspaces
 from repositories import sporting_reading as sporting_repo
+from repositories import tracking as tracking_repo
 from ui.styles import page_header
 from ui.match_study import render_campogram
 
@@ -338,14 +340,14 @@ def _neutral_staff_opinion(match, user: dict, players: list) -> None:
     )
     with st.form(f"neutral_opinion_42_{match.id}_{user['id']}"):
         c1, c2 = st.columns(2)
-        home_rating = c1.number_input(
-            f"Nota {match.home_team.name}", 0.0, 10.0,
-            float(existing.home_team_rating or 0.0) if existing else 0.0, .5, help="0 = sin valorar",
-        )
-        away_rating = c2.number_input(
-            f"Nota {match.away_team.name}", 0.0, 10.0,
-            float(existing.away_team_rating or 0.0) if existing else 0.0, .5, help="0 = sin valorar",
-        )
+        home_choices, home_default = rating_choices(existing.home_team_rating if existing else None)
+        away_choices, away_default = rating_choices(existing.away_team_rating if existing else None)
+        home_choice = c1.pills(f"Nota {match.home_team.name}", home_choices, default=home_default,
+            selection_mode="single", help="Pulsa el botón entero; Sin evaluar no computa como cero.")
+        away_choice = c2.pills(f"Nota {match.away_team.name}", away_choices, default=away_default,
+            selection_mode="single", help="Solo valora lo que has visto.")
+        home_rating = rating_from_choice(home_choice)
+        away_rating = rating_from_choice(away_choice)
         summary = st.text_area(
             "Qué te deja el partido", value=existing.summary or "" if existing else "", height=90,
             placeholder="Qué equipo te convenció, qué patrones viste, qué merece recordarse...",
@@ -356,11 +358,11 @@ def _neutral_staff_opinion(match, user: dict, players: list) -> None:
             for pid in selected:
                 previous = existing_by_player.get(pid)
                 c1, c2 = st.columns([1, 3])
-                rating = c1.number_input(
-                    f"Nota · {player_map[pid].display_name or player_map[pid].full_name}", 0.0, 10.0,
-                    float(previous.rating or 0.0) if previous else 0.0, .5,
-                    key=f"neutral_player_rate_42_{match.id}_{user['id']}_{pid}",
-                )
+                rating_options, rating_default = rating_choices(previous.rating if previous else None)
+                rating_choice = c1.pills(f"Nota · {player_map[pid].display_name or player_map[pid].full_name}",
+                    rating_options, default=rating_default, selection_mode="single",
+                    key=f"neutral_player_rate_443_{match.id}_{user['id']}_{pid}")
+                rating = rating_from_choice(rating_choice)
                 note = c2.text_input(
                     f"Apunte · {player_map[pid].display_name or player_map[pid].full_name}",
                     value=previous.note or "" if previous else "",
@@ -512,44 +514,68 @@ def _individual_tracking_form(match, user: dict, players: list) -> None:
     player = player_map[pid]
     with session_scope() as session:
         model_roles = planning_repo.list_model_roles(session)
+        previous = tracking_repo.match_observations(session, pid, user["id"], match.id)
+        from repositories import reports as reports_repo
+        report = reports_repo.report_for_user(session, match.id, user["id"])
+        matching_evaluation = next((ev for ev in reports_repo.list_evaluations(session, report.id, scope="rival")
+                                    if ev.player_id == pid and ev.observation_status == "evaluated" and ev.general_rating and ev.general_rating > 0), None) if report and report.status in {"incorporated", "final", "approved"} else None
+    existing = next((row for row in previous if row.player_evaluation_id == matching_evaluation.id), None) if matching_evaluation else None
+    existing = existing or (previous[0] if previous else None)
+    if len(previous) > 1:
+        st.warning("Hay varias observaciones históricas de esta persona en el mismo partido. Dirección Deportiva puede revisar los duplicados.")
+    if matching_evaluation:
+        st.caption(f"Valoración del postpartido: {matching_evaluation.general_rating:g}/10. Se reutilizará esta nota sin volver a puntuarla.")
     role_options = [None] + [r.id for r in model_roles if not player.primary_position or r.position == player.primary_position]
     role_id = st.selectbox(
         "Rol No Name", role_options,
         format_func=lambda rid: "Sin rol todavía" if rid is None else next(f"{r.position} · {r.name}" for r in model_roles if r.id == rid),
+        index=role_options.index(existing.model_role_id) if existing and existing.model_role_id in role_options else 0,
         key=f"individual_track_role_42_{match.id}_{pid}",
     )
     with session_scope() as session:
         criteria = planning_repo.list_model_criteria(session, role_id) if role_id else []
     with st.form(f"individual_track_form_42_{match.id}_{pid}_{role_id}"):
         c1, c2 = st.columns(2)
-        position = c1.selectbox("Posición observada", POSITIONS, index=POSITIONS.index(player.primary_position) if player.primary_position in POSITIONS else 0)
-        rating = c2.number_input("Rendimiento del partido", 0.0, 10.0, 0.0, .5)
+        current_pos = (existing.observed_position if existing else None) or player.primary_position
+        position = c1.selectbox("Posición observada", POSITIONS, index=POSITIONS.index(current_pos) if current_pos in POSITIONS else 0)
+        if matching_evaluation:
+            c2.metric("Nota del postpartido", f"{matching_evaluation.general_rating:g}")
+            rating = float(matching_evaluation.general_rating)
+        else:
+            rating = c2.number_input("Rendimiento del partido", 0.0, 10.0, float(existing.general_rating or 0) if existing else 0.0, .5)
         scores = {}
         for criterion in criteria:
             scores[criterion.id] = st.number_input(f"{criterion.name} · peso {criterion.weight}", 0.0, 10.0, 0.0, .5, key=f"track_crit_42_{match.id}_{pid}_{criterion.id}")
-        summary = st.text_area("Conclusión del visionado", height=90)
-        recommendation = st.selectbox("Siguiente acción", ["Sin conclusión", "Volver a ver", "Seguimiento", "Prioritario", "Descartado"])
-        strengths = st.text_area("Fortalezas", height=60)
-        weaknesses = st.text_area("Dudas / riesgos", height=60)
-        save = st.form_submit_button("Guardar en seguimiento", type="primary", use_container_width=True)
+        summary = st.text_area("Conclusión del visionado", value=existing.summary or "" if existing else "", height=90)
+        actions = ["Sin conclusión", "Volver a ver", "Seguimiento", "Prioritario", "Descartado"]
+        recommendation = st.selectbox("Siguiente acción", actions,
+                                       index=actions.index(existing.recommendation) if existing and existing.recommendation in actions else 0)
+        strengths = st.text_area("Fortalezas", value=existing.strengths or "" if existing else "", height=60)
+        weaknesses = st.text_area("Dudas / riesgos", value=existing.weaknesses or "" if existing else "", height=60)
+        save = st.form_submit_button("Guardar seguimiento" if existing else "Iniciar seguimiento", type="primary", use_container_width=True)
     if save:
         try:
             clean_scores = {cid: score for cid, score in scores.items() if score and score > 0}
             with session_scope() as session:
-                sporting_repo.start_player_tracking(session, player_id=pid, actor_id=user["id"])
                 fit = planning_repo.weighted_model_fit(planning_repo.list_model_criteria(session, role_id), clean_scores) if role_id else None
-                obs = planning_repo.create_observation(
-                    session, player_id=pid, reviewer_id=user["id"], match_id=match.id,
-                    mission_id=None, source_type="specific", observation_level="observation", model_role_id=role_id,
-                )
-                planning_repo.save_observation(
-                    session, obs.id, user["id"], observed_position=position,
-                    general_rating=rating if rating > 0 else None, model_fit_score=fit,
-                    attributes=clean_scores, summary=summary, recommendation=recommendation,
-                    strengths=strengths, weaknesses=weaknesses, model_role_id=role_id,
-                    observation_level="observation", submit=True,
-                )
-            st.success("Observación añadida al seguimiento individual del jugador.")
+                if matching_evaluation:
+                    obs = tracking_repo.enrich_postmatch_evaluation(session, evaluation_id=matching_evaluation.id,
+                        author_id=user["id"], summary=summary, recommendation=recommendation,
+                        strengths=strengths, weaknesses=weaknesses)
+                    obs.observed_position = position
+                    obs.model_role_id = role_id
+                    obs.model_fit_score = fit
+                    if clean_scores:
+                        obs.attributes_json = json.dumps({str(k): v for k,v in clean_scores.items()}, ensure_ascii=False)
+                else:
+                    obs, _ = tracking_repo.get_or_create_match_observation(session, player_id=pid,
+                        author_id=user["id"], match_id=match.id)
+                    planning_repo.save_observation(session, obs.id, user["id"], observed_position=position,
+                        general_rating=rating if rating > 0 else None, model_fit_score=fit,
+                        attributes=clean_scores, summary=summary, recommendation=recommendation,
+                        strengths=strengths, weaknesses=weaknesses, model_role_id=role_id,
+                        observation_level="observation", submit=True)
+            st.success("Seguimiento guardado para este jugador y partido.")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -697,6 +723,11 @@ def _render_match_hub(user: dict, match_id: int) -> None:
                 data["my_assignment"].status in {"pending", "in_progress", "returned"}):
             from views.reports import render_decline_control
             render_decline_control(user, match.id, key_prefix=f"hub_441_{match.id}")
+
+    # Requests are lightweight and distinct from the formal postmatch assignment.
+    if can_report(user):
+        from views.observation_requests import match_prompts
+        match_prompts(user, match.id)
 
     _schedule_form(match,user)
 

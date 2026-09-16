@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_403_release_contract_and_repair_migration_present():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.1"
-    assert 'APP_VERSION = "4.4.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.3"
+    assert 'APP_VERSION = "4.4.3"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
     assert (ROOT / "alembic/versions/0010_core_workspace_schema_repair_4_0_4.py").exists()
-    assert 'HEAD_MIGRATION = "0013_data_governance_4_2_3"' in (ROOT / "scripts/check_release_consistency.py").read_text(encoding="utf-8")
+    assert 'HEAD_MIGRATION = "0015_observation_requests_4_4_3"' in (ROOT / "scripts/check_release_consistency.py").read_text(encoding="utf-8")
 
 
 def test_schema_contract_is_checked_before_workspaces_render():
@@ -83,7 +83,7 @@ command.upgrade(cfg, 'head')
             "FROM matches WHERE id=1"
         )).first()
     engine.dispose()
-    assert version == "0013_data_governance_4_2_3"
+    assert version == "0015_observation_requests_4_4_3"
     assert str(row[0]) == "2026-09-13"
     assert str(row[1]) == "2026-09-13"
     assert bool(row[2]) is True

@@ -678,6 +678,11 @@ class ScoutObservation(Base):
     profile_id: Mapped[int] = mapped_column(ForeignKey("scouted_player_profiles.id", ondelete="CASCADE"), nullable=False)
     reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"))
+    # A formal observation can enrich an already-delivered postmatch rating.
+    # One linked observation per evaluation; never duplicate its sporting rating.
+    player_evaluation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("player_evaluations.id", ondelete="SET NULL"), unique=True
+    )
     mission_id: Mapped[int | None] = mapped_column(ForeignKey("scout_missions.id", ondelete="SET NULL"))
     model_role_id: Mapped[int | None] = mapped_column(ForeignKey("game_model_roles.id", ondelete="SET NULL"))
     legacy_review_id: Mapped[int | None] = mapped_column(ForeignKey("scout_reviews.id", ondelete="SET NULL"), unique=True)
@@ -708,6 +713,7 @@ class ScoutObservation(Base):
     match: Mapped[Match | None] = relationship()
     mission: Mapped[ScoutMission | None] = relationship()
     model_role: Mapped["GameModelRole | None"] = relationship(foreign_keys=[model_role_id])
+    player_evaluation: Mapped["PlayerEvaluation | None"] = relationship(foreign_keys=[player_evaluation_id])
     legacy_review: Mapped[ScoutReview | None] = relationship(foreign_keys=[legacy_review_id])
 
 
@@ -807,3 +813,58 @@ class AuditLog(Base):
     before_json: Mapped[str | None] = mapped_column(Text)
     after_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class PlayerObservationRequest(Base):
+    """A voluntary DD question, never a scout mission or formal observation."""
+    __tablename__ = "player_observation_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False, index=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    target_match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"))
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[str] = mapped_column(String(20), default="Normal", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    closed_reason: Mapped[str | None] = mapped_column(Text)
+    player: Mapped[Player] = relationship()
+    season: Mapped[Season] = relationship()
+    creator: Mapped[User] = relationship()
+    match: Mapped[Match | None] = relationship()
+
+
+class PlayerObservationRecipient(Base):
+    __tablename__ = "player_observation_recipients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("player_observation_requests.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    request: Mapped[PlayerObservationRequest] = relationship()
+    user: Mapped[User] = relationship()
+    __table_args__ = (UniqueConstraint("request_id", "user_id", name="uq_observation_request_user"),)
+
+
+class PlayerObservationResponse(Base):
+    __tablename__ = "player_observation_responses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("player_observation_requests.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"))
+    player_evaluation_id: Mapped[int | None] = mapped_column(ForeignKey("player_evaluations.id", ondelete="SET NULL"))
+    neutral_signal_id: Mapped[int | None] = mapped_column(ForeignKey("match_opinion_players.id", ondelete="SET NULL"))
+    result: Mapped[str] = mapped_column(String(25), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    request: Mapped[PlayerObservationRequest] = relationship()
+    user: Mapped[User] = relationship()
+    match: Mapped[Match | None] = relationship()
+    evaluation: Mapped[PlayerEvaluation | None] = relationship()
+    neutral_signal: Mapped[MatchOpinionPlayer | None] = relationship()
+    __table_args__ = (UniqueConstraint("request_id", "user_id", "match_id", name="uq_observation_response_context"),)

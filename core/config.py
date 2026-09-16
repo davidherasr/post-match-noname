@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.engine import make_url
 
 APP_NAME = "No Name · Área Técnica"
-APP_VERSION = "4.4.1"
+APP_VERSION = "4.4.3"
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 

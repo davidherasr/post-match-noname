@@ -160,7 +160,11 @@ def save_neutral_opinion(
     item.summary = (summary or "").strip() or None
     item.updated_at = UTC_NOW()
 
-    session.execute(delete(MatchOpinionPlayer).where(MatchOpinionPlayer.opinion_id == item.id))
+    # Preserve row identity for DD responses linked to an existing neutral signal.
+    # Deselecting a player intentionally removes the signal; unchanged players
+    # update in place so editing a team summary never severs their evidence.
+    existing_rows = {row.player_id: row for row in session.scalars(
+        select(MatchOpinionPlayer).where(MatchOpinionPlayer.opinion_id == item.id)).all()}
     allowed_team_ids = {match.home_team_id, match.away_team_id}
     seen: set[int] = set()
     for row in player_rows or []:
@@ -169,15 +173,18 @@ def save_neutral_opinion(
         if not player_id or player_id in seen or team_id not in allowed_team_ids:
             continue
         seen.add(player_id)
-        session.add(MatchOpinionPlayer(
-            opinion_id=item.id,
-            player_id=player_id,
-            team_id=team_id,
-            rating=_clamp_rating(row.get("rating")),
-            note=(row.get("note") or "").strip() or None,
-            created_at=UTC_NOW(),
-            updated_at=UTC_NOW(),
-        ))
+        signal = existing_rows.get(player_id)
+        if signal is None:
+            signal = MatchOpinionPlayer(opinion_id=item.id, player_id=player_id,
+                team_id=team_id, created_at=UTC_NOW())
+            session.add(signal)
+        signal.team_id = team_id
+        signal.rating = _clamp_rating(row.get("rating"))
+        signal.note = (row.get("note") or "").strip() or None
+        signal.updated_at = UTC_NOW()
+    for player_id, signal in existing_rows.items():
+        if player_id not in seen:
+            session.delete(signal)
     session.flush()
     audit(session, user_id, "save_neutral_match_opinion", "match_opinion", item.id, detail=f"match={match.id}; players={len(seen)}")
     return item

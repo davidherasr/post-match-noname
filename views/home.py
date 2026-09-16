@@ -10,6 +10,7 @@ from core.schedule import is_schedule_confirmed
 from core.presentation import status_badge
 from repositories import calendar as calendar_repo
 from repositories import workspaces
+from repositories import tracking as tracking_repo
 from ui.styles import page_header
 
 
@@ -71,6 +72,9 @@ def render(user: dict) -> None:
         st.success(f"Informe de {delivered['title']} entregado e incorporado correctamente.")
         if st.button("Consultar el partido", key="submitted_report_match_441", use_container_width=True):
             _open_match(int(delivered["match_id"]))
+    tracked = st.session_state.pop("tracking_saved_notice_442", None)
+    if tracked:
+        st.success(tracked)
     roles = roles_for(user)
     with session_scope() as session:
         data = workspaces.load_home_workspace(session, user_id=user["id"], roles=roles)
@@ -110,6 +114,10 @@ def render(user: dict) -> None:
                     render_decline_control(user, task["match_id"],
                                            key_prefix=f"home_441_{task['match_id']}")
 
+    if data.get("active_season") and "reporter" in roles:
+        from views.observation_requests import reporter_inbox
+        reporter_inbox(user, data["active_season"].id, compact=True)
+
     st.markdown("### Partidos de No Name")
     last_match = data.get("last_match")
     next_match = data.get("next_match")
@@ -126,12 +134,33 @@ def render(user: dict) -> None:
                           key=f"home_next44_{next_match.id}", primary=False)
 
     if can_direct(user):
+        from views.observation_requests import director_board
+        if data.get("active_season"):
+            director_board(user, data["active_season"].id, compact=True)
         dd = data.get("director") or {}
         st.markdown("### Actividad para Dirección Deportiva")
         a, b, c = st.columns(3)
         a.metric("Jugadores señalados", dd.get("neutral_signals", 0), help="Solo partidos oficiales de la temporada activa.")
         b.metric("Necesidades altas", dd.get("high_needs", 0))
         c.metric("Jugadores en evaluación", dd.get("decision_count", 0))
+        tracking_events = []
+        if data.get("active_season"):
+            with session_scope() as session:
+                tracking_events = tracking_repo.tracking_activity(session, data["active_season"].id, limit=4)
+        with st.container(border=True):
+            st.markdown("**Seguimientos recientes**")
+            if not tracking_events:
+                st.caption("Todavía no hay seguimientos individuales registrados en la temporada.")
+            for event in tracking_events:
+                obs, person, author = event["observation"], event["player"], event["author"]
+                name = person.display_name or person.full_name
+                action = "amplió el postpartido con seguimiento de" if obs.player_evaluation_id else "registró seguimiento de"
+                st.write(f"{author.full_name} {action} **{name}**")
+                st.caption(f"{event['match'].home_team.name} – {event['match'].away_team.name}")
+            if st.button("Ver seguimiento y decisiones", use_container_width=True, key="home_dd_tracking_442"):
+                st.session_state["dd_area_42"] = "Seguimiento"
+                request_navigation("Dirección Deportiva")
+                st.rerun()
         recent_reports = dd.get("latest_reports") or []
         recent_neutral = dd.get("latest_neutral") or []
         with st.container(border=True):
