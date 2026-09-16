@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_403_release_contract_and_repair_migration_present():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.1"
-    assert 'APP_VERSION = "4.2.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.2"
+    assert 'APP_VERSION = "4.2.2"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
     assert (ROOT / "alembic/versions/0010_core_workspace_schema_repair_4_0_4.py").exists()
     assert 'HEAD_MIGRATION = "0012_sporting_reading_4_2"' in (ROOT / "scripts/check_release_consistency.py").read_text(encoding="utf-8")
 

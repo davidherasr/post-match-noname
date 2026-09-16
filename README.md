@@ -1,4 +1,4 @@
-# No Name PostMatch 4.2.1
+# No Name PostMatch 4.2.2
 
 Aplicación interna de No Name para postpartido, lectura compartida del staff, Dirección Deportiva y seguimiento individual de jugadores externos. La capa visible se organiza en **Inicio · Jornada · Jugadores · Dirección Deportiva · Administración**.
 
@@ -11,21 +11,6 @@ Aplicación interna de No Name para postpartido, lectura compartida del staff, D
 - **Administración**: usuarios, roles, calendario, equipos, plantillas, calidad de datos y configuración.
 
 Los roles organizativos son **Administrador · Dirección Deportiva · Informador**. El seguimiento individual de jugadores **no es un rol Scout**: es un permiso adicional `Puede realizar seguimiento individual de jugadores`, activable solo para quienes realmente hagan ese trabajo.
-
-## 4.2.1 · Lectura transversal de Dirección Deportiva
-
-La lectura deportiva ya no se limita al partido abierto. Dirección Deportiva dispone de una capa de **inteligencia de liga** construida únicamente con datos introducidos por el staff:
-
-- jugadores externos que empiezan a repetirse entre partidos;
-- número de partidos y señales, personas que los señalaron y nota ponderada por el peso deportivo de cada miembro;
-- tendencia entre primeras y últimas apariciones;
-- equipos rivales con evidencia acumulada;
-- discrepancias localizadas por partido, equipo o jugador con etiquetas de consenso legibles;
-- acceso directo desde Inicio a `Lectura deportiva → Jugadores señalados`.
-
-Los permisos también quedan cerrados por responsabilidad: **Administrador** mantiene datos y usuarios, **Dirección Deportiva** interpreta la información y **Informador** es el único rol que habilita la escritura de valoraciones y postpartidos. Los roles pueden combinarse. El permiso `Puede realizar seguimiento individual de jugadores` sigue siendo independiente.
-
-La 4.2.1 no añade esquema nuevo; utiliza la migración `0012_sporting_reading_4_2`. Los históricos de antiguas misiones se conservan en base de datos, pero ya no forman parte de los workspaces ni de las vistas activas.
 
 ## 4.2 · Lectura deportiva real
 
@@ -71,11 +56,13 @@ Para la prueba de Jornada 1 consulta `PRUEBA_REAL_J1.md`.
 
 ## Datos y Supabase
 
-4.1.1 mantiene el mismo Supabase, `DATABASE_URL` y Secrets. El head Alembic actual es `0011_user_lifecycle_4_1_1`. La migración es aditiva y conserva todos los datos existentes; no se incluyen datos demo.
+4.2.2 mantiene el mismo Supabase, `DATABASE_URL` y Secrets. El head Alembic esperado sigue siendo `0012_sporting_reading_4_2`; **4.2.2 no añade una migración nueva**. En PostgreSQL la columna `alembic_version.version_num` debe admitir los identificadores largos de 4.x (la aplicación la prepara a 128 caracteres cuando Alembic necesita ejecutarse). No se incluyen datos deportivos demo ni credenciales reales.
+
+El hotfix 4.2.2 evita volver a ejecutar Alembic cuando la base ya está exactamente en el head de la release y el contrato físico del esquema es correcto. Esto reduce trabajo en cada arranque de Streamlit Cloud y protege frente al `KeyError` observado en 4.2.1 durante el arranque de base de datos. Si aparece otro error inesperado, la pantalla y los logs indican ahora la fase exacta: configuración, migraciones/esquema, bootstrap o carga de ajustes.
 
 ## Validación
 
-Consulta `VALIDACION_4_1_1.md`. La release está cubierta por `compileall`, suite automatizada completa, consistencia interna y migraciones fresh/upgrade.
+Consulta `VALIDACION_4_2_2.md`. La release se valida con `compileall`, suite automatizada, consistencia interna y migraciones fresh/upgrade hasta `0012`.
 ## 4.0.5 · Hotfix de navegación
 
 4.0.5 corrige la navegación desde tarjetas y tareas: las vistas ya no escriben directamente en el estado del widget `main_navigation` después de que Streamlit haya creado el radio lateral. La navegación se solicita mediante un estado pendiente y se aplica en el siguiente rerun antes de construir el widget. También protege PostgreSQL ampliando automáticamente la columna de versión de Alembic a 128 caracteres.

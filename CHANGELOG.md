@@ -1,17 +1,11 @@
-## 4.2.1 · Inteligencia transversal y permisos cerrados
+## 4.2.2 · Hotfix de arranque + paquete de continuidad
 
-- Dirección Deportiva deja de ser una lectura aislada por partido y cruza señales entre jornadas.
-- Nueva lectura transversal de jugadores externos: partidos distintos, número de señales, personas que los señalaron, nota ponderada, tendencia y notas recientes.
-- Nueva lectura transversal de equipos rivales combinando partidos neutrales y valoración del rival en postpartidos de No Name.
-- Las discrepancias del staff se convierten en etiquetas comprensibles (`Consenso muy alto`, `Consenso alto`, `Opiniones divididas`, `Discrepancia alta`) y DD puede abrir el partido exacto donde aparecen.
-- Inicio enlaza directamente con `Dirección Deportiva → Lectura deportiva → Jugadores señalados`.
-- Permisos estrictos: Administrador administra, Dirección Deportiva interpreta y solo Informador puede puntuar o editar postpartidos/lecturas neutrales. Un usuario puede combinar roles si necesita varias capacidades.
-- El seguimiento individual continúa siendo un permiso independiente de los roles y solo puede aplicarse a jugadores externos.
-- Se eliminan del paquete las vistas antiguas de Scout/DD y los workspaces activos dejan de consultar `ScoutMission`; los históricos de base de datos se conservan por compatibilidad.
-- Fichas y pantallas visibles sustituyen terminología Scout por `seguimiento individual`, `observador` y `observaciones` cuando corresponde.
-- El test de aceptación contra base real usa un Informador temporal dentro del SAVEPOINT y mantiene rollback total.
-- Sin migración nueva: Alembic continúa en `0012_sporting_reading_4_2`.
-- Suite final: 106 tests.
+- Corrige el arranque observado en 4.2.1 evitando entrar en Alembic cuando Supabase ya está exactamente en el head `0012_sporting_reading_4_2`.
+- Mantiene validación física de esquema antes de renderizar la aplicación.
+- Recuperación defensiva de `KeyError` únicamente cuando el head y el contrato físico quedan verificados.
+- Diagnóstico de arranque dividido por fase y traceback completo en logs.
+- Sin nueva migración y sin cambios destructivos de datos.
+- Incluye `CONTEXTO_NUEVO_CHAT.md` para continuar el proyecto en otra conversación sin perder decisiones funcionales ni técnicas.
 
 ## 4.2.0 · Lectura deportiva y seguimiento real
 

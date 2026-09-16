@@ -202,7 +202,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
 
 def load_player_workspace(session: Session, *, player_id: int, season_id: int | None) -> dict:
     payload = player_report_repo.build_player_report_360(session, int(player_id), season_id=season_id)
-    # 4.2.1: the old assigned Scout-mission concept is no longer part of the active product.
+    # 4.2.2: the old assigned Scout-mission concept is no longer part of the active product.
     payload["next_action"] = None
     return payload
 

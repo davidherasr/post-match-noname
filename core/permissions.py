@@ -19,7 +19,7 @@ def has_any(user: dict | None, *roles: str) -> bool:
 
 
 def can_report(user: dict | None) -> bool:
-    # 4.2.1: valorar/postpartido es responsabilidad explícita de Informador.
+    # 4.2.2: valorar/postpartido es responsabilidad explícita de Informador.
     # Administrador y Dirección Deportiva necesitan también ese rol si quieren puntuar.
     return has_any(user, ROLE_REPORTER)
 

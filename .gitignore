@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/secrets.toml
+postmatch_scout.db
+storage/*
+!storage/.gitkeep
+.env
+.DS_Store

@@ -63,7 +63,7 @@ def test_provisional_fixture_is_plannable_but_not_observable_until_confirmed(ses
         kickoff = datetime(2026, 10, 18, 17, 30)
         calendar_repo.update_schedule(session, match.id, admin.id, kickoff_at=kickoff)
         assert is_schedule_confirmed(match)
-        # 4.2.1: historical ScoutMission records are no longer part of the active calendar workflow.
+        # 4.2.2: historical ScoutMission records are no longer part of the active calendar workflow.
         # The match confirmation enables the observation, but does not mutate legacy mission deadlines.
         assert mission.due_at is None
 

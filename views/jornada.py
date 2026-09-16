@@ -609,9 +609,9 @@ def _render_match_hub(user: dict, match_id: int) -> None:
         _neutral_match_study(match,user)
 
     if data["is_own_match"]:
-        st.info("**Partido No Name · flujo 4.2.1**: el staff completa su postpartido. Dirección Deportiva compara el criterio conjunto. Los jugadores propios se leen como rendimiento de plantilla, nunca como seguimiento de mercado.")
+        st.info("**Partido No Name · flujo 4.2.2**: el staff completa su postpartido. Dirección Deportiva compara el criterio conjunto. Los jugadores propios se leen como rendimiento de plantilla, nunca como seguimiento de mercado.")
     else:
-        st.info("**Partido neutral · flujo 4.2.1**: cada miembro deja una lectura ligera del partido y puede señalar jugadores. Señalar no equivale a seguir; el seguimiento individual es un permiso aparte.")
+        st.info("**Partido neutral · flujo 4.2.2**: cada miembro deja una lectura ligera del partido y puede señalar jugadores. Señalar no equivale a seguir; el seguimiento individual es un permiso aparte.")
 
     if data["is_own_match"]:
         st.markdown("### Estado del postpartido")

@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.2.1"
+EXPECTED = "4.2.2"
 HEAD_MIGRATION = "0012_sporting_reading_4_2"
 
 
@@ -96,7 +96,7 @@ def main() -> None:
 
     jornada_text = (ROOT / "views" / "jornada.py").read_text(encoding="utf-8")
     for token in [
-        "Partido No Name · flujo 4.2.1", "Partido neutral · flujo 4.2.1",
+        "Partido No Name · flujo 4.2.2", "Partido neutral · flujo 4.2.2",
         "Dirección Deportiva · lectura conjunta", "Tu lectura del partido",
         "Seguimiento individual", "Iniciar seguimiento", "TITULARES", "SUPLENTES",
     ]:
@@ -113,12 +113,12 @@ def main() -> None:
         "Se repiten en 2+ partidos", "Iniciar seguimiento",
     ]:
         if token not in squad_text:
-            errors.append(f"Centro DD 4.2.1 incompleto: falta {token}")
+            errors.append(f"Centro DD 4.2.2 incompleto: falta {token}")
 
     sporting_text = (ROOT / "repositories" / "sporting_reading.py").read_text(encoding="utf-8")
     for token in ["def league_intelligence", "def consensus_label", "def trend_label", "def team_reading_history"]:
         if token not in sporting_text:
-            errors.append(f"Inteligencia transversal 4.2.1 incompleta: falta {token}")
+            errors.append(f"Inteligencia transversal 4.2.2 incompleta: falta {token}")
 
     home_text = (ROOT / "views" / "home.py").read_text(encoding="utf-8")
     if "Abrir lectura deportiva" not in home_text or 'request_navigation("Dirección Deportiva")' not in home_text:

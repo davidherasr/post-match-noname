@@ -81,6 +81,35 @@ def validate_schema_contract(connection) -> None:
         )
 
 
+def _configured_alembic_heads(cfg) -> set[str]:
+    """Return the migration heads shipped with this release."""
+    from alembic.script import ScriptDirectory
+
+    return {str(value) for value in ScriptDirectory.from_config(cfg).get_heads()}
+
+
+def _database_alembic_heads(connection) -> set[str]:
+    """Read Alembic heads without invoking the migration runner.
+
+    This is intentionally tiny and dialect-agnostic. 4.2.2 uses it to avoid
+    re-entering Alembic on every Streamlit cold start when Supabase is already
+    exactly at the release head.
+    """
+    inspector = inspect(connection)
+    if "alembic_version" not in set(inspector.get_table_names()):
+        return set()
+    rows = connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all()
+    return {str(value) for value in rows if value}
+
+
+def _schema_is_release_ready(connection) -> bool:
+    try:
+        validate_schema_contract(connection)
+        return True
+    except DatabaseSchemaError:
+        return False
+
+
 @lru_cache(maxsize=1)
 def get_engine():
     connect_args = {}
@@ -149,7 +178,29 @@ def init_db() -> None:
             cfg = Config(str(alembic_ini))
             cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
             cfg.attributes["connection"] = connection
-            command.upgrade(cfg, "head")
+
+            # 4.2.2 startup hotfix: 4.2.1 had no schema migration, but still
+            # entered Alembic on every Streamlit cold start. On the production
+            # Supabase/Python 3.14 stack this could surface an Alembic-internal
+            # KeyError even though the database was already on 0012. If the
+            # stored revision exactly matches the release head, validate the
+            # physical schema and continue without invoking the migration runner.
+            configured_heads = _configured_alembic_heads(cfg)
+            database_heads = _database_alembic_heads(connection)
+            if configured_heads and database_heads == configured_heads:
+                validate_schema_contract(connection)
+                return
+
+            try:
+                command.upgrade(cfg, "head")
+            except KeyError:
+                # Defensive recovery only when Alembic actually left the DB at
+                # the shipped head *and* the physical contract is complete. We
+                # never swallow a KeyError for a database that is still behind.
+                database_heads = _database_alembic_heads(connection)
+                if not (configured_heads and database_heads == configured_heads and _schema_is_release_ready(connection)):
+                    raise
+
             # Critical 4.0.3 guard: Alembic's version table alone is not enough.
             # Verify the actual physical columns before any ORM workspace runs.
             validate_schema_contract(connection)

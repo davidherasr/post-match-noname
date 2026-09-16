@@ -203,7 +203,7 @@ def _sporting_overview(user: dict, season) -> None:
     st.markdown("#### Principales discrepancias")
     _disagreements_block(disagreements, compact=True)
     st.info(
-        "Flujo 4.2.1: el staff observa y puntúa → DD detecta consenso, discrepancias y señales repetidas → "
+        "Flujo 4.2.2: el staff observa y puntúa → DD detecta consenso, discrepancias y señales repetidas → "
         "solo un usuario con permiso especial convierte un jugador externo en seguimiento individual."
     )
 

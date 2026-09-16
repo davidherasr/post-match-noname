@@ -27,7 +27,7 @@ from repositories.matches import _own_team_id_for_match, get_match, get_particip
 
 def _assert_report_owner_or_privileged(session: Session, report: Report, actor_id: int) -> User:
     actor = assert_role(session, actor_id)
-    # 4.2.1: writing/rating a postmatch is an Informador capability. Admin and
+    # 4.2.2: writing/rating a postmatch is an Informador capability. Admin and
     # Dirección Deportiva may review/approve through their dedicated actions,
     # but they do not inherit report-writing rights merely from those roles.
     if not user_has_role(session, actor_id, "reporter"):

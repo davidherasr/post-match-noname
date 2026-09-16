@@ -47,7 +47,7 @@ def live_acceptance_rollback(session: Session, actor_id: int) -> dict:
         competition = repo.create_competition(session, f"__ACCEPT_{token}", actor_id=actor_id)
         rival = repo.create_team(session, f"__RIVAL_{token}", actor_id=actor_id)
         player = repo.find_or_create_player(session, f"__PLAYER_{token}", primary_position="DC", actor_id=actor_id)
-        # 4.2.1: Admin no longer inherits reporting rights. The live acceptance
+        # 4.2.2: Admin no longer inherits reporting rights. The live acceptance
         # test creates a disposable Informador inside the SAVEPOINT so the real
         # production permission model is exercised without leaving data behind.
         reporter = repo.create_user(

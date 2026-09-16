@@ -6,9 +6,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_406_contract():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.1"
-    assert 'APP_VERSION = "4.2.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.2.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.2.2"
+    assert 'APP_VERSION = "4.2.2"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.2.2"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
 
 
 def test_lineup_picker_hides_players_selected_in_other_slots():
