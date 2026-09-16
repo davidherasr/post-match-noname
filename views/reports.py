@@ -10,6 +10,8 @@ from core.database import session_scope
 from core.evaluation_rules import AUTO_STANDOUT_THRESHOLD
 from core.performance import measure
 from core.permissions import can_direct, can_report
+from core.navigation import request_navigation
+from core.score_picker import rating_choices, rating_from_choice
 from core.utils import safe_html
 from repositories import scouting as repo
 from services.report_service import generate_report_pdf, report_filename
@@ -17,12 +19,27 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.4"
+REPORTS_PAGE_API_VERSION = "4.4.1"
 
 
 
 def _set_quick_rating(key: str, value: float) -> None:
     st.session_state[key] = float(value)
+
+
+def _render_exact_rating(key: str, player_name: str, *, read_only: bool) -> None:
+    """One-click numeric rating; legacy fractional values stay intact on edit."""
+    current = float(st.session_state.get(key, 0.0) or 0.0)
+    if read_only:
+        st.metric("Nota", "Sin evaluar" if current == 0 else f"{current:g}".replace(".", ","))
+        return
+    options, default = rating_choices(current)
+    selected = st.pills(
+        f"Nota · {player_name}", options, default=default, key=key + "_choice",
+        help="Pulsa una nota del 1 al 10. Sin evaluar no cuenta como 0 en las medias.",
+        label_visibility="collapsed", selection_mode="single",
+    )
+    st.session_state[key] = rating_from_choice(selected)
 
 
 def _minutes_played(participation) -> int:
@@ -185,10 +202,8 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
                 unsafe_allow_html=True,
             )
             rating_col, note_col = st.columns([1.15, 1.5], gap="small")
-            rating_col.number_input(
-                f"Nota · {display_name}", min_value=0.0, max_value=10.0, step=0.1, key=prefix + "rating",
-                disabled=read_only, help="0 = sin valorar.", label_visibility="collapsed",
-            )
+            with rating_col:
+                _render_exact_rating(prefix + "rating", display_name, read_only=read_only)
             if float(st.session_state.get(prefix + "rating", 0.0) or 0.0) <= 0 and _minutes_played(part) < 10:
                 rating_col.caption("Minutos insuficientes · no computará como valoración")
             note_col.text_input(
@@ -282,8 +297,14 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
     else:
         with st.form(f"global_reading_42_{report_id}"):
             c1, c2 = st.columns(2)
-            own_rating = c1.number_input("Nota No Name", 0.0, 10.0, float(report.own_team_rating or 0.0), .5, help="0 = sin valorar")
-            rival_rating = c2.number_input(f"Nota {report.rival_team.name}", 0.0, 10.0, float(report.rival_team_rating or 0.0), .5, help="0 = sin valorar")
+            own_options, own_default = rating_choices(report.own_team_rating)
+            rival_options, rival_default = rating_choices(report.rival_team_rating)
+            own_choice = c1.pills("Nota No Name", own_options, default=own_default,
+                                  selection_mode="single", help="Sin evaluar no cuenta como nota cero.")
+            rival_choice = c2.pills(f"Nota {report.rival_team.name}", rival_options, default=rival_default,
+                                    selection_mode="single", help="Sin evaluar no cuenta como nota cero.")
+            own_rating = rating_from_choice(own_choice)
+            rival_rating = rating_from_choice(rival_choice)
             own_note = st.text_area("Lectura No Name", value=report.own_team_note or "", height=80, placeholder="Qué hicimos bien, qué nos costó, sensaciones colectivas...")
             rival_note = st.text_area("Lectura rival", value=report.opponent_overview or "", height=80, placeholder="Qué propuso el rival y cómo nos condicionó...")
             takeaways = st.text_area("Conclusiones", value=report.key_takeaways or "", height=80, placeholder="2-3 ideas que merece la pena conservar")
@@ -328,7 +349,15 @@ def _render_finish(report, evaluation_list: list, report_id: int, user: dict, re
                                 repo.submit_report(session, report_id, user["id"])
                     st.session_state.pop(confirm_key,None)
                     _invalidate_workspace(report_id)
-                    st.success("Informe incorporado directamente a las estadísticas y a Dirección Deportiva.")
+                    st.session_state["report_submission_notice"] = {
+                        "match_id": int(report.match_id),
+                        "title": f"{report.match.home_team.name} – {report.match.away_team.name}",
+                    }
+                    st.session_state["_pending_report_ui_cleanup"] = int(report_id)
+                    st.session_state.pop("match_hub_mode", None)
+                    st.session_state.pop("workspace_match_id", None)
+                    st.session_state.pop("archive_open_report_33", None)
+                    request_navigation("Inicio")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -433,10 +462,37 @@ def _available_work_matches(user: dict):
             all_matches = [m for m in repo.list_matches(session) if m.status in {"published", "closed"}]
             assignments = repo.list_assignments(session, user_id=user["id"])
             reports = repo.list_reports(session, reporter_id=user["id"])
-    assigned_ids = {a.match_id for a in assignments if a.status != "waived"}
+    assigned_ids = {a.match_id for a in assignments if a.status not in {"waived", "declined"}}
     # Own-match report writing is assignment-driven even for hybrid DD/Informador.
     matches = [m for m in all_matches if m.id in assigned_ids]
     return matches, assignments, reports
+
+
+def render_decline_control(user: dict, match_id: int, *, key_prefix: str) -> None:
+    """Explicitly decline optional work without deleting a draft or touching DD data."""
+    if not can_report(user):
+        return
+    with st.expander("No puedo realizar este informe", expanded=False):
+        st.caption("La tarea desaparecerá de tu bandeja. Si ya tienes un borrador, se conservará; Administración podrá reactivar la asignación.")
+        reason = st.text_input("Motivo (opcional)", key=f"decline_reason_{key_prefix}",
+                               placeholder="Por ejemplo, no puedo asistir al partido")
+        confirm = st.checkbox("Confirmo que no voy a realizar este informe", key=f"decline_confirm_{key_prefix}")
+        if st.button("Rechazar asignación", type="secondary", disabled=not confirm,
+                     use_container_width=True, key=f"decline_submit_{key_prefix}"):
+            try:
+                with session_scope() as session:
+                    existing = repo.report_for_user(session, int(match_id), int(user["id"]))
+                    draft_id = existing.id if existing and existing.status in {"draft", "returned"} else None
+                    repo.decline_report_assignment(session, int(match_id), int(user["id"]), reason)
+                if draft_id:
+                    st.session_state["_pending_report_ui_cleanup"] = int(draft_id)
+                st.session_state["assignment_declined_notice"] = "Has rechazado la asignación. Ya no aparece entre tus tareas pendientes."
+                st.session_state.pop("match_hub_mode", None)
+                st.session_state.pop("workspace_match_id", None)
+                request_navigation("Inicio")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
 
 
 def _render_work(user: dict) -> None:
@@ -459,6 +515,7 @@ def _render_work(user: dict) -> None:
     valid_ids = [m.id for m in active_matches]
     preferred = st.session_state.pop("report_selected_match_id", None)
     selected_match_id = st.selectbox("Partido", valid_ids, index=valid_ids.index(preferred) if preferred in valid_ids else 0, format_func=lambda mid: labels[mid])
+    render_decline_control(user, selected_match_id, key_prefix=f"work_441_{selected_match_id}")
     selected_report = existing_by_match.get(selected_match_id)
     if not selected_report:
         if st.button("Empezar a valorar", type="primary", use_container_width=True):
@@ -517,7 +574,14 @@ def render_match_report(user: dict, match_id: int) -> None:
     contextual = dict(user)
     contextual["role"] = "reporter"
     with session_scope() as session:
+        assignment = next((row for row in repo.list_assignments(session, user_id=user["id"])
+                           if row.match_id == int(match_id)), None)
         report = repo.report_for_user(session, int(match_id), int(user["id"]))
+    if assignment and assignment.status in {"waived", "declined"}:
+        st.info("Tu asignación no está activa. Administración puede reactivarla.")
+        return
+    if assignment and assignment.status in {"pending", "in_progress", "returned"}:
+        render_decline_control(user, match_id, key_prefix=f"match_editor_441_{match_id}")
     if not report:
         if st.button("Empezar informe", type="primary", use_container_width=True, key=f"start_match_report_{match_id}"):
             try:

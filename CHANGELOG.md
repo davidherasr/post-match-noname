@@ -1,3 +1,11 @@
+## 4.4.1 · Valoración rápida y postpartidos opcionales
+
+- Selector directo 1–10 / Sin evaluar para notas individuales y colectivas; notas decimales previas preservadas sin redondeo silencioso.
+- Tras una entrega satisfactoria vuelve a Inicio con confirmación, vínculo al partido y limpieza diferida de estado UI. Si falla, mantiene el editor.
+- Informador puede rechazar una asignación pendiente con confirmación y motivo opcional; estado `declined` auditado, sin borrar borradores ni datos; Admin puede reactivar la asignación.
+- DD solo puede elaborar postpartidos si además tiene rol Informador. Con ambos roles puede incorporarse voluntariamente a cualquier postpartido propio publicado sin crear misiones ni privilegios implícitos.
+- 140 tests locales, compileall, consistencia y migraciones SQLite fresh/0012→0013 OK; producción no validada. Sin migración nueva; consultar `UPGRADE_4_4_1.md`.
+
 ## 4.4 · Experiencia operativa y fiabilidad deportiva
 
 - Inicio reorganizado por tareas reales del usuario, ultimo y proximo partido y actividad relevante de Direccion Deportiva.

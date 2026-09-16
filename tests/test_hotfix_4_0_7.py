@@ -31,9 +31,9 @@ def _neutral_match(session):
 
 
 def test_release_407_contract():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4"
-    assert 'APP_VERSION = "4.4"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.4"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.1"
+    assert 'APP_VERSION = "4.4.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.4.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
 
 
 def test_parser_understands_starters_and_substitutes_sections():

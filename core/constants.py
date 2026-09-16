@@ -29,6 +29,7 @@ ASSIGNMENT_STATUSES = {
     "incorporated": "Incorporado",
     "returned": "Devuelto",
     "waived": "No requerido",
+    "declined": "Rechazado por el Informador",
 }
 
 OBSERVATION_STATUSES = {

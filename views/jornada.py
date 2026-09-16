@@ -564,7 +564,7 @@ def _manage_postmatch_assignments_4231(match, user: dict, assignments: list) -> 
         reporters = [item for item in users_repo.list_users(session, active_only=True)
                      if item.deleted_at is None and users_repo.user_has_role(session, item.id, "reporter")]
     options = {item.id: item.full_name for item in reporters}
-    active = [assignment for assignment in assignments if assignment.status != "waived"]
+    active = [assignment for assignment in assignments if assignment.status not in {"waived", "declined"}]
     selected_default = [assignment.user_id for assignment in active if assignment.user_id in options]
     with st.expander("Informadores asignados · gestionar postpartido", expanded=not bool(active) or bool(st.session_state.get(f"assignment_focus_44_{match.id}"))):
         if not active:
@@ -636,7 +636,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
         st.session_state["workspace_team_id"]=match.away_team_id; st.rerun()
 
     primary_done = False
-    active_assignments = [item for item in data["assignments"] if item.status != "waived"]
+    active_assignments = [item for item in data["assignments"] if item.status not in {"waived", "declined"}]
     if data["is_own_match"] and can_admin(user) and match.status in {"scheduled", "draft"} and is_schedule_confirmed(match):
         if st.button("Preparar partido", type="primary", use_container_width=True, key=f"prepare38_{match.id}"):
             st.session_state["postmatch_existing_match_id"] = match.id
@@ -649,7 +649,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
             st.session_state[f"assignment_focus_44_{match.id}"] = True
             st.rerun()
         primary_done = True
-    elif data["is_own_match"] and can_report(user) and data.get("my_assignment") and data["my_assignment"].status != "waived":
+    elif data["is_own_match"] and can_report(user) and data.get("my_assignment") and data["my_assignment"].status not in {"waived", "declined"}:
         my_report = next((item for item in data["reports"] if item.reporter_id == user["id"]), None)
         label = ("Ver informe" if my_report and my_report.status in {"approved", "final", "incorporated", "submitted"}
                  else "Continuar informe" if my_report else "Rellenar informe")
@@ -657,6 +657,21 @@ def _render_match_hub(user: dict, match_id: int) -> None:
             st.session_state["match_hub_mode"] = "report"
             st.rerun()
         primary_done = True
+    # A Director can volunteer for any published own match, but only if an
+    # Administrator explicitly granted the additional Informador role.
+    if (data["is_own_match"] and match.status == "published" and
+            can_direct(user) and can_report(user) and
+            (not data.get("my_assignment") or data["my_assignment"].status in {"waived", "declined"})):
+        if st.button("Realizar mi propio informe · opcional", type="secondary",
+                     use_container_width=True, key=f"volunteer_report_441_{match.id}"):
+            try:
+                from repositories import reports as reports_repo
+                with session_scope() as session:
+                    reports_repo.claim_director_report(session, match.id, user["id"])
+                st.session_state["match_hub_mode"] = "report"
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
     neutral_focus_key = f"neutral_reading_focus_44_{match.id}"
     neutral_focus = bool(st.session_state.get(neutral_focus_key))
     if not primary_done and not is_schedule_confirmed(match) and can_admin(user):
@@ -671,9 +686,17 @@ def _render_match_hub(user: dict, match_id: int) -> None:
         if can_admin(user):
             _manage_postmatch_assignments_4231(match, user, data["assignments"])
         elif can_report(user) and not data.get("my_assignment"):
-            st.warning("Este postpartido está publicado, pero tu usuario no tiene asignación. Pide a Administración que abra este partido y utilice «Informadores asignados · gestionar postpartido». Tu rol Informador por sí solo no te asigna todos los encuentros.")
-        elif can_report(user) and data["my_assignment"].status == "waived":
-            st.info("Tu asignación para este partido consta como «No requerido». Administración puede reactivarla desde la ficha del encuentro.")
+            if can_direct(user):
+                st.caption("Puedes participar voluntariamente con «Realizar mi propio informe».")
+            else:
+                st.info("Este postpartido todavía no está asignado a tu usuario. Administración puede asignártelo desde la ficha del encuentro.")
+        elif can_report(user) and data["my_assignment"].status in {"waived", "declined"}:
+            if not can_direct(user):
+                st.info("Has rechazado o dejado de tener activa esta asignación. Administración puede reactivarla.")
+        if (can_report(user) and data.get("my_assignment") and
+                data["my_assignment"].status in {"pending", "in_progress", "returned"}):
+            from views.reports import render_decline_control
+            render_decline_control(user, match.id, key_prefix=f"hub_441_{match.id}")
 
     _schedule_form(match,user)
 
@@ -686,7 +709,7 @@ def _render_match_hub(user: dict, match_id: int) -> None:
 
     if data["is_own_match"]:
         st.markdown("### Estado del postpartido")
-        active_assignments = [a for a in data["assignments"] if a.status != "waived"]
+        active_assignments = [a for a in data["assignments"] if a.status not in {"waived", "declined"}]
         st.markdown(f"**Informes** · {len(data['reports'])} registrados / {len(active_assignments)} informadores asignados")
         from core.constants import REPORT_STATUSES
         for report in data["reports"][:8]:

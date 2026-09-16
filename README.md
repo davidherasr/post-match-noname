@@ -1,6 +1,14 @@
-# No Name · Área Técnica 4.4.0
+# No Name · Área Técnica 4.4.1
 
 Aplicación interna de No Name para postpartido, lectura compartida del staff, Dirección Deportiva y seguimiento individual de jugadores externos. La capa visible se organiza en **Inicio · Jornada · Jugadores · Dirección Deportiva · Administración**.
+
+## Novedades 4.4.1
+
+- Notas de jugadores y equipos por pulsación directa de 1 a 10 o «Sin evaluar», preservando notas históricas decimales.
+- Entrega de informe vuelve a Inicio con confirmación y acceso al partido; el editor no permanece abierto tras entregar.
+- Informadores pueden rechazar tareas opcionales; el motivo se audita, los borradores se preservan y Administración puede reactivar la asignación.
+- DD puede asumir voluntariamente un postpartido publicado únicamente cuando su cuenta tiene también rol Informador.
+- Sin nueva migración; consultar `UPGRADE_4_4_1.md` y `VALIDACION_4_4_1.md`.
 
 ## Novedades 4.4.0
 

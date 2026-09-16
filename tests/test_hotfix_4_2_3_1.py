@@ -83,7 +83,7 @@ def test_admin_recovery_is_reachable_and_informador_has_direct_route():
     assert 'def _manage_postmatch_assignments_4231(' in jornada
     assert 'if not can_admin(user) or match.status != "published":' in jornada
     assert 'matches_repo.assign_reporters(session, match.id, selected_ids' in jornada
-    assert 'no tiene asignación' in jornada
+    assert 'no está asignado' in jornada
     assert 'def _open_report(match_id: int)' in home
     assert '"match_hub_mode"] = "report"' in home
     assert '"Rellenar informe"' in home

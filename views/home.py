@@ -63,6 +63,14 @@ def _task_action(task: dict) -> str:
 
 def render(user: dict) -> None:
     page_header("Inicio", "Tu trabajo y la actividad deportiva del club.")
+    declined = st.session_state.pop("assignment_declined_notice", None)
+    if declined:
+        st.success(declined)
+    delivered = st.session_state.pop("report_submission_notice", None)
+    if delivered:
+        st.success(f"Informe de {delivered['title']} entregado e incorporado correctamente.")
+        if st.button("Consultar el partido", key="submitted_report_match_441", use_container_width=True):
+            _open_match(int(delivered["match_id"]))
     roles = roles_for(user)
     with session_scope() as session:
         data = workspaces.load_home_workspace(session, user_id=user["id"], roles=roles)
@@ -97,6 +105,10 @@ def render(user: dict) -> None:
                         _open_report(task["match_id"])
                     else:
                         _open_match(task["match_id"])
+                if task.get("kind") == "report" and task.get("match_id"):
+                    from views.reports import render_decline_control
+                    render_decline_control(user, task["match_id"],
+                                           key_prefix=f"home_441_{task['match_id']}")
 
     st.markdown("### Partidos de No Name")
     last_match = data.get("last_match")

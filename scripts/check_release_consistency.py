@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.4"
+EXPECTED = "4.4.1"
 HEAD_MIGRATION = "0013_data_governance_4_2_3"
 
 

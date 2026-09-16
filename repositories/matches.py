@@ -325,7 +325,7 @@ def assign_reporters(session: Session, match_id: int, user_ids: Sequence[int], a
             session.add(item)
         item.due_at = due_at
         item.required = required
-        if item.status == "waived":
+        if item.status in {"waived", "declined"}:
             item.status = "pending"
         result.append(item)
     for item in current.values():

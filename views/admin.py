@@ -84,7 +84,7 @@ def _section_users(user: dict) -> None:
                 ["admin", "director", "reporter"],
                 default=["reporter"],
                 format_func=lambda r: ROLES[r],
-                help="Los roles son independientes. Si una persona hace dos funciones, asigna ambos.",
+                help="Los roles son independientes. Asigna DD e Informador a quien deba poder realizar informes opcionales.",
             )
             password = c4.text_input(
                 "Contraseña",

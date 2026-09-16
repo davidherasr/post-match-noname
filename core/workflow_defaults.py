@@ -20,7 +20,7 @@ def recent_match_defaults(session, own_id: int, season_id: int) -> dict:
     latest = matches[0]
     own_formation = latest.home_formation if latest.home_team_id == own_id else latest.away_formation
     assignments = repo.list_assignments(session, match_id=latest.id)
-    reporter_ids = [int(a.user_id) for a in assignments if a.status != "waived"]
+    reporter_ids = [int(a.user_id) for a in assignments if a.status not in {"waived", "declined"}]
     return {
         "competition_id": int(latest.competition_id),
         "own_formation": own_formation if own_formation in FORMATIONS else "4-3-3",

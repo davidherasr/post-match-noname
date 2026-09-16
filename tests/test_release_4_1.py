@@ -18,9 +18,9 @@ def _user_dict(*roles: str, track: bool = False) -> dict:
 
 
 def test_release_411_contract_and_user_lifecycle_head():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4"
-    assert 'APP_VERSION = "4.4"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.4"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.1"
+    assert 'APP_VERSION = "4.4.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.4.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
     migration = ROOT / "alembic/versions/0012_sporting_reading_4_2.py"
     assert migration.exists()
     assert 'down_revision = "0011_user_lifecycle_4_1_1"' in migration.read_text(encoding="utf-8")

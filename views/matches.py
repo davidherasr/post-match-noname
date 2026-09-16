@@ -236,7 +236,7 @@ def render(user: dict) -> None:
         c1.metric("Asignados", progress.get("total", 0))
         c2.metric("Entregados", progress.get("submitted", 0))
         c3.metric("Aprobados", progress.get("approved", 0))
-        current_ids = [a.user_id for a in current if a.status != "waived"]
+        current_ids = [a.user_id for a in current if a.status not in {"waived", "declined"}]
         with st.form(f"assign_reporters_{selected_id}"):
             selected_users = st.multiselect(
                 "Informadores asignados",

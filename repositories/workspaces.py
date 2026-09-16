@@ -197,7 +197,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
             ids = [m.id for m in published]
             assigned = dict(session.execute(
                 select(ReportAssignment.match_id, func.count(ReportAssignment.id))
-                .where(ReportAssignment.match_id.in_(ids), ReportAssignment.status != "waived")
+                .where(ReportAssignment.match_id.in_(ids), ReportAssignment.status.notin_(["waived", "declined"]))
                 .group_by(ReportAssignment.match_id)
             ).all())
             for m in published:
@@ -283,7 +283,7 @@ def load_home_workspace(session: Session, *, user_id: int, roles: set[str]) -> d
         match_progress = {mid: {"assigned": 0, "incorporated": 0} for mid in visible_ids}
         for mid, assigned_count in session.execute(
             select(ReportAssignment.match_id, func.count(ReportAssignment.id)).where(
-                ReportAssignment.match_id.in_(visible_ids), ReportAssignment.status != "waived"
+                ReportAssignment.match_id.in_(visible_ids), ReportAssignment.status.notin_(["waived", "declined"])
             ).group_by(ReportAssignment.match_id)).all():
             match_progress[mid]["assigned"] = int(assigned_count or 0)
         for mid, count in session.execute(

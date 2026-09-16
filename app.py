@@ -50,7 +50,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name · Área Técnica se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la versión 4.4; "
+        "Sustituye **todo el contenido del repositorio** por la versión 4.4.1; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -99,7 +99,7 @@ def _render_unexpected_startup_error(exc: Exception, phase: str) -> None:
     st.error("No Name · Área Técnica no ha podido completar el arranque de la base de datos.")
     st.markdown(
         "No se ha continuado con el arranque. Consulta **Manage app → Logs** para el detalle técnico. "
-        "La 4.4 identifica también la fase exacta del arranque para evitar diagnósticos a ciegas."
+        "La versión actual identifica también la fase exacta del arranque para evitar diagnósticos a ciegas."
     )
     st.caption(f"Fase: {phase} · Tipo de error: {type(exc).__name__} · Versión {APP_VERSION}")
     st.stop()
@@ -121,7 +121,7 @@ except DatabaseUnavailableError as exc:
 except DatabaseSchemaError as exc:
     st.error("La base de datos necesita completar una actualización de esquema.")
     st.markdown(
-        "No se ha ejecutado ninguna pantalla deportiva. La versión 4.4 valida de forma "
+        "No se ha ejecutado ninguna pantalla deportiva. La aplicación valida de forma "
         "**no destructiva** que el esquema físico de Supabase coincide con la aplicación."
     )
     if exc.missing:
@@ -131,7 +131,7 @@ except DatabaseSchemaError as exc:
         st.code("\n".join(lines), language="text")
     st.info(
         "Comprueba que `RUN_MIGRATIONS = true` en los Secrets de Streamlit Cloud y haz "
-        "**Manage app → Reboot**. 4.4 incorpora la migración aditiva 0013: comprueba el head de PostgreSQL antes de iniciar."
+        "**Manage app → Reboot**. El proyecto incorpora la migración aditiva 0013: comprueba el head de PostgreSQL antes de iniciar."
     )
     st.stop()
 except Exception as exc:
@@ -167,13 +167,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.4"
+    expected_api = "4.4.1"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.4 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.4.1 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -238,6 +238,13 @@ if not user:
     )
     render_login()
     st.stop()
+
+# Delete the delivered report's transient widgets on the *next* rerun, before
+# any of those widgets can be instantiated again. Never alter persisted data.
+_completed_report_id = st.session_state.pop("_pending_report_ui_cleanup", None)
+if _completed_report_id is not None:
+    from core.report_ui_flow import clear_submitted_report_state
+    clear_submitted_report_state(st.session_state, int(_completed_report_id))
 
 # 4.4: password changes are optional. Simple internal passwords are allowed.
 # Legacy must_change_password flags are ignored/cleared on successful login.

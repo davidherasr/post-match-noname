@@ -36,6 +36,12 @@ def _assert_report_owner_or_privileged(session: Session, report: Report, actor_i
         raise PermissionError("Para valorar o editar un postpartido necesitas el rol Informador.")
     if actor.id != report.reporter_id and not user_has_role(session, actor_id, "admin", "director"):
         raise PermissionError("No puedes modificar un informe de otro usuario.")
+    assignment = session.scalar(select(ReportAssignment).where(
+        ReportAssignment.match_id == report.match_id,
+        ReportAssignment.user_id == report.reporter_id,
+    ))
+    if assignment and assignment.status in {"waived", "declined"}:
+        raise PermissionError("Esta asignación no está activa. Solicita su reactivación antes de editar el informe.")
     return actor
 
 
@@ -49,6 +55,11 @@ def get_or_create_report(session: Session, match_id: int, reporter_id: int, acto
         raise ValueError("Partido o usuario no válido.")
     if not user_has_role(session, reporter_id, "reporter"):
         raise PermissionError("Para crear o completar un postpartido necesitas el rol Informador.")
+    own_assignment = session.scalar(select(ReportAssignment).where(
+        ReportAssignment.match_id == match_id, ReportAssignment.user_id == reporter_id,
+    ))
+    if own_assignment and own_assignment.status in {"waived", "declined"}:
+        raise PermissionError("Has rechazado esta asignación o ya no está activa. Reactívala antes de comenzar.")
     existing = report_for_user(session, match_id, reporter_id)
     if existing:
         return existing
@@ -60,7 +71,7 @@ def get_or_create_report(session: Session, match_id: int, reporter_id: int, acto
     # return above and old published data is not invalidated retroactively.
     if match.status in {"draft", "scheduled"} and (match.schedule_status != "confirmed" or not match.kickoff_at):
         raise ValueError("El horario del partido todavía no está confirmado. Administración debe fijar fecha y hora antes de iniciar el informe.")
-    assignments = list(session.scalars(select(ReportAssignment).where(and_(ReportAssignment.match_id == match_id, ReportAssignment.status != "waived"))).all())
+    assignments = list(session.scalars(select(ReportAssignment).where(and_(ReportAssignment.match_id == match_id, ReportAssignment.status.notin_(["waived", "declined"])))).all())
     if assignments and reporter_id not in {a.user_id for a in assignments} and actor_role not in {"admin", "director"}:
         raise PermissionError("Este partido no está asignado a tu usuario.")
     own_team_id = _own_team_id_for_match(session, match)
@@ -73,6 +84,65 @@ def get_or_create_report(session: Session, match_id: int, reporter_id: int, acto
         assignment.status = "in_progress"
     audit(session, reporter_id, "create_report", "report", report.id)
     return report
+
+
+def decline_report_assignment(session: Session, match_id: int, actor_id: int, reason: str | None = None) -> ReportAssignment:
+    """Let the assigned Informador decline optional work without deleting its history.
+
+    An existing draft is retained, but cannot be edited until an Administrator
+    reactivates the assignment. Delivered reports can never be declined.
+    """
+    assert_role(session, actor_id, "reporter")
+    assignment = session.scalar(select(ReportAssignment).where(
+        ReportAssignment.match_id == int(match_id), ReportAssignment.user_id == int(actor_id),
+    ))
+    if assignment is None:
+        raise PermissionError("Este partido no está asignado a tu usuario.")
+    if assignment.status not in {"pending", "in_progress", "returned"}:
+        raise ValueError("Solo puedes rechazar informes pendientes o borradores no entregados.")
+    existing = report_for_user(session, int(match_id), int(actor_id))
+    if existing and existing.status not in {"draft", "returned"}:
+        raise ValueError("El informe ya está entregado y no se puede rechazar.")
+    before = {"status": assignment.status, "required": bool(assignment.required)}
+    assignment.status = "declined"
+    assignment.required = False
+    audit(session, int(actor_id), "decline_report_assignment", "report_assignment", assignment.id,
+          detail=(reason or "").strip()[:500] or "Rechazado por el Informador.",
+          before=before, after={"status": assignment.status, "required": assignment.required})
+    return assignment
+
+
+def claim_director_report(session: Session, match_id: int, actor_id: int) -> ReportAssignment:
+    """DD may opt into a published own postmatch ONLY with explicit Informador role."""
+    actor = assert_role(session, actor_id, "director")
+    if not user_has_role(session, actor_id, "reporter"):
+        raise PermissionError("Dirección Deportiva necesita además el rol Informador para elaborar informes.")
+    if not actor.active or actor.deleted_at is not None:
+        raise PermissionError("La cuenta debe estar activa para realizar informes.")
+    match = session.scalar(select(Match).where(Match.id == int(match_id), official_match_clause()))
+    if match is None or match.status != "published":
+        raise ValueError("Selecciona un partido oficial de No Name con postpartido publicado.")
+    from repositories.players import get_own_team
+    own = get_own_team(session)
+    if own is None or own.id not in {match.home_team_id, match.away_team_id}:
+        raise ValueError("Solo puedes elaborar un postpartido propio; los neutrales usan su lectura independiente.")
+    existing_report = report_for_user(session, match.id, actor.id)
+    if existing_report and existing_report.status not in {"draft", "returned"}:
+        raise ValueError("Ya tienes un informe entregado en este partido. Puedes consultarlo sin crear otra asignación.")
+    assignment = session.scalar(select(ReportAssignment).where(
+        ReportAssignment.match_id == match.id, ReportAssignment.user_id == actor.id,
+    ))
+    if assignment is None:
+        assignment = ReportAssignment(match_id=match.id, user_id=actor.id, assigned_by=actor.id,
+                                      status="pending", required=False)
+        session.add(assignment)
+        session.flush()
+    elif assignment.status in {"waived", "declined"}:
+        assignment.status = "in_progress" if existing_report else "pending"
+        assignment.required = False
+    audit(session, actor.id, "claim_director_report", "report_assignment", assignment.id,
+          detail=f"match={match.id}; status={assignment.status}")
+    return assignment
 
 
 def get_report(session: Session, report_id: int) -> Report | None:
