@@ -1,3 +1,12 @@
+## 4.4.4.1 · Hotfix de dependencias de arranque
+
+- Corrige el arranque opaco `ModuleNotFoundError` durante migraciones/validación.
+- PostgreSQL plano (`postgresql://`) se normaliza a SQLAlchemy `postgresql+psycopg://`.
+- Se incluyen `psycopg[binary]` y `psycopg2-binary` para compatibilidad con URLs modernas y legado explícito.
+- Alembic queda declarado con mínimo compatible actual y se valida antes de abrir la base.
+- Un módulo ausente se identifica por nombre en la pantalla de arranque y en logs, sin mostrar contraseñas ni cadenas de conexión.
+- No hay migración nueva: el head continúa en `0015_observation_requests_4_4_3`.
+
 ## 4.4.4 · Corrección de navegación y revisión visual
 
 - Hotfix DD `StreamlitWidgetAlreadyInstantiatedError`: estado lógico independiente del widget, navegación mediante callbacks anteriores a la nueva instanciación, botones que ya no asignan claves widget al hacer clic.

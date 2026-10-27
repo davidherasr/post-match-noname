@@ -41,7 +41,7 @@ try:
     from core.auth import current_user, login, logout
     from core.constants import ROLES
     from core.permissions import navigation_for, roles_for
-    from core.database import DatabaseSchemaError, DatabaseUnavailableError, init_db, session_scope
+    from core.database import DatabaseSchemaError, DatabaseUnavailableError, RuntimeDependencyError, init_db, session_scope
     from core.utils import safe_html
     from repositories import scouting as repo
     from services.bootstrap import bootstrap_application
@@ -50,7 +50,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name · Área Técnica se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la versión 4.4.4; "
+        "Sustituye **todo el contenido del repositorio** por la versión 4.4.4.1; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -94,6 +94,23 @@ def _render_database_startup_error(exc: Exception) -> None:
 _startup_logger = logging.getLogger("noname.startup")
 
 
+def _render_runtime_dependency_error(exc: Exception, phase: str) -> None:
+    module = getattr(exc, "module", None) or getattr(exc, "name", None) or "desconocido"
+    package = getattr(exc, "package", None) or module
+    _startup_logger.exception("Missing runtime dependency during %s: %s", phase, module)
+    st.error("Falta una dependencia necesaria para arrancar No Name · Área Técnica.")
+    st.markdown(
+        "La aplicación se ha detenido **antes de continuar con el esquema de la base de datos**. "
+        "El nombre del módulo es seguro de mostrar y permite distinguir un problema de despliegue de uno de Supabase."
+    )
+    st.code(f"Módulo: {module}\nPaquete requerido: {package}\nFase: {phase}\nVersión: {APP_VERSION}", language="text")
+    st.info(
+        "Despliega el ZIP completo de esta versión y, en Streamlit Cloud, ejecuta **Reboot app** "
+        "para que se reinstalen las dependencias declaradas en `requirements.txt`."
+    )
+    st.stop()
+
+
 def _render_unexpected_startup_error(exc: Exception, phase: str) -> None:
     _startup_logger.exception("Startup failure during %s", phase)
     st.error("No Name · Área Técnica no ha podido completar el arranque de la base de datos.")
@@ -116,6 +133,10 @@ except Exception as exc:
 
 try:
     init_db()
+except RuntimeDependencyError as exc:
+    _render_runtime_dependency_error(exc, "migraciones / validación de esquema")
+except ModuleNotFoundError as exc:
+    _render_runtime_dependency_error(exc, "migraciones / validación de esquema")
 except DatabaseUnavailableError as exc:
     _render_database_startup_error(exc)
 except DatabaseSchemaError as exc:
@@ -167,13 +188,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.4.4"
+    expected_api = "4.4.4.1"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.4.4 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.4.4.1 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import importlib.util
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -12,6 +13,40 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.config import BASE_DIR, database_target, settings, validate_production_settings
 from models import Base
 
+
+
+
+class RuntimeDependencyError(RuntimeError):
+    """Raised when the deployment is missing a package required at DB startup."""
+
+    def __init__(self, module: str, package: str):
+        self.module = module
+        self.package = package
+        super().__init__(f"Falta el módulo de ejecución {module!r} (paquete {package!r}).")
+
+
+def validate_runtime_dependencies() -> None:
+    """Validate lazy imports before opening or migrating the production DB.
+
+    Streamlit imports successfully even when a DB driver or Alembic is absent,
+    because those modules are only needed inside ``init_db``. Detecting them here
+    turns an opaque ModuleNotFoundError into an actionable, non-secret diagnosis.
+    """
+    if settings.run_migrations and importlib.util.find_spec("alembic") is None:
+        raise RuntimeDependencyError("alembic", "alembic")
+
+    try:
+        driver = str(database_target().get("driver") or "")
+    except Exception:
+        driver = ""
+    if not driver.startswith("postgresql"):
+        return
+    if driver in {"postgresql", "postgresql+psycopg2"}:
+        if importlib.util.find_spec("psycopg2") is None:
+            raise RuntimeDependencyError("psycopg2", "psycopg2-binary")
+    elif driver == "postgresql+psycopg":
+        if importlib.util.find_spec("psycopg") is None:
+            raise RuntimeDependencyError("psycopg", "psycopg[binary]")
 
 class DatabaseUnavailableError(RuntimeError):
     """Raised when the configured database cannot be reached safely."""
@@ -169,6 +204,7 @@ def _connect_with_retry(attempts: int = 3, delay_seconds: float = 1.0):
 @lru_cache(maxsize=1)
 def init_db() -> None:
     validate_production_settings()
+    validate_runtime_dependencies()
     alembic_ini = Path(BASE_DIR) / "alembic.ini"
 
     if settings.run_migrations and alembic_ini.exists():

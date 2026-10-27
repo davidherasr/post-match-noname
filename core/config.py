@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.engine import make_url
 
 APP_NAME = "No Name · Área Técnica"
-APP_VERSION = "4.4.4"
+APP_VERSION = "4.4.4.1"
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -50,6 +50,12 @@ def normalized_database_url() -> str:
     if raw.startswith("postgresql://") or raw.startswith("postgresql+"):
         try:
             url = make_url(raw)
+            # Plain ``postgresql://`` makes SQLAlchemy choose psycopg2 implicitly.
+            # Community Cloud may rebuild with a newer Python runtime, so make the
+            # supported driver explicit and ship its binary wheel. Explicit legacy
+            # URLs such as ``postgresql+psycopg2://`` are preserved unchanged.
+            if url.drivername == "postgresql":
+                url = url.set(drivername="postgresql+psycopg")
             query = dict(url.query)
             host = (url.host or "").lower()
             if "supabase" in host:

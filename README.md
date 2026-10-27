@@ -1,4 +1,13 @@
-# No Name · Área Técnica 4.4.4
+# No Name · Área Técnica 4.4.4.1
+
+
+## Hotfix 4.4.4.1 · arranque en Streamlit Cloud
+
+- Mantiene todas las funciones y datos de la 4.4.4; no añade ni elimina tablas.
+- Las URLs PostgreSQL sin driver explícito usan `psycopg` 3 de forma explícita.
+- `requirements.txt` declara tanto Psycopg 3 binario como el driver `psycopg2-binary` legado, además de Alembic.
+- Antes de abrir PostgreSQL se valida la disponibilidad del driver y de Alembic.
+- Si falta una dependencia, la pantalla de arranque muestra el **nombre exacto del módulo** sin exponer Secrets.
 
 Aplicación interna para el cuerpo técnico de No Name. Navegación: **Inicio · Jornada · Jugadores · Informes · Dirección Deportiva · Administración**, según permisos.
 
