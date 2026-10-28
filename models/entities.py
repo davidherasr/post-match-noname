@@ -10,6 +10,8 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
+    text,
     String,
     Text,
     UniqueConstraint,
@@ -910,3 +912,113 @@ class PlayerObservationResponse(Base):
     evaluation: Mapped[PlayerEvaluation | None] = relationship()
     neutral_signal: Mapped[MatchOpinionPlayer | None] = relationship()
     __table_args__ = (UniqueConstraint("request_id", "user_id", "match_id", name="uq_observation_response_context"),)
+
+# 4.7 · Additive collaboration layer. Legacy sporting evidence remains unchanged.
+class SportingContribution47(Base):
+    __tablename__ = 'sporting_contributions_47'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False, index=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey('seasons.id'), nullable=False, index=True)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey('matches.id', ondelete='SET NULL'), index=True)
+    player_id: Mapped[int | None] = mapped_column(ForeignKey('players.id', ondelete='SET NULL'), index=True)
+    team_id: Mapped[int | None] = mapped_column(ForeignKey('teams.id', ondelete='SET NULL'))
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default='draft', nullable=False)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    data_json: Mapped[str] = mapped_column(Text, default='{}', nullable=False)
+    audience: Mapped[str] = mapped_column(String(20), default='dd', nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime)
+    __table_args__ = (Index('uq_quick_one_per_author_match_47','author_id','match_id',
+        unique=True,postgresql_where=text("kind = 'quick' AND match_id IS NOT NULL"),
+        sqlite_where=text("kind = 'quick' AND match_id IS NOT NULL")),)
+
+
+class ActivityEvent47(Base):
+    __tablename__ = 'activity_events_47'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey('seasons.id'), nullable=False, index=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    title: Mapped[str] = mapped_column(String(220), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text)
+    target_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    audience: Mapped[str] = mapped_column(String(20), nullable=False)
+    recipient_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False, index=True)
+
+
+class ActivityState47(Base):
+    __tablename__ = 'activity_states_47'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey('activity_events_47.id', ondelete='CASCADE'), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime)
+    saved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    __table_args__ = (UniqueConstraint('event_id', 'user_id', name='uq_activity47_user_event'),)
+
+
+class PlayerProposal47(Base):
+    __tablename__ = 'player_proposals_47'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey('seasons.id'), nullable=False)
+    author_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    contribution_id: Mapped[int | None] = mapped_column(ForeignKey('sporting_contributions_47.id', ondelete='SET NULL'))
+    player_id: Mapped[int | None] = mapped_column(ForeignKey('players.id', ondelete='SET NULL'))
+    match_id: Mapped[int | None] = mapped_column(ForeignKey('matches.id', ondelete='SET NULL'))
+    subject: Mapped[str] = mapped_column(String(180), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), default='new', nullable=False)
+    shared_with: Mapped[str] = mapped_column(Text, default='[]', nullable=False)
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class StaffRequest47(Base):
+    __tablename__ = 'staff_requests_47'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey('seasons.id'), nullable=False)
+    sender_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False, index=True)
+    response_contribution_id: Mapped[int | None] = mapped_column(ForeignKey('sporting_contributions_47.id', ondelete='SET NULL'))
+    proposal_id: Mapped[int | None] = mapped_column(ForeignKey('player_proposals_47.id', ondelete='SET NULL'))
+    player_id: Mapped[int | None] = mapped_column(ForeignKey('players.id', ondelete='SET NULL'))
+    match_id: Mapped[int | None] = mapped_column(ForeignKey('matches.id', ondelete='SET NULL'))
+    subject: Mapped[str] = mapped_column(String(180), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[str] = mapped_column(String(20), default='Normal', nullable=False)
+    state: Mapped[str] = mapped_column(String(20), default='pending', nullable=False)
+    answer: Mapped[str | None] = mapped_column(Text)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class DataCorrection47(Base):
+    __tablename__ = 'data_corrections_47'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    season_id: Mapped[int | None] = mapped_column(ForeignKey('seasons.id'))
+    entity_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    entity_id: Mapped[int | None] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(20), default='open', nullable=False)
+    resolution: Mapped[str | None] = mapped_column(Text)
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class MatchPriority47(Base):
+    __tablename__ = 'match_priorities_47'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey('matches.id', ondelete='CASCADE'), nullable=False, unique=True)
+    marked_by: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    importance: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)

@@ -161,7 +161,7 @@ def render(user: dict) -> None:
     pending_section = st.session_state.pop('admin_section_423', None)
     if pending_section in {'Usuarios', 'Club', 'Datos', 'Configuración', 'Mantenimiento avanzado'}:
         st.session_state['admin_section_current_423'] = pending_section
-    section=st.selectbox("Sección",["Usuarios","Club","Datos","Configuración","Mantenimiento avanzado"],key="admin_section_current_423")
+    section=st.pills("Área de administración",["Usuarios","Club","Datos","Configuración","Mantenimiento avanzado"],selection_mode="single",key="admin_section_current_423") or "Usuarios"
     from views import admin as legacy_admin
     from views import catalog as legacy_catalog
     if section=="Usuarios": legacy_admin._section_users(user)

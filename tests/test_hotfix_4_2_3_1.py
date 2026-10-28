@@ -85,6 +85,6 @@ def test_admin_recovery_is_reachable_and_informador_has_direct_route():
     assert 'render_match_report' in jornada
     assert 'def _open_report(match_id: int)' in home
     assert '"match_hub_mode"] = "report"' in home
-    assert '"Rellenar informe"' in home
+    assert 'Aportar una lectura (voluntario)' in home
     assert 'errors, warnings = _validate_draft_for_publish(d)' in postmatch
     assert 'disabled=bool(errors)' in postmatch

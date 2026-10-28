@@ -154,8 +154,9 @@ def test_44_navigation_and_advanced_admin_contracts():
     admin = (ROOT / "views/admin_hub.py").read_text(encoding="utf-8")
     players = (ROOT / "views/player_hub.py").read_text(encoding="utf-8")
     jornada = (ROOT / "views/jornada.py").read_text(encoding="utf-8")
-    assert "Mi trabajo" in home and "Último partido" in home and "Próximo partido" in home
-    assert "Mostrar otras" in home and "Mi trabajo" in home
+    # 4.6 supersedes the old assignment-first desktop with consultation-first activity.
+    assert "Novedades del cuerpo técnico" in home and "Partido de No Name" in home
+    assert "Aportar una lectura (voluntario)" in home and "staff_feed.load_activity" in home
     assert "st.segmented_control" not in squad
     assert '"Mantenimiento avanzado"' in admin
     assert "_technical(user)" in admin

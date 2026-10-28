@@ -504,7 +504,7 @@ def render(user: dict) -> None:
         on_change=_sync_dd_navigation, selection_mode="single") or sections[0]
     if section == "Mi mesa de trabajo":
         from views import attention
-        attention.render(user, season.id)
+        attention.render(user, season.id, limit=5)
         st.markdown("### Peticiones y siguientes acciones")
         requests_view.director_board(user, season.id, compact=True)
         st.markdown("#### Acciones deportivas")

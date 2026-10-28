@@ -37,12 +37,15 @@ try:
     # Validate release coherence before init_db can run migrations. Deploying
     # only app.py without its repositories caused Cloud Attribute/ImportErrors.
     from pathlib import Path as _Path
-    if APP_VERSION != "4.5.1.1" or (_Path(__file__).parent / "VERSION").read_text(encoding="utf-8").strip() != "4.5.1.1":
-        raise ImportError("VERSION, app.py y core/config.py no pertenecen a 4.5.1.1; actualiza el repositorio completo.")
+    if APP_VERSION != "4.7" or (_Path(__file__).parent / "VERSION").read_text(encoding="utf-8").strip() != "4.7":
+        raise ImportError("VERSION, app.py y core/config.py no pertenecen a 4.6; actualiza el repositorio completo.")
     from repositories.users import PARTICIPATION_PROFILES as _participation_profiles
     from repositories.dd_attention import team_knowledge as _team_knowledge
-    if set(_participation_profiles) != {"own_only", "full", "free", "viewer"} or not callable(_team_knowledge):
-        raise ImportError("Faltan módulos de roles/atención deportiva de 4.5.1.1; actualiza el repositorio completo.")
+    from repositories.staff_feed import load_activity as _load_activity
+    from repositories.report_roster import optional_player_choices as _optional_player_choices
+    from repositories.collaboration47 import visible_events as _visible_events_47, save_contribution as _save_contribution_47
+    if not all(callable(f) for f in (_visible_events_47, _save_contribution_47)) or set(_participation_profiles) != {"own_only", "full", "free", "viewer"} or not all(callable(fn) for fn in (_team_knowledge, _load_activity, _optional_player_choices)):
+        raise ImportError("Faltan módulos de roles/atención deportiva de 4.7; actualiza el repositorio completo.")
     database_target = _config.database_target
     settings = _config.settings
     validate_production_settings = _config.validate_production_settings
@@ -59,7 +62,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name · Área Técnica se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la versión 4.5.1.1; "
+        "Sustituye **todo el contenido del repositorio** por la versión 4.7; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -162,7 +165,7 @@ except DatabaseSchemaError as exc:
         st.code("\n".join(lines), language="text")
     st.info(
         "Comprueba que `RUN_MIGRATIONS = true` en los Secrets de Streamlit Cloud y haz "
-        "**Manage app → Reboot**. Esta release incorpora Alembic hasta `0017_lowlight_compact_4_5_1`. Consulta `public.alembic_version` con las consultas de `docs/CONSULTA_SEGURA_SUPABASE_4511.sql`. No crees ni modifiques `supabase_migrations.schema_migrations` para resolver este problema."
+        "**Manage app → Reboot**. Esta release incorpora Alembic hasta `0018_workspaces_4_7`. Consulta `public.alembic_version` con las consultas de `docs/CONSULTA_SEGURA_SUPABASE_4511.sql`. No crees ni modifiques `supabase_migrations.schema_migrations` para resolver este problema."
     )
     st.stop()
 except Exception as exc:
@@ -198,13 +201,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.5.1.1"
+    expected_api = "4.7"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.5.1.1 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.7 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"
@@ -329,23 +332,6 @@ with st.sidebar:
     if settings.demo_mode:
         st.warning("Modo local")
 
-if selected_label == "Inicio":
-    from views.home import render
-    render(user)
-elif selected_label == "Jornada":
-    from views.jornada import render
-    render(user)
-elif selected_label == "Jugadores":
-    from views.player_hub import render
-    render(user)
-elif selected_label == "Informes":
-    _render_reports_route(user, "archive")
-elif selected_label == "Dirección Deportiva":
-    from views.squad import render
-    render(user)
-elif selected_label == "Administración":
-    from views.admin_hub import render
-    render(user)
-else:
-    from views.home import render
-    render(user)
+# 4.7 routes are permission-aware at repository level, not merely hidden in UI.
+from views.experience47 import render as render_experience47
+render_experience47(user, selected_label)

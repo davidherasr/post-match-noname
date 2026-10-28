@@ -1,272 +1,189 @@
-"""Role-aware operational workspace: actions before informative statistics."""
+"""4.6 consultation-first workspaces; actions remain opt-in and permission-gated."""
 from __future__ import annotations
 
 import streamlit as st
-
 from core.database import session_scope
 from core.navigation import request_navigation
-from core.permissions import roles_for, can_direct
-from core.schedule import is_schedule_confirmed
-from core.presentation import status_badge
+from core.permissions import roles_for, can_report, can_direct, can_admin
 from repositories import calendar as calendar_repo
-from repositories import workspaces
-from repositories import tracking as tracking_repo
+from repositories import workspaces, staff_feed
 from ui.styles import page_header
 
 
-def _open_match(match_id: int) -> None:
-    st.session_state["workspace_match_id"] = int(match_id)
-    st.session_state.pop("match_hub_mode", None)
-    request_navigation("Jornada")
+def _go(destination: str, *, player_id=None, match_id=None, report=False) -> None:
+    if player_id is not None:
+        st.session_state["workspace_player_id"] = int(player_id)
+    if match_id is not None:
+        st.session_state["workspace_match_id"] = int(match_id)
+        st.session_state["match_hub_mode"] = "report" if report else None
+    request_navigation(destination)
     st.rerun()
+
+
+def _open_match(match_id: int) -> None:
+    _go("Jornada", match_id=match_id)
 
 
 def _open_report(match_id: int) -> None:
-    st.session_state["workspace_match_id"] = int(match_id)
-    st.session_state["match_hub_mode"] = "report"
-    request_navigation("Jornada")
-    st.rerun()
+    _go("Jornada", match_id=match_id, report=True)
 
 
 def _open_director_reading() -> None:
     st.session_state["dd_area_42"] = "Lectura deportiva"
     st.session_state["dd_reading_area_421"] = "Jugadores señalados"
-    request_navigation("Dirección Deportiva")
-    st.rerun()
+    _go("Dirección Deportiva")
 
 
-def _fixture_card(match, *, label: str, progress: dict, key: str, primary: bool) -> None:
+def _render_activity(entries: list[dict]) -> None:
+    st.markdown("### Novedades del cuerpo técnico")
+    st.caption("Decisiones explícitas, lecturas entregadas y observaciones registradas. Los borradores no aparecen.")
+    if not entries:
+        st.info("Aún no hay actividad deportiva registrada en la temporada. Puedes consultar partidos y jugadores sin hacer ninguna aportación.")
+        return
+    for i, event in enumerate(entries):
+        left, right = st.columns([6, 1], vertical_alignment="center")
+        with left:
+            date = event.get("date")
+            date_text = date.strftime("%d/%m · %H:%M") if date else "Sin fecha"
+            st.markdown(f"**{event['title']}** · {event['detail']}")
+            st.caption(f"{date_text} · {event['source']}")
+        with right:
+            if event.get("player_id") and st.button("Ver jugador", key=f"activity_player_46_{i}", use_container_width=True):
+                _go("Jugadores", player_id=event["player_id"])
+            if event.get("match_id") and st.button("Ver partido", key=f"activity_match_46_{i}", use_container_width=True):
+                _open_match(event["match_id"])
+        if i < len(entries)-1:
+            st.divider()
+
+
+def _compact_fixture(match, label: str, *, own_report=None, key: str) -> None:
     with st.container(border=True):
-        st.caption(label.upper())
-        st.markdown(f"**{match.home_team.name} – {match.away_team.name}**")
-        st.caption(f"{match.round_name} · {calendar_repo.schedule_label(match)}")
-        if match.home_score is not None and match.away_score is not None:
-            st.markdown(f"**Resultado: {match.home_score} – {match.away_score}**")
-        elif not is_schedule_confirmed(match):
-            st.caption("Horario exacto opcional · partido disponible")
-        finished = progress.get("incorporated", 0)
-        st.caption(f"{finished} aportaciones incorporadas · sin preparación obligatoria")
-        if st.button("Abrir partido", type="primary" if primary else "secondary",
-                     use_container_width=True, key=key):
+        a, b = st.columns([5, 1], vertical_alignment="center")
+        a.markdown(f"**{label}: {match.home_team.name} – {match.away_team.name}**")
+        a.caption(f"{match.round_name} · {calendar_repo.schedule_label(match)}")
+        if own_report:
+            a.caption("Tu lectura: " + ("entregada" if own_report.status not in {"draft", "returned"} else "borrador"))
+        if b.button("Consultar", key=f"home_open_46_{key}_{match.id}", use_container_width=True):
             _open_match(match.id)
 
 
-def _task_action(task: dict) -> str:
-    return {
-        "report": "Rellenar informe", "prepare": "Preparar partido",
-        "assign": "Asignar Informadores", "schedule": "Confirmar horario",
-    }.get(task.get("kind"), "Abrir partido")
-
-
-def _render_reporter_home(user: dict, data: dict) -> None:
-    """Reporter-first workspace: one current fixture, recent fixtures in one row."""
-    from core.clock import local_today
+def _render_reporting_option(user: dict, data: dict) -> None:
+    """Reporting is a voluntary action, never the main homepage or a fake pending task."""
     from views.reports import _available_work_matches
-    from repositories import observation_requests as requests_repo
-    from core.permissions import can_report
+    from core.clock import local_today
     if not can_report(user):
         return
     matches, assignments, reports = _available_work_matches(user)
-    report_map = {rep.match_id: rep for rep in reports}
-    assignment_map = {row.match_id: row for row in assignments}
     if not matches:
-        st.info('No hay partidos oficiales de No Name en el calendario.')
         return
     today = local_today()
     def distance(match):
-        start = match.window_start.date() if hasattr(match.window_start, 'date') else match.window_start or match.match_date
-        end = match.window_end.date() if hasattr(match.window_end, 'date') else match.window_end or start
+        start = match.window_start or match.match_date
+        end = match.window_end or start
+        if hasattr(start, 'date'): start = start.date()
+        if hasattr(end, 'date'): end = end.date()
         if start <= today <= end:
             return 0
-        return min(abs((today - start).days), abs((today - end).days))
-    current = min(matches, key=lambda m: (distance(m), abs((m.match_date - today).days)))
-    report = report_map.get(current.id)
-    st.markdown('### Partido de esta semana' if distance(current) <= 7 else '### Próximo partido disponible')
-    with st.container(border=True):
-        st.markdown(f'**{current.home_team.name} – {current.away_team.name}**')
-        st.caption(f'{current.round_name} · {calendar_repo.schedule_label(current)}')
-        st.caption('Tu lectura: ' + ('Entregada' if report and report.status not in {'draft', 'returned'}
-                                     else 'Borrador' if report else 'Sin realizar'))
-        if report and report.status not in {'draft', 'returned'}:
-            if st.button('Consultar mi informe', type='secondary', use_container_width=True,
-                         key=f'reporter_view_451_{current.id}'):
-                st.session_state['archive_open_report_33'] = report.id
-                request_navigation('Informes')
-                st.rerun()
-        elif st.button('Hacer mi lectura', type='primary', use_container_width=True,
-                       key=f'reporter_do_451_{current.id}'):
+        return min(abs((today-start).days), abs((today-end).days))
+    current = min(matches, key=lambda m: (distance(m), abs((m.match_date-today).days)))
+    by_match = {r.match_id: r for r in reports}
+    _compact_fixture(current, "Partido de No Name", own_report=by_match.get(current.id), key="current")
+    with st.expander("Aportar una lectura (voluntario)", expanded=False):
+        st.caption("Puedes valorar solo No Name, ambos equipos, algún jugador o una observación sin nota. No necesitas que Admin prepare el encuentro.")
+        if st.button("Abrir editor de este partido", key=f"home_voluntary_report_46_{current.id}",
+                     use_container_width=True, disabled=bool(current.id in by_match and by_match[current.id].status not in {'draft', 'returned'})):
             _open_report(current.id)
-    previous = [m for m in matches if m.id != current.id and m.match_date <= today]
-    previous.sort(key=lambda m: m.match_date, reverse=True)
-    st.markdown('### Partidos anteriores')
-    if previous:
-        chosen = st.selectbox('Seleccionar partido', [m.id for m in previous[:25]],
-            format_func=lambda mid: next(
-                f'{m.match_date:%d/%m} · {m.home_team.name} – {m.away_team.name} · '
-                + ('Entregado' if mid in report_map and report_map[mid].status not in {'draft','returned'}
-                   else 'Sin informe') for m in previous if m.id == mid),
-            key='reporter_previous_451')
-        c1, c2 = st.columns([1, 4])
-        if c1.button('Abrir partido', key='reporter_previous_open_451'):
-            _open_match(chosen)
-        if c2.button('Valorar este encuentro', key='reporter_previous_rate_451',
-                     disabled=bool(chosen in report_map and report_map[chosen].status not in {'draft','returned'})):
-            _open_report(chosen)
-    else:
-        st.caption('Todavía no hay encuentros anteriores en el calendario.')
-    if data.get('active_season'):
-        from views.observation_requests import reporter_inbox
-        reporter_inbox(user, data['active_season'].id, compact=True)
-    if st.button('Buscar un jugador', key='reporter_player_search_451'):
-        request_navigation('Jugadores')
-        st.rerun()
+        previous = [m for m in matches if m.id != current.id and m.match_date <= today]
+        previous.sort(key=lambda m: m.match_date, reverse=True)
+        if previous:
+            ids = [m.id for m in previous[:40]]
+            label = {m.id: f"{m.match_date:%d/%m} · {m.home_team.name} – {m.away_team.name}" for m in previous[:40]}
+            chosen = st.selectbox("Partidos anteriores", ids, format_func=lambda mid: label[mid], key="home_previous_46")
+            if st.button("Consultar el anterior", key="home_past_open_46", use_container_width=True):
+                _open_match(chosen)
+            if st.button("Aportar sobre el anterior", key="home_past_report_46", use_container_width=True,
+                         disabled=bool(chosen in by_match and by_match[chosen].status not in {'draft','returned'})):
+                _open_report(chosen)
+
+
+def _render_director_attention(data: dict, user: dict) -> None:
+    if not can_direct(user) or not data.get("active_season"):
+        return
+    from repositories import dd_attention
+    with session_scope() as session:
+        feed = dd_attention.attention_feed(session, data["active_season"].id)
+    external = [row for row in feed if not row.get("own_team")]
+    st.markdown("### Para Dirección Deportiva")
+    st.caption("Señales que necesitan interpretación; una nota alta nunca crea por sí sola interés DD.")
+    if not external:
+        st.caption("Sin nuevas señales de jugadores externos. Los informes incorporados aparecerán cuando existan.")
+    for i, row in enumerate(external[:3]):
+        a, b = st.columns([5, 1], vertical_alignment="center")
+        a.markdown(f"**{row['name']}** · {', '.join(row['reasons'][:2])}")
+        average = f" · nota {row['average']:.1f}" if row.get('average') is not None else ""
+        a.caption(f"{row['matches']} partidos · {row['authors']} autores · {row['coverage']}{average}")
+        if row.get("player_id") and b.button("Ver", key=f"home_dd_attention_46_{i}", use_container_width=True):
+            _go("Jugadores", player_id=row["player_id"])
+    if st.button("Abrir Dirección Deportiva", key="home_dd_board_46"):
+        _open_director_reading()
+
+
+def _render_admin_options(user: dict) -> None:
+    if not can_admin(user):
+        return
+    st.markdown("### Administración")
+    st.caption("Mantenimiento por necesidad. Los horarios, alineaciones y asignaciones opcionales no generan tareas semanales.")
+    a, b = st.columns(2)
+    if a.button("Usuarios y permisos", key="home_admin_users_46", use_container_width=True):
+        st.session_state['admin_section_current_423'] = 'Usuarios'
+        _go("Administración")
+    if b.button("Calidad de datos", key="home_admin_data_46", use_container_width=True):
+        st.session_state['admin_section_current_423'] = 'Datos'
+        _go("Administración")
 
 
 def render(user: dict) -> None:
-    page_header("Inicio", "Tu trabajo y la actividad deportiva del club.")
-    declined = st.session_state.pop("assignment_declined_notice", None)
-    if declined:
-        st.success(declined)
+    page_header("Inicio", "Lo que ha cambiado en el club, sin tareas obligatorias por defecto.")
     delivered = st.session_state.pop("report_submission_notice", None)
     if delivered:
-        st.success(f"Informe de {delivered['title']} entregado e incorporado correctamente.")
-        if st.button("Consultar el partido", key="submitted_report_match_441", use_container_width=True):
-            _open_match(int(delivered["match_id"]))
-    tracked = st.session_state.pop("tracking_saved_notice_442", None)
-    if tracked:
-        st.success(tracked)
+        st.success(f"Lectura de {delivered['title']} incorporada.")
+    for notice_key in ("assignment_declined_notice", "tracking_saved_notice_442"):
+        message = st.session_state.pop(notice_key, None)
+        if message:
+            st.success(message)
     roles = roles_for(user)
     with session_scope() as session:
-        data = workspaces.load_home_workspace(session, user_id=user["id"], roles=roles)
-        received_requests = []
-        if "reporter" in roles and data.get("active_season"):
-            from repositories import observation_requests as requests_repo
-            received_requests = requests_repo.list_requests(session,
-                season_id=data["active_season"].id, reporter_id=user["id"], active_only=True)
+        data = workspaces.load_home_workspace(session, user_id=user['id'], roles=roles)
+        entries = staff_feed.load_activity(session,
+            season_id=data['active_season'].id, roles=roles, limit=6) if data.get('active_season') else []
 
-    profile = user.get("participation_profile", "full")
-    if roles == {'reporter'}:
-        _render_reporter_home(user, data)
-        return
-    if "reporter" in roles and data.get("own_team") and data.get("active_season"):
-        today_own = data.get("last_match") or data.get("next_match")
-        if today_own:
-            st.markdown("### Tu partido de No Name" if profile == "own_only" else "### Aportación voluntaria")
-            st.caption(f"{today_own.home_team.name} – {today_own.away_team.name} · {calendar_repo.schedule_label(today_own)}")
-            if st.button("Hacer mi lectura", key=f"home_do_report_45_{today_own.id}",
-                         type="primary", use_container_width=True):
-                _open_report(today_own.id)
-    if profile == "viewer" and "reporter" not in roles:
-        st.caption("Perfil de consulta: no tienes tareas deportivas asignadas.")
+    if not data.get('active_season'):
+        st.warning("No hay temporada activa. Administración debe configurarla.")
+    if not data.get('own_team'):
+        st.warning("No hay equipo propio configurado.")
+    _render_activity(entries)
+
+    # DD is shown *after* recent facts: context first, decisions and tasks second.
+    _render_director_attention(data, user)
+
+    if can_report(user):
+        st.markdown("### Partidos")
+        _render_reporting_option(user, data)
+        # Explicit requests are work, but only for their actual recipients.
+        if data.get('active_season'):
+            from views.observation_requests import reporter_inbox
+            with st.expander('Peticiones que te ha enviado Dirección Deportiva', expanded=False):
+                reporter_inbox(user, data['active_season'].id, compact=True)
     else:
-        st.markdown("### Mi trabajo")
-    tasks = data.get("tasks") or []
-    if not data.get("active_season"):
-        st.warning("No hay una temporada activa. Administración debe seleccionarla.")
-    elif not data.get("own_team"):
-        st.warning("No se ha configurado el equipo propio. Administración debe seleccionarlo.")
-    elif not tasks:
-        if received_requests:
-            st.caption(f"Sin postpartidos asignados pendientes; tienes {len(received_requests)} petición(es) voluntaria(s) de DD debajo.")
-        else:
-            st.info("No se han encontrado tareas pendientes para tus permisos en la temporada activa.")
-    else:
-        st.caption(f"{data.get('task_count', len(tasks))} tareas pendientes · Se muestran primero las que requieren atención.")
-        visible_limit = 1
-        if len(tasks) > visible_limit:
-            show_all = st.checkbox(f"Mostrar otras {len(tasks)-visible_limit} tareas", key="home_all_tasks_44")
-        else:
-            show_all = True
-        for i, task in enumerate(tasks if show_all else tasks[:visible_limit]):
-            with st.container(border=True):
-                # Use a vertical action layout that remains usable on narrow screens.
-                st.caption(task.get("role", "Trabajo"))
-                st.markdown(f"**{status_badge(task['severity'], task['title'])}**")
-                due = task.get("due")
-                if due:
-                    st.caption("Fecha: " + (due.strftime("%d/%m/%Y · %H:%M") if hasattr(due, "hour") else due.strftime("%d/%m/%Y")))
-                if task.get("match_id") and st.button(_task_action(task), use_container_width=True,
-                                                      type="primary" if i == 0 else "secondary",
-                                                      key=f"home_task44_{i}_{task['match_id']}"):
-                    if task.get("kind") == "report":
-                        _open_report(task["match_id"])
-                    else:
-                        _open_match(task["match_id"])
-                if task.get("kind") == "report" and task.get("match_id"):
-                    from views.reports import render_decline_control
-                    render_decline_control(user, task["match_id"],
-                                           key_prefix=f"home_441_{task['match_id']}")
+        match = data.get('last_match') or data.get('next_match')
+        if match:
+            st.markdown("### Partido de No Name")
+            _compact_fixture(match, "Consultar", key="general")
 
-    if data.get("active_season") and "reporter" in roles:
-        from views.observation_requests import reporter_inbox
-        reporter_inbox(user, data["active_season"].id, compact=True)
-
-    st.markdown("### Partidos de No Name")
-    last_match = data.get("last_match")
-    next_match = data.get("next_match")
-    if last_match is None and next_match is None:
-        st.info("Todavía no hay partidos oficiales para mostrar en esta temporada.")
-    else:
-        if last_match:
-            _fixture_card(last_match, label="Último partido",
-                          progress=data.get("match_progress", {}).get(last_match.id, {}),
-                          key=f"home_last44_{last_match.id}", primary=False)
-        if next_match and (not last_match or next_match.id != last_match.id):
-            _fixture_card(next_match, label="Partido de hoy" if data.get("is_matchday") else "Próximo partido",
-                          progress=data.get("match_progress", {}).get(next_match.id, {}),
-                          key=f"home_next44_{next_match.id}", primary=False)
-
-    if can_direct(user):
-        from views.observation_requests import director_board
-        if data.get("active_season"):
-            director_board(user, data["active_season"].id, compact=True)
-        dd = data.get("director") or {}
-        st.markdown("### Actividad para Dirección Deportiva")
-        a, b, c = st.columns(3)
-        a.metric("Jugadores señalados", dd.get("neutral_signals", 0), help="Solo partidos oficiales de la temporada activa.")
-        b.metric("Necesidades altas", dd.get("high_needs", 0))
-        c.metric("Jugadores en evaluación", dd.get("decision_count", 0))
-        tracking_events = []
-        if data.get("active_season"):
-            with session_scope() as session:
-                tracking_events = tracking_repo.tracking_activity(session, data["active_season"].id, limit=4)
-        with st.container(border=True):
-            st.markdown("**Seguimientos recientes**")
-            if not tracking_events:
-                st.caption("Todavía no hay seguimientos individuales registrados en la temporada.")
-            for event in tracking_events:
-                obs, person, author = event["observation"], event["player"], event["author"]
-                name = person.display_name or person.full_name
-                action = "amplió el postpartido con seguimiento de" if obs.player_evaluation_id else "registró seguimiento de"
-                st.write(f"{author.full_name} {action} **{name}**")
-                st.caption(f"{event['match'].home_team.name} – {event['match'].away_team.name}")
-            if st.button("Ver seguimiento y decisiones", use_container_width=True, key="home_dd_tracking_442"):
-                st.session_state["dd_area_42"] = "Seguimiento"
-                request_navigation("Dirección Deportiva")
-                st.rerun()
-        recent_reports = dd.get("latest_reports") or []
-        recent_neutral = dd.get("latest_neutral") or []
-        with st.container(border=True):
-            st.markdown("**Informes incorporados recientemente**")
-            if not recent_reports:
-                st.caption("Todavía no hay informes incorporados en la temporada.")
-            for report in recent_reports:
-                st.write(f"{report.match.home_team.name} – {report.match.away_team.name} · {report.reporter.full_name}")
-                if st.button("Abrir informe en el partido", key=f"home_dd_report44_{report.id}", use_container_width=True):
-                    _open_match(report.match_id)
-        with st.container(border=True):
-            st.markdown("**Lecturas neutrales recientes**")
-            if not recent_neutral:
-                st.caption("Todavía no hay lecturas neutrales en la temporada.")
-            for opinion in recent_neutral:
-                st.write(f"{opinion.match.home_team.name} – {opinion.match.away_team.name} · {opinion.user.full_name}")
-                if st.button("Abrir partido", key=f"home_dd_neutral44_{opinion.id}", use_container_width=True):
-                    _open_match(opinion.match_id)
-        if st.button("Consultar inteligencia deportiva", key="home_dd_reading44", use_container_width=True):
-            _open_director_reading()
-
-    st.markdown("### Accesos rápidos")
-    for destination in ("Jornada", "Jugadores"):
-        if st.button(destination, key=f"home_shortcut44_{destination}", use_container_width=True):
-            request_navigation(destination)
-            st.rerun()
+    _render_admin_options(user)
+    st.markdown("### Consultar")
+    a, b = st.columns(2)
+    if a.button("Calendario y partidos", use_container_width=True, key="home_calendar_46"):
+        _go("Jornada")
+    if b.button("Buscar jugadores", use_container_width=True, key="home_players_46"):
+        _go("Jugadores")

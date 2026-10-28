@@ -4,9 +4,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_405_contract():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.5.1.1"
-    assert 'APP_VERSION = "4.5.1.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.5.1.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.7"
+    assert 'APP_VERSION = "4.7"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.7"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
 
 
 def test_navigation_changes_are_deferred_until_before_radio_instantiation():
@@ -17,7 +17,7 @@ def test_navigation_changes_are_deferred_until_before_radio_instantiation():
     assert "apply_pending_navigation(labels, nav_key=nav_key)" in app
     assert app.index("apply_pending_navigation(labels, nav_key=nav_key)") < app.index('st.radio("Navegación"')
     assert '_PENDING_NAVIGATION_KEY = "_pending_main_navigation"' in helper
-    assert 'request_navigation("Jornada")' in home
+    assert '_go("Jornada")' in home and 'request_navigation(destination)' in home
     assert 'st.session_state["main_navigation"] = "Jornada"' not in home
 
 

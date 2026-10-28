@@ -147,7 +147,7 @@ def test_451_upgrade_from_populated_0016_keeps_evaluation(tmp_path):
             conn.commit()
             command.upgrade(cfg, 'head')
             conn.commit()
-            assert conn.scalar(text('SELECT version_num FROM alembic_version')) == '0017_lowlight_compact_4_5_1'
+            assert conn.scalar(text('SELECT version_num FROM alembic_version')) == '0018_workspaces_4_7'
             assert conn.scalar(text('SELECT attention_signal FROM player_evaluations WHERE id = 451')) == 1
             assert conn.scalar(text('SELECT lowlight_rank FROM player_evaluations WHERE id = 451')) is None
             from core.database import validate_schema_contract

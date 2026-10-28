@@ -1,3 +1,25 @@
+## 4.7 — Rediseño por perfiles y colaboración verificable (28/10/2026)
+
+- Menús diferenciados DD, analista, Informador propio, Consulta y Administración, manteniendo permisos efectivos y roles acumulables.
+- Inicio/bandeja persistente por usuario: no leídos, vistos, guardados, tipo de evento, eventos legados sin marcar artificialmente como nuevos; solicitudes separadas de notificaciones.
+- DD: propuestas explícitas, decisiones guardar/seguir/descartar, compartir con destinatarios, solicitudes y respuestas vinculadas, partidos muy importantes sin tareas automáticas, plan de necesidades manual.
+- David/Roma: partidos recientes y próximos, análisis de rival desde el próximo encuentro, borradores privados y publicación deliberada, lecturas individuales y generales, síntesis multiencuentro, estructuras observadas sin sobrescribir referencia; datos y vídeo como referencias.
+- Coloto/Diego/Viti: acceso directo último partido, nota 1–10 sin preselección y botón Guardar, revisión en el mismo registro, zona/dorsal opcional, solicitudes individuales recibidas.
+- Fichas de jugador/equipo, catálogo SQL paginado, plantilla DD con conteo real de partidos y opiniones deduplicadas, tendencia solo desde cuatro encuentros distintos.
+- Incidencias de datos desde contexto y Administración técnica; edición delegada de roster/XI confirmado sujeta a permisos, importador Federación ya existente y protección de informes cerrados.
+- Datos antiguos preservados, migración aditiva 0018 (siete tablas nuevas), validación de esquema de arranque y pruebas de seguridad para acceso a borradores, propuestas y correcciones.
+- **Validación:** 218 tests locales; no prueba real de Streamlit, navegador, Supabase Cloud o PostgreSQL de producción.
+
+## 4.6 — Experiencia de consulta (28/10/2026)
+
+- Inicio deja de ser una bandeja de informes obligatorios. Feed de datos oficiales y decisiones explícitas con acceso a fuente; ningún borrador se anuncia como hecho.
+- Personas con DD + Informador reciben primero noticias y evidencia. Informar sigue siendo opcional.
+- Ranking de DD y noticias de jugadores externos sin convertir jugadores propios en objetivos de mercado. No se publican notas internas de DD.
+- Un informe completo sin XI ofrece el resumen básico y ampliación opcional, sin bloquearse en un paso vacío.
+- Selección de futbolistas del roster solo si no hay participaciones identificadas, marcada como **no confirmada**; sin crear `participations`.
+- Inicio, DD y Administración más compactos; sin nueva migración física (Alembic 0017).
+- Alcance no cerrado: pendientes los rediseños completos de Jornada, Player 360, equipos, informes históricos y el flujo de notificaciones. Ver `REVISION_PRODUCTO_4_6.md`.
+
 # 4.5.1.1 · Compatibilidad con esquema remitido (28/10/2026)
 
 - Auditoría offline del esquema público de Supabase: 43 tablas/461 columnas frente al contrato 44/488 de 4.5.1.1; faltan exactamente las ampliaciones 0016 y 0017.

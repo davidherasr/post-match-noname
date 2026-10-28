@@ -179,7 +179,7 @@ def test_home_deep_link_and_legacy_scout_ui_are_gone():
 
     assert 'st.session_state["dd_area_42"] = "Lectura deportiva"' in home
     assert 'st.session_state["dd_reading_area_421"] = "Jugadores señalados"' in home
-    assert 'request_navigation("Dirección Deportiva")' in home
+    assert '_go("Dirección Deportiva")' in home
 
     for obsolete in ["scout.py", "director.py", "scouted.py", "model.py", "dashboard.py"]:
         assert not (ROOT / "views" / obsolete).exists()

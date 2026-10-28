@@ -98,6 +98,13 @@ _REQUIRED_COLUMNS: dict[str, set[str]] = {
     "player_observation_requests": {"player_id", "season_id", "requested_by", "question", "status", "target_match_id", "origin_player_evaluation_id", "origin_neutral_signal_id", "origin_unidentified_signal_id"},
     "player_observation_recipients": {"request_id", "user_id", "status"},
     "player_observation_responses": {"request_id", "user_id", "result", "match_id", "player_evaluation_id", "neutral_signal_id"},
+    "sporting_contributions_47": {"id", "author_id", "season_id", "match_id", "kind", "status", "data_json", "revision", "published_at"},
+    "activity_events_47": {"id", "actor_id", "season_id", "kind", "audience", "recipient_id", "target_type", "target_id"},
+    "activity_states_47": {"id", "event_id", "user_id", "seen_at", "saved_at"},
+    "player_proposals_47": {"id", "author_id", "season_id", "contribution_id", "state", "shared_with"},
+    "staff_requests_47": {"id", "sender_id", "recipient_id", "proposal_id", "response_contribution_id", "season_id", "question", "answer", "state"},
+    "data_corrections_47": {"id", "author_id", "entity_type", "description", "state", "resolution"},
+    "match_priorities_47": {"id", "match_id", "marked_by", "importance", "reason"},
 }
 
 

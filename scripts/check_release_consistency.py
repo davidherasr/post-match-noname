@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.5.1.1"
-HEAD_MIGRATION = "0017_lowlight_compact_4_5_1"
+EXPECTED = "4.7"
+HEAD_MIGRATION = "0018_workspaces_4_7"
 
 
 def read_version() -> str:
@@ -51,16 +51,18 @@ def main() -> None:
         errors.append("Falta showSidebarNavigation=false")
 
     app_text = (ROOT / "app.py").read_text(encoding="utf-8")
-    for label in ["Inicio", "Jornada", "Jugadores", "Dirección Deportiva", "Administración"]:
-        if f'"{label}"' not in app_text:
-            errors.append(f"Falta navegación 4.2: {label}")
+    for label in ['Inicio', 'Dirección Deportiva', 'Administración']:
+        if label not in app_text and label not in (ROOT/'views/experience47.py').read_text():
+            errors.append(f'Falta navegación 4.7: {label}')
+    if 'render_experience47(user, selected_label)' not in app_text:
+        errors.append('La app no usa las rutas operativas de 4.7')
     if 'st.set_option("client.showSidebarNavigation", False)' not in app_text:
         errors.append("Falta defensa runtime de navegación")
 
     required = [
-        "views/home.py", "views/jornada.py", "views/player_hub.py", "views/squad.py", "views/admin_hub.py",
+        "views/experience47.py", "views/home.py", "views/jornada.py", "views/player_hub.py", "views/squad.py", "views/admin_hub.py",
         "views/reports.py", "views/postmatch.py", "views/team_hub.py",
-        "repositories/workspaces.py", "repositories/player_report.py", "repositories/planning.py",
+        "repositories/collaboration47.py", "repositories/staff_feed.py", "repositories/report_roster.py", "repositories/workspaces.py", "repositories/player_report.py", "repositories/planning.py",
         "repositories/sporting_reading.py", "repositories/tracking.py", "repositories/scouting.py", "repositories/calendar.py",
         "ui/player_report.py", "ui/match_study.py", "reports/player_report_pdf.py",
         "core/permissions.py", "core/presentation.py", "core/calendar_import.py", "core/clock.py",
@@ -78,17 +80,13 @@ def main() -> None:
             errors.append(f"Falta views.reports.{name}()")
 
     permissions_text = (ROOT / "core" / "permissions.py").read_text(encoding="utf-8")
-    if 'items.append("Dirección Deportiva")' not in permissions_text:
-        errors.append("Dirección Deportiva no está expuesta por permiso explícito")
-    if 'return bool(user.get("can_track_players"))' not in permissions_text:
-        errors.append("El seguimiento individual no depende del permiso can_track_players")
-    if 'return has_any(user, ROLE_DIRECTOR)' not in permissions_text:
-        errors.append("Dirección Deportiva no es un rol explícito")
-    if 'return has_any(user, ROLE_REPORTER)' not in permissions_text:
-        errors.append("Informador no es el único permiso de valoración/postpartido")
-    if 'ROLE_SCOUT' in permissions_text:
-        errors.append("Permisos conserva Scout como rol activo")
-
+    for token in ['working_profile', 'own_only', 'Mis partidos', 'Dirección Deportiva', 'can_report', 'can_direct']:
+        if token not in permissions_text:
+            errors.append(f'Permisos 4.7 incompletos: {token}')
+    active_ui=(ROOT/'views/experience47.py').read_text(encoding='utf-8')
+    for token in ['def home(', 'def matches(', 'def match_detail(', 'def my_contributions(', 'def director(', 'def admin(', 'def player_detail(']:
+        if token not in active_ui:
+            errors.append(f'Ruta 4.7 incompleta: {token}')
     migration = (ROOT / "alembic" / "versions" / "0013_data_governance_4_2_3.py").read_text(encoding="utf-8")
     for token in ["is_test", "archived_at", "archived_previous_status"]:
         if token not in migration:
@@ -127,7 +125,7 @@ def main() -> None:
             errors.append(f"Inteligencia transversal 4.2.2 incompleta: falta {token}")
 
     home_text = (ROOT / "views" / "home.py").read_text(encoding="utf-8")
-    if not any(label in home_text for label in ("Abrir lectura deportiva", "Consultar inteligencia deportiva")) or 'request_navigation("Dirección Deportiva")' not in home_text:
+    if not any(label in home_text for label in ("Abrir lectura deportiva", "Consultar inteligencia deportiva", "Abrir Dirección Deportiva")) or not any(label in home_text for label in ('request_navigation("Dirección Deportiva")', '_go("Dirección Deportiva")')):
         errors.append("Inicio no enlaza directamente con la lectura deportiva de DD")
 
     for legacy_view in ["views/scout.py", "views/director.py", "views/scouted.py", "views/model.py", "views/dashboard.py"]:

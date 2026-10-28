@@ -1,3 +1,31 @@
+# No Name · Área Técnica 4.7
+
+**Rediseño de producto basado en once rondas funcionales.** Inicio y menús por perfil; colaboración y solicitudes con privacidad de repositorio; aportaciones rápidas y completas sin exigir XI; borradores privados y publicación explícita; mesa DD con propuestas separadas de seguimiento; fichas y tablas compactas; delegación de datos deportivos y mantenimiento ligero.
+
+**El club se denomina Noname en la interfaz deportiva.** No se codifican permisos por el nombre de ningún integrante del staff.
+
+**Migración nueva no destructiva:** `0018_workspaces_4_7` (siete tablas aditivas); desde el esquema confirmado anteriormente en 0015, Alembic debería ejecutar 0016, 0017 y 0018. La 4.7 no puede usarse antes de completar el contrato de esquema. Nunca manipules manualmente `public.alembic_version` o `supabase_migrations.schema_migrations`.
+
+- **[Decisiones de producto](DECISIONES_PRODUCTO_4_7.md)**: navegación, privacidad, recorridos y criterios por pantalla.
+- **[Instrucciones de despliegue](UPGRADE_4_7.md)**: respaldo, migraciones, verificación y límites.
+- **[Validación](VALIDACION_4_7.md)**: pruebas automatizadas, escenarios en navegador y condiciones de aceptación.
+
+**Estado de validación:** 218 tests locales superados. Sin prueba real en Supabase ni Streamlit Cloud o navegador. Se entrega como **candidata para validación**, no como producción certificada.
+
+---
+
+# No Name · Área Técnica 4.6
+
+**Revisión de la experiencia, base 4.5.1.1.** Inicio de consulta con novedades reales, decisiones DD con muestra y actividad de informes. Las aportaciones se ofrecen como opción voluntaria. El modo «Completo» deja de exigir un XI conocido; una plantilla de temporada puede ayudar a seleccionar nombres sin confirmar participación.
+
+**Sin nueva migración:** Alembic sigue en `0017_lowlight_compact_4_5_1`. Se mantienen identidad, roles acumulables, perfiles de participación, datos históricos, informes, decisiones y seguimiento. Consulta `REVISION_PRODUCTO_4_6.md` para el diagnóstico completo y las pantallas que **aún requieren rediseño**.
+
+**Validación local:** consulta `VALIDACION_4_6.md`. No se ha verificado Streamlit Cloud/Supabase real en esta ejecución. Antes de desplegar, lee `UPGRADE_4_6.md`, haz un backup restaurable, comprueba las migraciones 0016/0017 y reemplaza el repositorio completo.
+
+---
+
+## Documentación histórica de 4.5.1.1
+
 # No Name · Área Técnica 4.5.1.1
 
 **Código completo**, continuación exclusiva de 4.5.1. Alembic head `0017_lowlight_compact_4_5_1`, sin nueva migración. Se conservan la lista compacta de jugadores, informes básicos/completos y las mejoras anteriores.

@@ -20,7 +20,7 @@ def test_upgrade_from_populated_0015_preserves_historical_rows(tmp_path):
         conn.commit()
         command.upgrade(cfg, "head")
         conn.commit()
-        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0017_lowlight_compact_4_5_1"
+        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0018_workspaces_4_7"
         assert conn.scalar(text("SELECT name FROM seasons WHERE id=9745")) == "Temporada histórica"
         validate_schema_contract(conn)
         old = conn.scalar(text("SELECT count(*) FROM seasons"))
@@ -38,7 +38,7 @@ def test_fresh_database_migrates_through_0017(tmp_path):
         cfg.attributes["connection"] = conn
         command.upgrade(cfg, "head")
         conn.commit()
-        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0017_lowlight_compact_4_5_1"
+        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0018_workspaces_4_7"
         validate_schema_contract(conn)
         assert "unidentified_player_signals" in inspect(conn).get_table_names()
     engine.dispose()

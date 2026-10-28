@@ -1,4 +1,4 @@
-"""4.5.1.1: exact public schema received 28 Oct and real 4.4.4.1 fixture upgrade."""
+"""4.6: exact public schema received 28 Oct and real 4.4.4.1 fixture upgrade."""
 from __future__ import annotations
 
 import gzip
@@ -21,9 +21,9 @@ def test_4511_manifest_exact_missing_elements():
     actual = parse_public_manifest(EXPORT.read_text(encoding='utf-8'))
     result = describe_public_schema(actual)
     assert (result['tables'], result['columns']) == (43, 461)
-    assert (result['expected_tables'], result['expected_columns']) == (44, 488)
+    assert (result['expected_tables'], result['expected_columns']) == (51, 566)
     assert result['matches_4441_public_shape'] is True
-    assert result['missing_tables'] == ['unidentified_player_signals']
+    assert result['missing_tables'] == ['activity_events_47', 'activity_states_47', 'data_corrections_47', 'match_priorities_47', 'player_proposals_47', 'sporting_contributions_47', 'staff_requests_47', 'unidentified_player_signals']
     assert result['extra_tables'] == [] and result['extra_columns'] == {}
     assert result['schema_matches_orm'] is False
 
@@ -47,9 +47,9 @@ def test_4511_legacy_actual_4441_schema_migrates_without_losing_data(tmp_path):
         conn.commit()
         inspector = inspect(conn)
         tables = inspector.get_table_names()
-        assert len(tables) == 44
-        assert sum(len(inspector.get_columns(t)) for t in tables) == 488
-        assert conn.scalar(text('SELECT version_num FROM alembic_version')) == '0017_lowlight_compact_4_5_1'
+        assert len(tables) == 51
+        assert sum(len(inspector.get_columns(t)) for t in tables) == 566
+        assert conn.scalar(text('SELECT version_num FROM alembic_version')) == '0018_workspaces_4_7'
         assert conn.execute(text('SELECT id,general_rating,standout,lowlight_rank,highlight_rank FROM player_evaluations WHERE id=901')).one() == (901,8.0,1,None,None)
         assert conn.scalar(text('SELECT own_team_rating FROM reports WHERE id=901')) == 7.5
         assert conn.scalar(text('SELECT COUNT(*) FROM matches')) == 1

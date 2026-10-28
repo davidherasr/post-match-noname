@@ -56,10 +56,10 @@ def _seed(session):
 
 
 def test_release_navigation_and_direct_click_scores():
-    assert (ROOT / 'VERSION').read_text().strip() == '4.5.1.1'
-    assert 'Informes' in navigation_for({'id':1, 'roles':['reporter'], 'role':'reporter'})
-    assert 'Informes' in navigation_for({'id':1, 'roles':['director'], 'role':'director'})
-    assert 'Informes' not in navigation_for({'id':1, 'roles':['admin'], 'role':'admin'})
+    assert (ROOT / 'VERSION').read_text().strip() == '4.7'
+    assert 'Mis aportaciones' in navigation_for({'id':1, 'roles':['reporter'], 'role':'reporter'})
+    assert 'Dirección Deportiva' in navigation_for({'id':1, 'roles':['director'], 'role':'director'})
+    assert 'Mis aportaciones' not in navigation_for({'id':1, 'roles':['admin'], 'role':'admin'})
     code=(ROOT / 'views/reports.py').read_text()
     assert 'def _render_quick_report' in code and 'st.pills' in code
     assert 'default=[]' in code and 'Sin evaluar' in code

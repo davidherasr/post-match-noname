@@ -21,7 +21,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.5.1.1"
+REPORTS_PAGE_API_VERSION = "4.7"
 
 
 
@@ -162,7 +162,7 @@ def _render_team_form(report, players: list, evaluations: dict, user: dict, *, o
     memory; persistence only occurs when the user explicitly saves the block.
     """
     if not players:
-        st.warning("No hay jugadores cargados para este equipo.")
+        st.info("Sin participaciones confirmadas para este equipo. Puedes guardar una lectura colectiva arriba o seleccionar jugadores de la plantilla sin atribuirles una titularidad.")
         return
     team_id = report.own_team_id if own_team else report.rival_team_id
     team_name = report.own_team.name if own_team else report.rival_team.name
@@ -495,6 +495,7 @@ def _render_quick_report(report, participations: list, evaluations: dict,
     from sqlalchemy import select
     from models.entities import PlayerEvaluation
     from repositories import unidentified_players as unknown_repo
+    from repositories import report_roster
 
     st.caption('Solo registra lo que hayas observado. Los campos vacíos no son notas cero ni tareas pendientes.')
     sides = [(report.own_team_id, 'No Name')]
@@ -502,8 +503,17 @@ def _render_quick_report(report, participations: list, evaluations: dict,
         sides.append((report.rival_team_id, report.rival_team.name))
     groups = {team_id: [p for p in participations if p.team_id == team_id]
               for team_id, _ in sides}
+    roster_only = set()
+    # A squad is useful for selecting names but must never be treated as a confirmed XI.
+    with session_scope() as session:
+        for team_id, _ in sides:
+            choices, provisional = report_roster.optional_player_choices(session,
+                season_id=report.match.season_id, team_id=team_id, confirmed=groups[team_id])
+            groups[team_id] = choices
+            if provisional:
+                roster_only.add(team_id)
     for parts in groups.values():
-        parts.sort(key=lambda p: (not p.starter, p.shirt_number or 999, p.player_id))
+        parts.sort(key=lambda p: (not bool(p.starter), p.shirt_number or 999, p.player_id))
     with st.form(f"basic_451_{report.id}_{int(include_rival)}"):
         team_payload = []
         for team_id, title in sides:
@@ -515,6 +525,8 @@ def _render_quick_report(report, participations: list, evaluations: dict,
                                               else report.rival_team_rating)
             score = rating_from_choice(st.pills(f'Nota colectiva · {title}', options, default=default,
                                                 selection_mode='single'))
+            if team_id in roster_only:
+                st.caption('Nombres de la plantilla de temporada. Su participación en este partido NO está confirmada; selecciona únicamente a quien hayas observado.')
             if ids:
                 a, b = st.columns(2)
                 best = a.multiselect('Tres que más destacaron (opcional)', ids,
@@ -527,7 +539,7 @@ def _render_quick_report(report, participations: list, evaluations: dict,
                     key=f'low_451_{report.id}_{team_id}')
             else:
                 best, lower = [], []
-                st.caption('Sin alineación nominal: puedes valorar al equipo o anotar una señal por posición.')
+                st.caption('Sin alineación ni plantilla conocida. Puedes valorar al equipo o señalar a un jugador por posición.')
             if set(best) & set(lower):
                 st.caption('Un jugador no puede estar a la vez en las dos selecciones.')
             note = st.text_input(f'Comentario del equipo · {title} (opcional)',
@@ -692,7 +704,7 @@ def _render_report_editor(report_id: int, user: dict) -> None:
     if total_known:
         st.caption(f"{total_evaluated} valoraciones individuales registradas · completar la plantilla es opcional.")
     else:
-        st.caption("No hay participantes identificados: puedes registrar una lectura colectiva documentada.")
+        st.caption("No hay XI confirmado. Puedes aportar una lectura colectiva, seleccionar un futbolista de la plantilla de temporada o señalar una posición desconocida.")
 
     if read_only:
         for team_id, team_label in ((report.own_team_id, 'No Name'),
@@ -716,45 +728,37 @@ def _render_report_editor(report_id: int, user: dict) -> None:
         else: _render_documents(report_id)
         return
 
-    stage_key = f"report_stage_{report_id}"
+    st.caption("Elige qué quieres aportar. Ningún modo obliga a cumplimentar los dos equipos ni a identificar once jugadores.")
     mode_labels = ['Básico · No Name', 'Básico · ambos equipos', 'Completo']
-    mode = st.segmented_control('Tipo de informe', mode_labels,
+    mode = st.segmented_control('Tipo de lectura', mode_labels,
         default='Básico · No Name', key=f'report_mode_451_{report_id}') or mode_labels[0]
-    if mode != 'Completo':
-        # Selecting the report type is sufficient; no extra side selection.
-        _render_quick_report(report, participations, evaluations, user,
-                             include_rival=mode == 'Básico · ambos equipos')
-        return
-    stage = st.session_state.get(stage_key, 'own')
-    if stage == 'quick':
-        stage = 'own'
-    step_labels = {"own": "1 · No Name", "rival": "2 · Rival", "finish": "3 · Entregar"}
-    st.caption(" → ".join((f"**{label}**" if key == stage else label) for key, label in step_labels.items()))
-    if stage == "own":
-        st.markdown("### 1 · No Name")
-        _render_team_form(report, own_players, evaluations, user, own_team=True, read_only=False, next_stage="rival")
-    elif stage == "rival":
-        c1, c2 = st.columns([1,4])
-        rival_dirty = bool(st.session_state.get(_dirty_key(report.id, report.rival_team_id), False))
-        if c1.button("← No Name", use_container_width=True, disabled=rival_dirty, help="Guarda o deshaz los cambios del rival antes de salir." if rival_dirty else None):
-            st.session_state[stage_key] = "own"; st.rerun()
-        c2.markdown("### 2 · Rival")
-        if rival_dirty:
-            c2.caption("Hay cambios sin guardar: guarda o deshaz antes de cambiar de paso.")
-        _render_team_form(report, rival_players, evaluations, user, own_team=False, read_only=False, next_stage="finish")
-    else:
-        st.markdown("### 3 · Entregar")
-        _render_finish(report, evaluation_list, report_id, user, False)
+    # Every path can deliver a substantial partial report on one screen.
+    # The detailed mode only adds optional player-by-player tools below.
+    _render_quick_report(report, participations, evaluations, user,
+                         include_rival=mode != 'Básico · No Name')
+    if mode == 'Completo':
+        st.markdown('### Ampliar el análisis · opcional')
+        st.caption('Puedes completar notas de los participantes confirmados. Si no hay XI, la lectura básica anterior sigue disponible; no se exige una alineación inventada.')
+        if own_players:
+            with st.expander('Valoración detallada · No Name', expanded=False):
+                _render_team_form(report, own_players, evaluations, user, own_team=True, read_only=False)
+        if rival_players:
+            with st.expander(f'Valoración detallada · {report.rival_team.name}', expanded=False):
+                _render_team_form(report, rival_players, evaluations, user, own_team=False, read_only=False)
+        if not own_players and not rival_players:
+            st.info('No hay participaciones confirmadas. La lectura global y las señales por posición están disponibles arriba. Para añadir un XI confirmado, utiliza la preparación del partido cuando se conozca.')
 
 
 def _available_work_matches(user: dict):
     from repositories.data_governance import official_match_clause
     from models.entities import Match
     from sqlalchemy import select, or_
+    from sqlalchemy.orm import joinedload
     from repositories.players import get_own_team
     with session_scope() as session:
         own = get_own_team(session)
-        matches = list(session.scalars(select(Match).where(official_match_clause(),
+        matches = list(session.scalars(select(Match).options(joinedload(Match.home_team), joinedload(Match.away_team))
+            .where(official_match_clause(),
             or_(Match.home_team_id == own.id, Match.away_team_id == own.id))
             .order_by(Match.match_date.desc()).limit(100)).all()) if own else []
         assignments = repo.list_assignments(session, user_id=user["id"])

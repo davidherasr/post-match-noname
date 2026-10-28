@@ -151,7 +151,7 @@ def test_ui_routes_offer_optional_wizard_and_dd_activity_without_old_scout_missi
     assert "_render_postmatch_tracking_step" in reports
     assert "postmatch_tracking_wizard" in reports
     assert 'with st.form(f"postmatch_tracking_step_442_{report_id}")' in reports
-    assert 'tracking_repo.tracking_activity' in home and '"Seguimiento"' in squad
+    assert '_render_director_attention' in home and '"Seguimiento"' in squad
     assert 'tracking_repo.duplicate_groups' in squad and 'tracking_repo.delete_duplicate_observation' in squad
 
 
@@ -187,7 +187,7 @@ def test_additive_migration_from_0013_and_fresh_database(tmp_path):
         engine = create_engine(uri, future=True)
         try:
             with engine.connect() as connection:
-                assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0017_lowlight_compact_4_5_1"
+                assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0018_workspaces_4_7"
             inspector = inspect(engine)
             assert "player_evaluation_id" in {col["name"] for col in inspector.get_columns("scout_observations")}
             assert "uq_scout_observation_evaluation_442" in {idx["name"] for idx in inspector.get_indexes("scout_observations")}

@@ -109,10 +109,21 @@ def get_participations(session: Session, match_id: int, team_id: int | None = No
     return list(session.scalars(stmt).unique().all())
 
 
+def _assert_delegated_roster_editor(session: Session, actor_id: int) -> None:
+    """Only Administration, DD and full/free analysts can maintain official sport data."""
+    user = session.get(User, int(actor_id))
+    if not user or not user.active or user.deleted_at is not None:
+        raise PermissionError('Usuario inactivo o inexistente.')
+    if user_has_role(session, actor_id, 'admin', 'director'):
+        return
+    if user_has_role(session, actor_id, 'reporter') and user.participation_profile in {'full','free'}:
+        return
+    raise PermissionError('La edición de plantillas oficiales no está habilitada para este perfil.')
+
+
 def replace_participations(session: Session, match_id: int, team_id: int, rows: Iterable[dict], actor_id: int) -> list[Participation]:
-    # Administración prepara datos; Informador puede corregir lo observado en el partido.
-    # Dirección Deportiva no obtiene este permiso automáticamente.
-    assert_role(session, actor_id, "admin", "reporter")
+    # Solo los editores deportivos delegados modifican participaciones oficiales.
+    _assert_delegated_roster_editor(session, actor_id)
     match = session.get(Match, match_id)
     if not match:
         raise ValueError("Partido no encontrado.")
@@ -211,7 +222,7 @@ def import_federation_roster_text(session: Session, *, team_id: int, season_id: 
     supplied, those labels are also stored as match participations. Plain lists
     without headings remain roster-only: order never implies starter status.
     """
-    assert_role(session, actor_id, "reporter", "admin")
+    _assert_delegated_roster_editor(session, actor_id)
     from repositories import players as players_repo
     parsed = parse_federation_roster(text)
     if not parsed:

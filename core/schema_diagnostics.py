@@ -67,18 +67,23 @@ def describe_public_schema(actual: Mapping[str, set[str]]) -> dict:
         "missing_columns": missing, "extra_columns": extra,
         "schema_matches_orm": not missing and not extra,
     }
-    # A structural signature, not a claim that the Alembic revision is 0015.
-    result["matches_4441_public_shape"] = (
-        result["tables"] == 43 and result["columns"] == 461
-        and missing_tables == ["unidentified_player_signals"]
+    # Backward-compatible signature against the 4.5.1.1 baseline only:
+    # newly added 4.7 tables must not invalidate recognition of a real 0015 dump.
+    legacy_expected = {t: columns for t, columns in expected.items() if not t.endswith('_47')}
+    legacy_missing = {t: sorted(columns - actual.get(t, set())) for t, columns in legacy_expected.items()
+                      if columns - actual.get(t, set())}
+    legacy_missing_tables = sorted(set(legacy_expected)-set(actual))
+    result['matches_4441_public_shape'] = (
+        result['tables'] == 43 and result['columns'] == 461
+        and legacy_missing_tables == ['unidentified_player_signals']
         and not extra_tables and not extra
-        and missing == {
-            "users": ["participation_profile"],
-            "team_rosters": ["usual_position"],
-            "player_evaluations": ["attention_signal", "highlight_rank", "lowlight_rank"],
-            "match_opinion_players": ["attention_signal", "highlight_rank"],
-            "player_observation_requests": ["origin_neutral_signal_id", "origin_player_evaluation_id", "origin_unidentified_signal_id"],
-            "unidentified_player_signals": sorted(expected["unidentified_player_signals"]),
+        and legacy_missing == {
+            'users': ['participation_profile'],
+            'team_rosters': ['usual_position'],
+            'player_evaluations': ['attention_signal', 'highlight_rank', 'lowlight_rank'],
+            'match_opinion_players': ['attention_signal', 'highlight_rank'],
+            'player_observation_requests': ['origin_neutral_signal_id', 'origin_player_evaluation_id', 'origin_unidentified_signal_id'],
+            'unidentified_player_signals': sorted(legacy_expected['unidentified_player_signals']),
         }
     )
     return result
