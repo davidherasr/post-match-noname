@@ -105,6 +105,7 @@ _REQUIRED_COLUMNS: dict[str, set[str]] = {
     "staff_requests_47": {"id", "sender_id", "recipient_id", "proposal_id", "response_contribution_id", "season_id", "question", "answer", "state"},
     "data_corrections_47": {"id", "author_id", "entity_type", "description", "state", "resolution"},
     "match_priorities_47": {"id", "match_id", "marked_by", "importance", "reason"},
+    "match_rating_releases_473": {"id", "match_id", "published_by", "published_at"},
 }
 
 

@@ -1,4 +1,4 @@
-"""4.7.1: user journeys simplified without weakening data rules."""
+"""4.7.4: user journeys simplified without weakening data rules."""
 from pathlib import Path
 import pytest
 from sqlalchemy import select, func
@@ -14,14 +14,14 @@ def test_simplified_navigation_leaves_tools_available_in_context():
     analyst={'id':1,'role':'reporter','roles':['reporter'],'participation_profile':'full'}
     own={'id':2,'role':'reporter','roles':['reporter'],'participation_profile':'own_only'}
     assert navigation_for(analyst)==['Inicio','Partidos','Jugadores','Mis solicitudes']
-    assert navigation_for(own)==['Mis partidos','Mis solicitudes']
+    assert navigation_for(own)==['Mis partidos','Mis valoraciones','Mis solicitudes']
     ui=(ROOT/'views/experience47.py').read_text(encoding='utf-8')
     assert "def _admin_players471" in ui
     assert "'Buscar por nombre'" in ui
     assert 'purge.build_plan' in ui and 'purge.execute_plan' in ui
-    assert "f'Elaborar postpartido de {rival.name}'" in ui
+    assert "'Valorar jugadores'" in ui
     assert "with st.expander('Buscar partidos anteriores o de otros equipos'" in ui
-    assert "'Solo puntuar a Noname'" in ui
+    assert "'Cargar alineaciones y publicar'" in ui
     assert "'⭐ Destacar este jugador para Aarón'" in ui
     assert 'if own_only:' in ui and "return my_contributions(user,ratings_only=True)" in ui
     assert "st.radio('Periodo'" not in ui

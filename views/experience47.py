@@ -16,6 +16,8 @@ from core.database import session_scope
 from core.permissions import can_admin, can_direct, can_report, working_profile
 from core.navigation import request_navigation
 from core.clock import local_today
+from core.match_priority472 import current_fixtures
+from repositories import publication473 as publication
 from models.entities import (
     Match, Team, TeamRoster, Player, User, Report, PlayerEvaluation,
     MatchOpinion, MatchOpinionPlayer, Participation, PlayerSeasonDecision,
@@ -88,6 +90,19 @@ def _fixtures(season_id, own_id=None, count=100):
         return list(db.scalars(stmt.order_by(Match.match_date.desc(), Match.id.desc()).limit(count)).unique().all())
 
 
+def _published_list(matches):
+    if not matches:return []
+    with session_scope() as db:
+        opened=publication.opened_match_ids(db,[m.id for m in matches])
+    return [m for m in matches if m.id in opened]
+
+
+def _can_prepare(user):
+    from core.permissions import can_admin, can_direct, can_report
+    return bool(can_admin(user) or can_direct(user) or (can_report(user) and
+                (user or {}).get('participation_profile') in {'full','free'}))
+
+
 def _direct_link_to_event(event):
     if event.target_type == 'contribution':
         return 'Mis aportaciones', {'contribution': event.target_id}
@@ -101,68 +116,57 @@ def _direct_link_to_event(event):
 
 
 def _events(user, season_id, *, intro=False):
+    """Email-style, accessible activity list with explicit seen/save controls."""
     if not season_id:
         return
-    st.markdown('### Novedades' if intro else '### Bandeja de actividad')
-    filter_value='Nuevos'
-    group='Todo'
+    from ui.mobile472 import inbox_component
     if not intro:
-        filter_value=st.radio('Mostrar',['Nuevos','Todos','Guardados'],horizontal=True,
-                              key='inbox_filter_47',label_visibility='collapsed')
-        if can_direct(user):
-            group=st.selectbox('Tipo de novedad',['Todo','Informes y observaciones','Propuestas de jugadores',
-                                 'Respuestas y solicitudes'],key='inbox_group47')
+        st.markdown('### Novedades del cuerpo técnico')
+        value=st.selectbox('Consultar', ['Nuevos','Todos','Guardados'],
+              key='inbox_filter_472', label_visibility='collapsed')
+    else:
+        value='Nuevos'
     with session_scope() as db:
-        events = domain.visible_events(db, actor_id=user['id'], season_id=season_id,
-                        filter_by={'Nuevos':'new','Todos':'all','Guardados':'saved'}[filter_value],
-                        limit=8 if intro else 100)
-    classes={'Informes y observaciones':{'contribution','contribution_update','legacy_report','legacy_opinion'},
-        'Propuestas de jugadores':{'proposal','proposal_decision'},
-        'Respuestas y solicitudes':{'request','response','request_response','request_closed'}}
-    if group in classes:
-        events=[(e,state) for e,state in events if e.kind in classes[group]]
-    if not events:
-        st.info('No hay novedades en esta vista. Las aportaciones guardadas y los partidos siguen disponibles.')
+        events=domain.visible_events(db,actor_id=user['id'],season_id=season_id,
+            filter_by={'Nuevos':'new','Todos':'all','Guardados':'saved'}[value],
+            limit=8 if intro else 80)
+    view=[{'id':ev.id,'title':ev.title,'detail':ev.detail or '',
+           'date':ev.created_at.strftime('%d/%m'),
+           'seen':bool(state and state.seen_at),'saved':bool(state and state.saved_at)}
+          for ev,state in events]
+    result=inbox_component(key=f'activity_list472_{"home" if intro else "dd"}_{value}',
+                           data={'items':view})
+    action=result.action
+    if not isinstance(action,dict) or action.get('action') not in {'open','seen','unsee','save','unsave'}:
         return
-    for event, state in events:
-        with st.container(border=True):
-            head, buttons = st.columns([5,3], vertical_alignment='center')
-            with head:
-                st.markdown(f'**{event.title}**')
-                st.caption(f'{event.detail or ""} · {event.created_at:%d/%m/%Y %H:%M}')
-            with buttons:
-                c1,c2,c3 = st.columns(3)
-                if c1.button('Abrir', key=f'ev_open47_{event.id}', use_container_width=True):
-                    dest, kw = _direct_link_to_event(event)
-                    if event.target_type=='request' and can_direct(user):
-                        st.session_state['pending_dd_section47']='Solicitudes'
-                        dest,kw='Dirección Deportiva',{}
-                    if event.target_type in {'legacy_report','legacy_opinion'}:
-                        with session_scope() as db:
-                            source = db.get(Report if event.target_type=='legacy_report' else MatchOpinion, event.target_id)
-                            if not source or not can_direct(user):
-                                st.error('Fuente no disponible para tu perfil.')
-                                return
-                            kw={'match':source.match_id}
-                    # A DD may also open a published contribution directly.
-                    if event.target_type == 'contribution':
-                        st.session_state['contribution_id_47'] = event.target_id
-                        if can_direct(user): st.session_state['pending_dd_section47'] = 'Aportaciones compartidas'
-                        dest = 'Dirección Deportiva' if can_direct(user) else 'Mis aportaciones'
-                        kw = {}
-                    _go(dest, **kw)
-                if c2.button('☆' if not (state and state.saved_at) else '★',
-                             key=f'ev_save47_{event.id}', help='Guardar para después', use_container_width=True):
-                    with session_scope() as db:
-                        domain.change_event_state(db, actor_id=user['id'], event_id=event.id,
-                            action='unsave' if state and state.saved_at else 'save')
-                    st.rerun()
-                if c3.button('×' if not (state and state.seen_at) else '↶',
-                             key=f'ev_seen47_{event.id}', help='Marcar visto / recuperar', use_container_width=True):
-                    with session_scope() as db:
-                        domain.change_event_state(db, actor_id=user['id'], event_id=event.id,
-                            action='unsee' if state and state.seen_at else 'seen')
-                    st.rerun()
+    # Revalidate with the same access-controlled event collection; event ids
+    # submitted from the browser are untrusted.
+    chosen=next((ev for ev,state in events if ev.id==action.get('id')),None)
+    if chosen is None:
+        st.error('La novedad no está disponible para esta cuenta.');return
+    if action['action'] != 'open':
+        try:
+            with session_scope() as db:
+                domain.change_event_state(db,actor_id=user['id'],event_id=chosen.id,action=action['action'])
+            st.rerun()
+        except Exception as exc: st.error(str(exc))
+        return
+    dest,kw=_direct_link_to_event(chosen)
+    if chosen.target_type=='request' and can_direct(user):
+        st.session_state['pending_dd_section47']='Solicitudes'
+        dest,kw='Dirección Deportiva',{}
+    if chosen.target_type in {'legacy_report','legacy_opinion'}:
+        with session_scope() as db:
+            source=db.get(Report if chosen.target_type=='legacy_report' else MatchOpinion,chosen.target_id)
+            if not source or not can_direct(user):
+                st.error('Fuente no disponible para tu perfil.');return
+            kw={'match':source.match_id}
+    if chosen.target_type=='contribution':
+        st.session_state['contribution_id_47']=chosen.target_id
+        if can_direct(user):st.session_state['pending_dd_section47']='Aportaciones compartidas'
+        dest='Dirección Deportiva' if can_direct(user) else 'Mis aportaciones'
+        kw={}
+    _go(dest,**kw)
 
 
 def _fixture_shortcut(m, label):
@@ -194,23 +198,22 @@ def home(user):
     elif can_report(user):
         own_id=_own()
         fixtures=_fixtures(season,own_id=own_id,count=100) if own_id else []
-        last=next((m for m in fixtures if m.match_date<=local_today()),None)
-        next_game=next((m for m in reversed(fixtures) if m.match_date>local_today()),None)
-        if last:
-            state,prior=_latest_match_state(user,last,full=True)
-            rival=last.away_team if last.home_team_id==own_id else last.home_team
+        last,next_game=current_fixtures(fixtures,local_today())
+        available=_published_list([m for m in fixtures if m.match_date<=local_today()])
+        if available:
+            ready=available[0]
             with st.container(border=True):
-                st.caption('ESTA SEMANA · POSTPARTIDO')
-                st.subheader(f'Noname – {rival.name}' if last.home_team_id==own_id else f'{rival.name} – Noname')
-                st.caption(f'{last.match_date:%d/%m/%Y} · {last.round_name}')
-                label={'new':f'Elaborar postpartido de {rival.name}',
-                       'draft':f'Continuar postpartido de {rival.name}',
-                       'shared':f'Consultar postpartido de {rival.name}'}[state]
-                if st.button(label,type='primary',key='home_postmatch471',use_container_width=True):
-                    if state!='shared':st.session_state['contrib_mode47']='complete'
-                    else:st.session_state.pop('contrib_mode47',None)
-                    if prior and prior.status=='draft':st.session_state['edit_contribution_47']=prior.id
-                    _go('Partidos',match=last.id)
+                st.caption('PARTIDO DISPONIBLE · VALORACIÓN INDIVIDUAL')
+                st.subheader(_fixture_label(ready))
+                st.caption(f'{ready.match_date:%d/%m/%Y} · {ready.round_name or "Jornada"}')
+                if st.button('Valorar futbolistas',type='primary',key='home_ratings473',use_container_width=True):
+                    st.session_state['contrib_mode47']='board472'
+                    _go('Partidos',match=ready.id)
+        elif last:
+            st.info('El último encuentro todavía no está publicado para valorar.')
+        if last and _can_prepare(user) and last.id not in {m.id for m in available}:
+            if st.button('Preparar y publicar el último partido',key='home_release473',use_container_width=True):
+                _go('Partidos',match=last.id)
         if next_game:
             rival=next_game.away_team if next_game.home_team_id==own_id else next_game.home_team
             with st.container(border=True):
@@ -291,36 +294,26 @@ def matches(user, own_only=False):
     own_id=_own()
     today=local_today()
     mine=_fixtures(season,own_id=own_id,count=180) if own_id else []
-    last=next((m for m in mine if m.match_date<=today),None)
-    future=next((m for m in reversed(mine) if m.match_date>today),None)
+    last,future=current_fixtures(mine,today)
+    released=_published_list([m for m in mine if m.match_date<=today])
     dest='Mis partidos' if own_only else 'Partidos'
-    if last:
-        state, previous=_latest_match_state(user,last,full=not own_only) if can_report(user) else ('new',None)
-        other=last.away_team if last.home_team_id==own_id else last.home_team
+    if released:
+        latest=released[0]
         with st.container(border=True):
-            st.caption('ÚLTIMO PARTIDO · '+str(last.round_name or 'Jornada'))
-            st.subheader(_fixture_label(last))
-            st.caption(f'{last.match_date:%d/%m/%Y}')
-            if can_report(user):
-                if own_only:
-                    text='Editar mi valoración' if state=='shared' else 'Valorar a Noname'
-                    work='quick'
-                else:
-                    text={'new':f'Elaborar postpartido de {other.name}',
-                          'draft':f'Continuar postpartido de {other.name}',
-                          'shared':f'Consultar postpartido de {other.name}'}[state]
-                    work='complete' if state!='shared' else None
-                if st.button(text,key='main_last_match471',type='primary',use_container_width=True):
-                    if work: st.session_state['contrib_mode47']=work
-                    else: st.session_state.pop('contrib_mode47',None)
-                    if previous and previous.status=='draft':
-                        st.session_state['edit_contribution_47']=previous.id
-                    _go(dest,match=last.id)
-            else:
-                if st.button('Consultar partido',key='main_last_match471',type='primary',use_container_width=True):
-                    _go(dest,match=last.id)
+            st.caption('ÚLTIMO PARTIDO ABIERTO PARA VALORAR')
+            st.subheader(_fixture_label(latest))
+            st.caption(f'{latest.match_date:%d/%m/%Y} · {latest.round_name or "Jornada"}')
+            if st.button('Valorar jugadores',key='main_rating473',type='primary',use_container_width=True):
+                st.session_state['contrib_mode47']='board472'
+                _go(dest,match=latest.id)
     elif own_id:
-        st.info('Aún no hay partidos disputados de Noname en la temporada activa.')
+        st.info('Todavía no hay partidos publicados para valorar. En cuanto se carguen los dos XI aparecerán aquí.')
+    if last and (not released or last.id!=released[0].id) and _can_prepare(user) and not own_only:
+        with st.container(border=True):
+            st.caption('PENDIENTE DE PUBLICAR · ADMINISTRACIÓN / ANALISTAS')
+            st.markdown('**'+_fixture_label(last)+'**')
+            if st.button('Cargar alineaciones y publicar',key='main_release473',use_container_width=True):
+                _go(dest,match=last.id)
     if future:
         with st.container(border=True):
             st.caption('PRÓXIMO PARTIDO')
@@ -330,7 +323,7 @@ def matches(user, own_only=False):
                 _go('Partidos',match=future.id)
     if own_only:
         with st.expander('Elegir otro partido o consultar mis valoraciones',expanded=False):
-            prior=[m for m in mine if last is None or m.id!=last.id]
+            prior=[m for m in released if not released or m.id!=released[0].id]
             for match in prior[:25]:
                 if st.button(f'{match.match_date:%d/%m} · {_fixture_label(match)}',
                              key=f'own_prior471_{match.id}',use_container_width=True):
@@ -416,7 +409,7 @@ def _contribution_summary(row):
 def _show_contribution(row, actor_id):
     data=_contribution_summary(row)
     st.markdown(f'**{row.title}** · {_contrib_status(row)}')
-    st.caption(f'{row.kind} · {row.updated_at:%d/%m/%Y %H:%M} · revisión {row.revision}')
+    st.caption(f'{row.updated_at:%d/%m/%Y %H:%M} · revisión {row.revision}')
     for key,value in data.items():
         if value in ('',None,[]): continue
         st.write(f'**{key.replace("_"," ").capitalize()}:** {value}')
@@ -442,56 +435,116 @@ def _zone_buttons(mid):
     return selected
 
 
-def _quick(user, match, own_id):
-    if not can_report(user): return
+def _mobile_board(user, match, own_id):
+    """Native mobile-style card, backed by actual match/season roster records."""
+    if not can_report(user):
+        st.error('Esta cuenta no tiene permiso para valorar.')
+        return
+    from repositories import mobile472
+    from ui.mobile472 import scoreboard_component
+    own_match=bool(own_id and own_id in (match.home_team_id,match.away_team_id))
+    if own_match:
+        own_team=match.home_team if match.home_team_id==own_id else match.away_team
+        rival_team=match.away_team if match.home_team_id==own_id else match.home_team
+    else:
+        own_team=match.home_team
+        rival_team=match.away_team
     with session_scope() as db:
-        prior=db.scalar(select(Contribution).where(Contribution.author_id==user['id'],
-             Contribution.match_id==match.id,Contribution.kind=='quick').order_by(Contribution.id.desc()).limit(1))
-    defaults=_contribution_summary(prior) if prior else {}
-    st.markdown('### Valoración rápida · Noname')
-    st.caption('Solo nota + Guardar. Todo lo demás es opcional. Tu opinión es privada para ti y Dirección Deportiva.')
-    with st.form(f'quickform47_{match.id}'):
-        ratings=list(range(1,11))
-        previous_note=defaults.get('nota_noname')
-        rating=st.pills('¿Qué nota le das a Noname?',ratings,selection_mode='single',
-             default=int(previous_note) if previous_note in ratings else None,
-             key=f'quickrating47_{match.id}')
-        with st.expander('Añadir comentario (opcional)',expanded=False):
-            comment=st.text_area('¿Qué destacarías?',value=str(defaults.get('comentario') or ''),height=80)
-        submitted=st.form_submit_button('Guardar valoración',type='primary',use_container_width=True)
-    if submitted:
+        own_rows,own_confirmed=mobile472.choices(db,match.id,own_team.id)
+        rival_rows,rival_confirmed=mobile472.choices(db,match.id,rival_team.id)
+        _,annotated=mobile472.existing(db,author_id=user['id'],match_id=match.id)
+    if not own_confirmed or not rival_confirmed:
+        st.error('Este encuentro no tiene los dos XI confirmados. Solicita una corrección a Administración.')
+        return
+    suggested_form='4-2-3-1'  # backwards-compatible component field; not inferred.
+    initial={}
+    for side,team,rows in [('own',own_team,own_rows),('rival',rival_team,rival_rows)]:
+        for row in rows:
+            prior=annotated.get(f"{team.id}:{row['key']}")
+            if prior:initial[f"{side}:{row['key']}"]=prior
+    ui=scoreboard_component(
+        key=f'mobile_rating472_{match.id}_{user["id"]}',
+        data={'fixture':_fixture_label(match),'subtitle':f'{match.round_name or "Partido"} · {_date_label(match)}',
+              'is_own_match':own_match,'own_name':own_team.name,'rival_name':rival_team.name,
+              'own':own_rows,'rival':rival_rows,
+              'own_hint':('Alineación confirmada' if own_confirmed else 'Plantilla de temporada: no confirma que todos jugaran') if own_rows and own_match else
+                         ('Jugadores del encuentro' if own_confirmed else 'Posiciones provisionales, sin nombres confirmados'),
+              'rival_hint':('Alineación confirmada' if rival_confirmed else 'Plantilla de temporada: no confirma participación') if rival_confirmed or any(x['player_id'] for x in rival_rows) else
+                            'Posiciones orientativas · no se han confirmado los jugadores del rival',
+              'team_score':None,'initial':initial,
+              'formation':suggested_form},
+    )
+    packet=ui.save
+    if packet is not None:
         try:
-            if rating is None: raise ValueError('Elige primero una nota del 1 al 10.')
+            if not isinstance(packet,dict):raise ValueError('Datos de valoración inválidos.')
+            values=packet.get('players',[])
+            if not isinstance(values,list) or any(not isinstance(p,dict) or p.get('side') not in {'own','rival'} for p in values):
+                raise ValueError('Datos de jugador inválidos.')
             with session_scope() as db:
-                domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
-                    match_id=match.id,team_id=own_id,kind='quick',title=f'Valoración Noname · {match.round_name}',
-                    data={'nota_noname':rating,'comentario':comment},
-                    contribution_id=prior.id if prior else None,expected_revision=prior.revision if prior else None,publish=True)
-            st.success('Valoración guardada. Puedes editarla desde este mismo partido.')
-            st.rerun()
-        except Exception as exc: st.error(str(exc))
-    with st.expander('Señalar un jugador por su zona (opcional)',expanded=False):
-        zone=_zone_buttons(match.id)
-        with st.form(f'quickzone47_{match.id}'):
-            dorsal=st.number_input('Dorsal si lo conoces (0 = desconocido)',min_value=0,max_value=99,value=0)
-            score=st.selectbox('Nota individual opcional',['Sin nota']+list(range(1,11)))
-            category=st.selectbox('Impresión (opcional)',['Sin categoría','Destacado','Menos destacado'])
-            text=st.text_area('Qué observaste (opcional)',placeholder='Puedes identificarlo solo por su posición.')
-            favorite=st.checkbox('⭐ Destacar a Aarón',value=False)
-            keep=st.form_submit_button('Guardar observación del jugador',disabled=not bool(zone))
-        if keep:
-            with session_scope() as db:
-                row=domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
-                   match_id=match.id,team_id=own_id,kind='individual',title=f'Observación {zone} · {match.round_name}',
-                   data={'posicion_observada':zone,'dorsal_observado':dorsal or None,
-                         'nota':None if score=='Sin nota' else score,'comentario':text,
-                         'impresion':None if category=='Sin categoría' else category},publish=True)
-                if favorite:
-                    domain.propose_player(db,actor_id=user['id'],season_id=match.season_id,
-                       subject=f'Noname · {zone} · dorsal {dorsal or "por identificar"}',
-                       reason=text.strip() or 'Jugador señalado como destacado para Dirección Deportiva',
-                       match_id=match.id,contribution_id=row.id)
-            st.success('Observación guardada'+(' y enviada a Aarón.' if favorite else '.'));st.rerun()
+                saved=[]
+                own_items=[{k:v for k,v in entry.items() if k!='side'} for entry in values if entry['side']=='own']
+                rival_items=[{k:v for k,v in entry.items() if k!='side'} for entry in values if entry['side']=='rival']
+                clear=packet.get('cleared', [])
+                if not isinstance(clear,list) or any(not isinstance(x,dict) or x.get('side') not in {'own','rival'} for x in clear):
+                    raise ValueError('Listado de notas retiradas inválido.')
+                own_clear=[x['key'] for x in clear if x['side']=='own']
+                rival_clear=[x['key'] for x in clear if x['side']=='rival']
+                if packet.get('team_score') is not None or own_items or own_clear:
+                    saved.append(mobile472.save_board(db,actor_id=user['id'],match_id=match.id,
+                       team_id=own_team.id,payload={'team_score':packet.get('team_score'), 'players':own_items,'cleared':own_clear,
+                                                   'formation':match.home_formation if not own_match and match.home_formation_known else '4-2-3-1'}))
+                if rival_items or rival_clear:
+                    saved.append(mobile472.save_board(db,actor_id=user['id'],match_id=match.id,
+                       team_id=rival_team.id,payload={'players':rival_items,'cleared':rival_clear,
+                          'formation':suggested_form}))
+            total=sum(x['evaluados'] for x in saved)
+            stars=sum(x['propuestas'] for x in saved)
+            deleted=sum(x.get('retiradas',0) for x in saved)
+            st.success(f'Cambios guardados · {total} jugadores valorados'+
+                       (f' · {deleted} notas retiradas' if deleted else '')+
+                       (f' · {stars} propuestas enviadas a Aarón' if stars else '')+'.')
+        except Exception as exc:
+            st.error(f'No se ha guardado la valoración: {exc}')
+
+
+def _individual_statistics474(user,match):
+    """Optional analyst metrics attached to an already published match."""
+    if not can_report(user) or working_profile(user) not in {'analyst','director'}:
+        return
+    from repositories import mobile472,player_metrics474
+    with st.expander('Añadir estadísticas individuales (opcional)',expanded=False):
+        with session_scope() as db:
+            home,_=mobile472.choices(db,match.id,match.home_team_id)
+            away,_=mobile472.choices(db,match.id,match.away_team_id)
+        participants=[(match.home_team_id,r) for r in home if r['player_id']]+[(match.away_team_id,r) for r in away if r['player_id']]
+        if not participants:
+            st.caption('Necesitas el XI publicado o un suplente confirmado.');return
+        with st.form(f'metrics474_{match.id}'):
+            choice=st.selectbox('Futbolista que has analizado',range(len(participants)),
+                format_func=lambda idx:f"{participants[idx][1]['name']} · {match.home_team.name if participants[idx][0]==match.home_team_id else match.away_team.name}")
+            left,right=st.columns(2)
+            with left:
+                completed=st.number_input('Pases acertados',min_value=0,max_value=300,value=0)
+                total=st.number_input('Pases intentados',min_value=0,max_value=300,value=0)
+            with right:
+                won=st.number_input('Duelos ganados',min_value=0,max_value=300,value=0)
+                duels=st.number_input('Duelos disputados',min_value=0,max_value=300,value=0)
+            source=st.text_input('Procedencia',value='Registro manual del analista')
+            sent=st.form_submit_button('Guardar estadísticas')
+        if sent:
+            try:
+                tid,player=participants[choice]
+                with session_scope() as db:
+                    player_metrics474.save_stats(db,actor_id=user['id'],match_id=match.id,team_id=tid,
+                        player_id=player['player_id'],passes_complete=int(completed),passes_total=int(total),
+                        duels_won=int(won),duels_total=int(duels),source=source)
+                st.success('Estadísticas guardadas en la ficha del jugador; no modifican su nota.')
+            except Exception as exc:st.error(f'No se guardaron las estadísticas: {exc}')
+
+
+def _quick(user, match, own_id):
+    _mobile_board(user, match, own_id)
 
 
 def _complete(user, match):
@@ -515,49 +568,46 @@ def _complete(user, match):
     rival=match.away_team if match.home_team_id==own_id else match.home_team
     st.markdown('### '+(f'Postpartido de {rival.name}' if own_match else 'Informe del partido'))
     st.caption('Escribe solo lo que has visto. Puedes dejar campos vacíos. No necesitas XI ni horario.')
-    with st.form(f'complete471_{match.id}_{prior.id if prior else 0}'):
-        first=st.text_area('Noname · ¿Qué destacarías?' if own_match else f'{match.home_team.name} · Observaciones',
-            value=old.get('equipo_propio',''),height=110)
-        second=st.text_area(f'{rival.name} · ¿Qué destacarías?' if own_match else f'{match.away_team.name} · Observaciones',
-            value=old.get('rival',''),height=110)
-        with st.expander('Añadir notas o datos (opcional)',expanded=False):
-            options=['Sin nota']+list(range(1,11))
-            def _rating_index(k):
-                val=old.get(k)
-                return options.index(val) if val in options else 0
-            own_rating=st.selectbox('Nota de Noname' if own_match else 'Nota del local',options,index=_rating_index('nota_propio'))
-            rival_rating=st.selectbox('Nota del rival' if own_match else 'Nota del visitante',options,index=_rating_index('nota_rival'))
-            context=st.text_area('Conclusión o contexto',value=old.get('conclusion',''),height=80)
-            strengths=st.text_area('Fortalezas (opcional)',value=old.get('fortalezas',''),height=70)
-            weaknesses=st.text_area('Debilidades (opcional)',value=old.get('debilidades',''),height=70)
-            stats=st.text_area('Estadísticas o pases (opcional)',value=old.get('datos_individuales',''),height=70)
-            video=st.text_input('Referencia a cortes de vídeo (opcional)',value=old.get('cortes_video',''))
-        a,b=st.columns(2)
-        save=a.form_submit_button('Guardar borrador',use_container_width=True)
-        publish=b.form_submit_button('Enviar a Aarón',type='primary',use_container_width=True)
-    if save or publish:
-        try:
-            if not any(str(value).strip() for value in [first,second,context,strengths,weaknesses,stats,video]) and own_rating=='Sin nota' and rival_rating=='Sin nota':
-                raise ValueError('Introduce alguna valoración o comentario antes de guardar.')
-            data={'ambito':'Ambos' if own_match else 'Partido neutral','equipo_propio':first,'rival':second,
-                  'nota_propio':None if own_rating=='Sin nota' else own_rating,
-                  'nota_rival':None if rival_rating=='Sin nota' else rival_rating,
-                  'conclusion':context,'fortalezas':strengths,'debilidades':weaknesses,
-                  'datos_individuales':stats,'cortes_video':video}
-            with session_scope() as db:
-                row=domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
-                    match_id=match.id,kind='complete',title=f'Postpartido · {_fixture_label(match)}',
-                    data=data,contribution_id=prior.id if prior else None,
-                    expected_revision=prior.revision if prior else None,publish=publish)
-            if publish:
-                st.session_state.pop('edit_contribution_47',None)
-                st.session_state.pop('contrib_mode47',None)
-                st.success('Postpartido enviado a Aarón.')
-            else:
-                st.session_state['edit_contribution_47']=row.id
-                st.success('Borrador privado guardado. Solo tú puedes verlo hasta enviarlo.')
-            st.rerun()
-        except Exception as exc:st.error(str(exc))
+    from ui.mobile472 import postmatch_component
+    widget=postmatch_component(key=f'postmatch_mobile472_{match.id}_{user["id"]}',
+        data={'title':f'Postpartido de {rival.name}' if own_match else 'Análisis del partido',
+              'own_label':'Noname · ¿Qué destacarías?' if own_match else f'{match.home_team.name} · Observaciones',
+              'rival_label':f'{rival.name} · ¿Qué destacarías?' if own_match else f'{match.away_team.name} · Observaciones',
+              'old':old})
+    result=widget.save
+    if result is None:return
+    try:
+        if not isinstance(result,dict) or not isinstance(result.get('values'),dict):
+            raise ValueError('Formulario no válido.')
+        values=result['values']
+        keys={'equipo_propio','rival','conclusion','fortalezas','debilidades',
+              'datos_individuales','cortes_video','nota_propio','nota_rival'}
+        if set(values) != keys:raise ValueError('El informe está incompleto o contiene campos desconocidos.')
+        for field in ('nota_propio','nota_rival'):
+            grade=values[field]
+            if grade is not None and (type(grade) is not int or grade<1 or grade>10):
+                raise ValueError('Nota de equipo fuera de rango.')
+        for field in keys-{'nota_propio','nota_rival'}:
+            if not isinstance(values[field],str) or len(values[field])>12000:
+                raise ValueError('Texto de análisis inválido.')
+        if not any(str(value).strip() for value in values.values() if value is not None):
+            raise ValueError('Introduce algún dato antes de guardar.')
+        data={'ambito':'Ambos' if own_match else 'Partido neutral',**values}
+        publish=result.get('publish') is True
+        with session_scope() as db:
+            row=domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
+                match_id=match.id,kind='complete',title=f'Postpartido · {_fixture_label(match)}',
+                data=data,contribution_id=prior.id if prior else None,
+                expected_revision=prior.revision if prior else None,publish=publish)
+        if publish:
+            st.session_state.pop('edit_contribution_47',None)
+            st.session_state.pop('contrib_mode47',None)
+            st.success('Postpartido compartido con Aarón.')
+        else:
+            st.session_state['edit_contribution_47']=row.id
+            st.success('Borrador privado guardado. Solo tú puedes verlo hasta compartirlo.')
+        st.rerun()
+    except Exception as exc:st.error(f'No se ha guardado el postpartido: {exc}')
 
 
 def _individual(user, match):
@@ -646,6 +696,154 @@ def _correction_form(user, entity_type, entity_id, season_id):
             except Exception as exc: st.error(str(exc))
 
 
+def _lineup_import472(user, match):
+    """One obvious phone-friendly entry for pasted ChatGPT/Federación text.
+
+    A plain dorsal;nombre list updates only the seasonal roster. There is no
+    silent assumption that the first eleven are the starters.
+    """
+    permitted = can_direct(user) or can_admin(user) or (can_report(user) and
+                (user.get('participation_profile') or 'full') in {'full','free'})
+    if not permitted:
+        return
+    from core.federation_roster import parse_federation_roster
+    from repositories import matches as matches_repo
+    with st.popover('＋ Cargar alineación', use_container_width=False):
+        st.markdown('**Pegar alineación desde el móvil**')
+        st.caption('Puedes copiar aquí lo que ChatGPT te haya transcrito. Dos columnas: `dorsal;nombre`.')
+        team_id=st.selectbox('Equipo',[match.home_team_id,match.away_team_id],
+             format_func=lambda t:match.home_team.name if t==match.home_team_id else match.away_team.name,
+             key=f'load_team472_{match.id}')
+        text=st.text_area('Texto para importar',height=175,
+             placeholder='TITULARES\n1;Juan García\n3;Pedro López\n...\nSUPLENTES\n12;Otro jugador\n\nO simplemente: 7;Nombre del jugador',
+             key=f'load_paste472_{match.id}')
+        uploaded=st.file_uploader('O elegir archivo .txt / .csv',type=['txt','csv'],
+             key=f'load_file472_{match.id}')
+        if uploaded is not None:
+            raw=uploaded.getvalue()
+            if len(raw)>80_000:
+                st.error('El archivo supera 80 KB; utiliza una lista de partido.')
+                return
+            try: text=raw.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                try:text=raw.decode('cp1252')
+                except UnicodeDecodeError:
+                    st.error('Archivo no legible como UTF-8 o Windows-1252.');return
+        rows=parse_federation_roster(text)
+        if rows:
+            if len(rows)>60:
+                st.error('Demasiados jugadores para una alineación. Revisa el texto.');return
+            st.caption(f'{len(rows)} nombres reconocidos · '
+                       f'{sum(r.squad_role=="starter" for r in rows)} titulares · '
+                       f'{sum(r.squad_role=="substitute" for r in rows)} suplentes')
+            st.dataframe(pd.DataFrame([{'Dorsal':r.shirt_number,'Nombre':r.name,
+                   'Tipo':{'starter':'Titular','substitute':'Suplente'}.get(r.squad_role,'Plantilla')} for r in rows]),
+                   hide_index=True, use_container_width=True)
+            if all(r.squad_role is None for r in rows):
+                st.info('No hay etiquetas TITULARES/SUPLENTES: se actualizará la plantilla, pero NO se creará un XI.')
+            confirm=st.checkbox('He revisado nombres, dorsales y equipo',key=f'confirm_load472_{match.id}')
+            if st.button('Guardar nombres y dorsales',key=f'save_paste472_{match.id}',
+                        disabled=not confirm,type='primary',use_container_width=True):
+                try:
+                    with session_scope() as db:
+                        result=matches_repo.import_federation_roster_text(db,
+                             team_id=team_id,season_id=match.season_id,actor_id=user['id'],
+                             text=text,match_id=match.id)
+                    st.success(f'Guardados {result["rows"]} jugadores. La ficha del partido ya puede usarlos.')
+                    st.rerun()
+                except Exception as exc: st.error(f'No se ha importado: {exc}')
+        else: st.caption('Pega al menos un jugador. Ejemplo: `7;Nombre Apellido`.')
+
+
+def _prepare_rating_release473(user,match):
+    """One administrative action: paste both XIs and publish, no collective report."""
+    from core.lineup473 import parse_xi
+    with session_scope() as db:
+        state=publication.readiness(db,match.id)
+    if state['published']:
+        st.success('Partido publicado · las valoraciones individuales están habilitadas.')
+        return
+    if not _can_prepare(user):
+        st.info('Este partido todavía no está abierto para valorar. Aparecerá aquí cuando se publiquen las dos alineaciones.')
+        return
+    st.subheader('Preparar y publicar el partido')
+    st.caption('Pega los 11 titulares con dorsal;nombre;posición para cada equipo. ' 
+               'Las posiciones son las de este partido. No hacen falta horarios, resultado ni notas colectivas.')
+    with st.form(f'release473_{match.id}'):
+        left,right=st.columns(2)
+        texts={}
+        for col,team in ((left,match.home_team),(right,match.away_team)):
+            with col:
+                current=state['teams'][team.id]
+                st.markdown(f'**{team.name}**')
+                st.caption('XI ya completo' if current['ready'] else f'{current["starters"]}/11 titulares confirmados')
+                pasted=st.text_area(f'Alineación de {team.name}',height=210,
+                    placeholder='TITULARES\n1;Nombre portero;POR\n2;Nombre lateral;LD\n15;Nombre central;DCD\n...')
+                uploaded=st.file_uploader('O subir un TXT / CSV',type=['txt','csv'],
+                                          key=f'upload473_{match.id}_{team.id}')
+                texts[team.id]=pasted
+                if uploaded is not None and not pasted.strip():
+                    raw=uploaded.getvalue()
+                    if len(raw)>80000:
+                        texts[team.id]=None
+                    else:
+                        try:texts[team.id]=raw.decode('utf-8-sig')
+                        except UnicodeDecodeError:
+                            try:texts[team.id]=raw.decode('cp1252')
+                            except UnicodeDecodeError:texts[team.id]=None
+        submit=st.form_submit_button('Revisar los 22 titulares',type='primary',use_container_width=True)
+    if submit:
+        try:
+            if any(text is None for text in texts.values()):
+                raise ValueError('Uno de los archivos no se puede leer o supera el límite de 80 KB.')
+            parsed={}
+            for team in (match.home_team,match.away_team):
+                if texts[team.id].strip():
+                    parsed[team.id]=parse_xi(texts[team.id],team_name=team.name)
+                elif not state['teams'][team.id]['ready']:
+                    raise ValueError(f'Falta la alineación completa de {team.name}.')
+            # Preview and deliberate second confirmation: do not write before approval.
+            st.session_state[f'preview_release473_{match.id}']={
+                'home':texts[match.home_team_id], 'away':texts[match.away_team_id]}
+        except ValueError as exc:
+            st.error(str(exc))
+            st.session_state.pop(f'preview_release473_{match.id}',None)
+    approval=st.session_state.get(f'preview_release473_{match.id}')
+    if approval:
+        st.markdown('#### Vista previa · Confirmar publicación')
+        with session_scope() as db:
+            existing={tid:list(db.scalars(select(Participation).options(joinedload(Participation.player)).where(
+                 Participation.match_id==match.id,Participation.team_id==tid,
+                 Participation.starter.is_(True))).all()) for tid in (match.home_team_id,match.away_team_id)}
+        for team,txt in ((match.home_team,approval['home']),(match.away_team,approval['away'])):
+            if txt.strip():
+                rows=parse_xi(txt,team_name=team.name)
+                display=[{'Dorsal':r.shirt,'Jugador':r.name,'Posición':r.position}
+                         for r in rows if r.starter]
+            else:
+                display=[{'Dorsal':r.shirt_number,'Jugador':r.player.full_name,'Posición':r.position} for r in existing[team.id]]
+            st.markdown(f'**{team.name} · 11 titulares**')
+            st.dataframe(pd.DataFrame(display),hide_index=True,use_container_width=True)
+            with st.expander('Ver distribución por posiciones',expanded=False):
+                from ui.lineup473 import lineup_svg
+                st.markdown(lineup_svg(display),unsafe_allow_html=True)
+        st.caption('Solo después de confirmar el partido quedará disponible para Informadores, Analistas y DD.')
+        a,b=st.columns([3,2])
+        if a.button('Confirmar y publicar partido',type='primary',key=f'confirm_release473_{match.id}',use_container_width=True):
+            try:
+                with session_scope() as db:
+                    publication.publish_match(db,actor_id=user['id'],match_id=match.id,
+                        home_text=approval['home'],away_text=approval['away'])
+                st.session_state.pop(f'preview_release473_{match.id}',None)
+                st.session_state.pop('contrib_mode47',None)
+                st.success('Partido publicado. Ya se pueden valorar los 22 titulares.')
+                st.rerun()
+            except Exception as exc:st.error(f'No se pudo publicar: {exc}')
+        if b.button('Cancelar',key=f'cancel_release473_{match.id}',use_container_width=True):
+            st.session_state.pop(f'preview_release473_{match.id}',None)
+            st.rerun()
+
+
 def match_detail(user, match_id, return_to='Partidos'):
     with session_scope() as db:
         match=db.scalar(select(Match).options(joinedload(Match.home_team),joinedload(Match.away_team)).where(
@@ -659,6 +857,31 @@ def match_detail(user, match_id, return_to='Partidos'):
         st.session_state.pop('edit_contribution_47',None)
         st.rerun()
     page_header(_fixture_label(match),f'{match.round_name} · {_date_label(match)}')
+    with session_scope() as db:
+        released=publication.is_open(db,match.id)
+    if not released:
+        _prepare_rating_release473(user,match)
+        return
+    if _can_prepare(user):
+        with st.expander('Incorporar un suplente que participó',expanded=False):
+            st.caption('Solo se añade el futbolista confirmado. No se modifica ninguno de los 22 titulares.')
+            from core.lineup473 import ALLOWED
+            with st.form(f'substitute474_{match.id}'):
+                team_id=st.selectbox('Equipo',[match.home_team_id,match.away_team_id],
+                    format_func=lambda tid:match.home_team.name if tid==match.home_team_id else match.away_team.name)
+                name=st.text_input('Nombre del suplente')
+                shirt=st.number_input('Dorsal',min_value=1,max_value=99,value=12,step=1)
+                position=st.selectbox('Posición observada',sorted(ALLOWED),index=sorted(ALLOWED).index('DC'))
+                minute=st.number_input('Minuto de entrada',min_value=0,max_value=130,value=60)
+                add=st.form_submit_button('Añadir suplente confirmado')
+            if add:
+                try:
+                    with session_scope() as db:
+                        publication.register_substitute(db,actor_id=user['id'],match_id=match.id,
+                            team_id=team_id,name=name,shirt=shirt,position=position,minute_in=minute,
+                            minute_out=max(90,int(minute)))
+                    st.success('Suplente registrado. Ya está disponible para recibir notas.');st.rerun()
+                except Exception as exc:st.error(f'No se pudo incorporar el suplente: {exc}')
     if importance and importance.importance=='Muy importante':
         st.caption('★ Partido de especial interés para Dirección Deportiva')
     st.caption('Las plantillas de temporada no equivalen a una alineación confirmada.')
@@ -672,7 +895,7 @@ def match_detail(user, match_id, return_to='Partidos'):
     own_match=own_id in (match.home_team_id,match.away_team_id)
     if working_profile(user)=='own':
         if own_match:
-            _quick(user,match,own_id)
+            _mobile_board(user,match,own_id)
         else:
             st.caption('Este encuentro no corresponde a Noname.')
         return
@@ -691,23 +914,14 @@ def match_detail(user, match_id, return_to='Partidos'):
     mode=st.session_state.get('contrib_mode47')
     if not mode:
         if can_report(user):
-            simple=working_profile(user)=='own'
-            if simple:
-                if own_match and st.button('Valorar a Noname',key=f'mvquick47_{match.id}',type='primary',use_container_width=True):
-                    _open_work(user,match,'quick')
-                with st.expander('También quiero comentar algo del rival (opcional)',expanded=False):
-                    if st.button('Señalar un jugador del rival',key=f'own_rival47_{match.id}'):
-                        _open_work(user,match,'individual')
+            if working_profile(user)=='analyst' or working_profile(user)=='director':
+                if st.button('Valorar jugadores',key=f'main_board474_{match.id}',type='primary',use_container_width=True):
+                    _open_work(user,match,'board472')
             else:
-                action=('Elaborar postpartido' if own_match else 'Anotar este partido')
-                if st.button(action,key=f'mvcomplete471_{match.id}',type='primary',use_container_width=True):
-                    _open_work(user,match,'complete')
-                with st.expander('Otras aportaciones (opcional)',expanded=False):
-                    if own_match and st.button('Solo puntuar a Noname',key=f'mvquick471_{match.id}',use_container_width=True):
-                        _open_work(user,match,'quick')
-                    if st.button('Valorar un jugador o enviarlo como favorito a Aarón',
-                                 key=f'mvindiv471_{match.id}',use_container_width=True):
-                        _open_work(user,match,'individual')
+                _mobile_board(user,match,own_id)
+                return
+            # Historical complete/post-match narrative remains readable but is
+            # no longer offered as a second editor for an individual rating.
         st.markdown('### Información del encuentro')
         a,b=st.columns(2)
         with a:
@@ -716,8 +930,8 @@ def match_detail(user, match_id, return_to='Partidos'):
         with b:
             st.markdown(f'**{match.away_team.name}**')
             st.caption(f'Estructura de referencia: {match.away_formation if match.away_formation_known and match.away_formation else "Sin confirmar"}')
-        if can_report(user) and working_profile(user) in {'analyst','director'}:
-            with st.expander('Registrar una estructura observada (sin sobrescribir la oficial)',expanded=False):
+        if False:  # legacy formation editor disabled, evidence remains readable
+            with st.expander('Registrar una estructura observada (archivo histórico)',expanded=False):
                 with st.form(f'formation47_{match.id}'):
                     side=st.selectbox('Equipo observado',[match.home_team_id,match.away_team_id],
                         format_func=lambda tid:match.home_team.name if tid==match.home_team_id else match.away_team.name)
@@ -736,33 +950,10 @@ def match_detail(user, match_id, return_to='Partidos'):
                                   data={'formacion':shape.strip(),'contexto':comment},publish=publish)
                             st.success('Estructura registrada como observación independiente.');st.rerun()
                         except Exception as exc: st.error(str(exc))
-        can_edit_data=can_direct(user) or can_admin(user) or (can_report(user) and
-                       (user.get('participation_profile') or 'full') in {'full','free'})
-        if can_edit_data:
-            with st.expander('Gestionar plantillas y alineaciones comprobadas',expanded=False):
-                st.caption('Pega datos de Federación. Sin TITULARES/SUPLENTES solo actualiza la plantilla, '
-                           'no inventa participantes ni XI. Las alineaciones confirmadas quedan auditadas.')
-                from repositories import matches as matches_repo
-                with st.form(f'fed47_{match.id}'):
-                    tid=st.selectbox('Equipo',[match.home_team_id,match.away_team_id],
-                        format_func=lambda tid:match.home_team.name if tid==match.home_team_id else match.away_team.name)
-                    pasted=st.text_area('Texto Federación',height=170,
-                        placeholder='TITULARES\n1;Portero;POR\n...\nSUPLENTES\n12;Jugador;DC\n\nO bien solo: 7;Jugador;EI')
-                    save_roster=st.form_submit_button('Verificar y guardar datos')
-                if save_roster:
-                    try:
-                        with session_scope() as db:
-                            result=matches_repo.import_federation_roster_text(db,
-                                team_id=tid,season_id=match.season_id,actor_id=user['id'],
-                                text=pasted,match_id=match.id)
-                        st.success(f"Plantilla actualizada: {result['rows']} registros; "
-                                   f"{result['starters']} titulares; {result['substitutes']} suplentes.")
-                        st.rerun()
-                    except Exception as exc: st.error(str(exc))
         st.markdown('### Aportaciones disponibles')
         _match_sources(user,match)
-        if can_report(user) and working_profile(user) in {'analyst','director'} and own_match:
-            with st.expander('Preparar al próximo rival (desde este partido)',expanded=False):
+        if False:  # former parallel syntheses are available only as historical evidence
+            with st.expander('Preparar al próximo rival (archivo histórico)',expanded=False):
                 rival=match.away_team if match.home_team_id==own_id else match.home_team
                 st.caption(f'Partidos recientes del {rival.name}. No se crea una ficha táctica obligatoria.')
                 season_matches=[m for m in _fixtures(match.season_id,count=200) if rival.id in (m.home_team_id,m.away_team_id) and m.id!=match.id]
@@ -780,9 +971,12 @@ def match_detail(user, match_id, return_to='Partidos'):
         if mode=='quick':
             if not own_match: st.warning('La nota rápida de Noname corresponde a partidos del equipo propio.')
             else: _quick(user,match,own_id)
-        elif mode=='complete': _complete(user,match)
-        elif mode=='individual': _individual(user,match)
-        elif mode=='synthesis': _synthesis(user,match)
+        elif mode=='board472':
+            _mobile_board(user,match,own_id)
+            _individual_statistics474(user,match)
+        else:
+            st.session_state.pop('contrib_mode47',None)
+            st.info('Utiliza la valoración individual del partido. Los informes antiguos siguen disponibles en el archivo.')
 
 
 
@@ -828,7 +1022,14 @@ def team_detail(user, team_id):
 def _synthesis(user,match):
     st.markdown('### Síntesis de varios partidos')
     all_matches=_fixtures(match.season_id,count=300)
-    choose=[m for m in all_matches if match.home_team_id in (m.home_team_id,m.away_team_id) or match.away_team_id in (m.home_team_id,m.away_team_id)]
+    own_id=_own()
+    default_team=match.away_team_id if match.home_team_id==own_id else (match.home_team_id if match.away_team_id==own_id else match.home_team_id)
+    teams=[match.home_team_id,match.away_team_id]
+    target=st.selectbox('Equipo que estás analizando',teams,
+         index=teams.index(default_team),
+         format_func=lambda t:match.home_team.name if t==match.home_team_id else match.away_team.name,
+         key=f'synth_target472_{match.id}')
+    choose=[m for m in all_matches if target in (m.home_team_id,m.away_team_id)]
     lookup={m.id:f'{m.match_date:%d/%m} · {_fixture_label(m)}' for m in choose}
     with st.form(f'synthform47_{match.id}'):
         chosen=st.multiselect('Partidos que has observado',list(lookup),format_func=lookup.get,
@@ -841,8 +1042,8 @@ def _synthesis(user,match):
             if not chosen: raise ValueError('Selecciona al menos un partido documentado.')
             with session_scope() as db:
                 domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
-                   match_id=match.id,kind='synthesis',title=f'Síntesis deportiva · {_fixture_label(match)}',
-                   data={'partidos_revisados':chosen,'conclusion':text},publish=shared)
+                   match_id=match.id,team_id=target,kind='synthesis',title=f'Síntesis deportiva · {_fixture_label(match)}',
+                   data={'equipo_analizado':target,'partidos_revisados':chosen,'conclusion':text},publish=shared)
             st.success('Síntesis guardada sin duplicar observaciones individuales.');st.rerun()
         except Exception as exc: st.error(str(exc))
 
@@ -865,7 +1066,30 @@ def my_contributions(user, ratings_only=False):
             Report.reporter_id==user['id'],Report.match.has(Match.season_id==sid))
             .order_by(Report.updated_at.desc()).limit(80)).unique().all())
     if ratings_only:
-        rows=[r for r in rows if r.kind in {'quick','individual'}]
+        from repositories.rating_summary474 import observations
+        with session_scope() as db:
+            own_notes=observations(db,actor_id=user['id'],season_id=sid)
+        by_match=defaultdict(list)
+        for (pid,mid,author),(when,score,origin) in own_notes.items():
+            by_match[mid].append((pid,when,score))
+        with session_scope() as db:
+            games={m.id:m for m in db.scalars(select(Match).options(
+                joinedload(Match.home_team),joinedload(Match.away_team)).where(
+                Match.id.in_(by_match.keys()))).unique().all()}
+        st.caption('Una fila por encuentro. Las notas siguen siendo privadas; puedes editarlas desde el partido.')
+        ids=sorted(by_match,key=lambda x:(games[x].match_date,x) if x in games else (date.min,x),reverse=True)
+        if not ids:
+            st.info('Todavía no has valorado futbolistas. Abre un partido publicado para empezar.')
+        else:
+            visible_ids=[mid for mid in ids if mid in games]
+            view=pd.DataFrame([{'Partido':_fixture_label(games[mid]),
+               'Fecha':f"{games[mid].match_date:%d/%m/%Y}",
+               'Futbolistas':len({pid for pid,_,score in by_match[mid]}),
+               'Nota media propia':round(sum(score for _,_,score in by_match[mid])/len(by_match[mid]),1)}
+               for mid in visible_ids])
+            index=_table_select(view,key='my_rating_games474')
+            if index is not None and index<len(visible_ids):_go('Partidos',match=visible_ids[index])
+        return
     view=st.radio('Estado',['Todos','Borradores','Compartidos'],horizontal=True,key='my_filter47')
     if view=='Borradores': rows=[r for r in rows if r.status=='draft']
     if view=='Compartidos': rows=[r for r in rows if r.status=='shared']
@@ -1090,7 +1314,7 @@ def director(user):
         else:
             st.session_state['dd_section47']='Más'
             st.session_state['dd_extra471']=pending
-    section=st.radio('Qué quieres revisar',['Propuestas','Solicitudes','Más'],horizontal=True,key='dd_section47')
+    section=st.selectbox('Qué quieres revisar',['Propuestas','Solicitudes','Más'],key='dd_section47')
     if section=='Más':
         section=st.selectbox('Otras herramientas',['Aportaciones compartidas','Modelo y necesidades','Actividad'],
                              key='dd_extra471')
@@ -1150,8 +1374,7 @@ def director(user):
     if section=='Propuestas':
         with session_scope() as db:
             proposals=domain.list_proposals(db,user['id'],sid)
-        selected=st.radio('Estado de propuesta',['Pendientes','Guardadas','Seguimiento','Descartadas','Todas'],
-                          horizontal=True,key='proposal_filter47')
+        selected=st.selectbox('Estado de propuesta',['Pendientes','Guardadas','Seguimiento','Descartadas','Todas'],key='proposal_filter47')
         statuses={'Pendientes':['new'],'Guardadas':['saved'],'Seguimiento':['tracking'],
                   'Descartadas':['dismissed'],'Todas':['new','saved','tracking','dismissed']}
         proposals=[p for p in proposals if p.state in statuses[selected]]
@@ -1190,7 +1413,7 @@ def director(user):
                         except Exception as exc: st.error(str(exc))
 
                 with st.form(f'decide47_{p.id}'):
-                    decision=st.radio('Qué quieres hacer',[
+                    decision=st.selectbox('Qué quieres hacer',[
                         'Guardar el informe para después','Iniciar seguimiento deportivo',
                         'Descartar la propuesta','Devolver a pendientes'],
                         index=0,key=f'decision_choice47_{p.id}')
@@ -1280,7 +1503,7 @@ def players(user):
         if st.session_state.get('catalog_signature47')!=signature:
             st.session_state['catalog_signature47']=signature
             st.session_state['catalog_page_input47']=1
-        page=st.number_input('Página',min_value=1,max_value=maximum,key='catalog_page_input47')
+        page=st.selectbox('Página',range(1,maximum+1),key='catalog_page_input47') if maximum>1 else 1
         chunk=list(db.scalars(stmt.order_by(Player.full_name,Player.id)
               .offset((page-1)*count).limit(count)).all())
     st.caption(f'{total} jugadores encontrados · Página {page} de {maximum}')
@@ -1304,48 +1527,50 @@ def player_detail(user,player_id):
                   TeamRoster.player_id==player_id,TeamRoster.season_id==sid,
                   TeamRoster.active.is_(True))).unique().all()) if sid else []
         contributions=domain.list_contributions(db,actor_id=user['id'],season_id=sid,
-                  player_id=player_id) if sid else []
+                  player_id=player_id,limit=250) if sid else []
+        from repositories.rating_summary474 import observations, summary_for
+        totals=summary_for(observations(db,actor_id=user['id'],season_id=sid,
+                                        player_ids=[player_id]),player_id) if sid else None
         legacy=[]
         if can_direct(user) or can_admin(user) or can_report(user):
             stmt=select(PlayerEvaluation,Report).options(joinedload(Report.match)).join(Report,Report.id==PlayerEvaluation.report_id).where(
                     PlayerEvaluation.player_id==player_id,Report.status.in_(FINAL_REPORT_STATUSES))
             if not (can_direct(user) or can_admin(user)):
                 stmt=stmt.where(Report.reporter_id==user['id'])
-            legacy=list(db.execute(stmt.order_by(Report.submitted_at.desc()).limit(40)).all())
+            legacy=list(db.execute(stmt.order_by(Report.submitted_at.desc())).all())
         opinions_stmt=select(MatchOpinionPlayer,MatchOpinion).join(
             MatchOpinion,MatchOpinion.id==MatchOpinionPlayer.opinion_id).where(
             MatchOpinionPlayer.player_id==player_id)
         if not (can_direct(user) or can_admin(user)):
             opinions_stmt=opinions_stmt.where(MatchOpinion.user_id==user['id'])
-        neutral_notes=list(db.execute(opinions_stmt.limit(60)).all())
+        neutral_notes=list(db.execute(opinions_stmt).all())
         decision=db.scalar(select(PlayerSeasonDecision).where(PlayerSeasonDecision.player_id==player_id,
                 PlayerSeasonDecision.season_id==sid)) if sid and can_direct(user) else None
     page_header(p.display_name or p.full_name,'Ficha deportiva · evidencia identificada y muestra disponible')
     st.caption(' · '.join([p.primary_position or 'Posición desconocida',
                           ', '.join(r.team.name for r in rosters) if rosters else 'Equipo no confirmado']))
-    scores_by_observer={}
-    for ev,r in legacy:
-        if ev.general_rating is not None and ev.general_rating>0:
-            scores_by_observer[(r.match_id,r.reporter_id)] = float(ev.general_rating)
-    for ev,op in neutral_notes:
-        if ev.rating is not None and ev.rating>0:
-            scores_by_observer.setdefault((op.match_id,op.user_id),float(ev.rating))
-    for c in sorted(contributions,key=lambda r:(r.updated_at,r.id)):
-        val=_contribution_summary(c).get('nota')
-        if c.kind=='individual' and c.match_id and val is not None and float(val)>0:
-            scores_by_observer[(c.match_id,c.author_id)]=float(val)
-    ratings=list(scores_by_observer.values())
-    latest=len({mid for mid,uid in scores_by_observer})
+    totals=totals or {'matches':0,'opinions':0,'average':None,'trend':'—','history':[]}
     c1,c2,c3=st.columns(3)
-    c1.metric('Partidos evaluados',latest)
-    c2.metric('Nota (fuentes visibles)',f'{sum(ratings)/len(ratings):.1f}' if ratings else 'Sin muestra')
-    c3.metric('Opiniones con nota',len(ratings))
+    c1.metric('Partidos evaluados',totals['matches'])
+    c2.metric('Nota · fuentes visibles',
+        f"{totals['average']:.1f}" if totals['average'] is not None else 'Sin muestra')
+    c3.metric('Opiniones con nota',totals['opinions'])
+    if totals['history']:
+        st.caption('Evolución: '+totals['trend']+' · '+str(len(totals['history']))+' encuentros distintos.')
     if decision: st.caption(f'Decisión DD actual: {decision.status} · Prioridad {decision.priority}')
     st.markdown('### Evidencia disponible')
     if not contributions and not legacy and not neutral_notes:
         st.info('Todavía no existen valoraciones accesibles con tu perfil. No se interpreta como un 0.')
     for row in contributions:
-        with st.expander(f'{row.updated_at:%d/%m} · {row.title}'):_show_contribution(row,user['id'])
+        with st.expander(f'{row.updated_at:%d/%m} · {row.title}'):
+            try: details=json.loads(row.data_json or '{}')
+            except (TypeError,ValueError):details={}
+            if details.get('source')=='metrics474':
+                stats=details.get('estadisticas') or {}
+                st.write(f"Pases: **{stats.get('pases_correctos','—')}/{stats.get('pases_intentados','—')}** · "
+                         f"Duelos: **{stats.get('duelos_ganados','—')}/{stats.get('duelos_disputados','—')}**")
+                st.caption('Fuente: '+str(details.get('procedencia') or 'No especificada'))
+            else:_show_contribution(row,user['id'])
     for ev,rep in legacy:
         st.write(f'**{rep.match.match_date:%d/%m} · nota {ev.general_rating if ev.general_rating else "—"}**')
         if ev.short_note: st.caption(ev.short_note)
@@ -1364,63 +1589,27 @@ def squad(user):
     page_header('Plantilla · Noname','Rendimiento con muestra, evolución y fuentes. No se crean necesidades de fichaje automáticamente.')
     sid=_season(); own_id=_own()
     if not sid or not own_id: st.info('Configura temporada y equipo propio.');return
+    from repositories.rating_summary474 import observations,summary_for
     with session_scope() as db:
         roster=list(db.scalars(select(TeamRoster).options(joinedload(TeamRoster.player)).where(
              TeamRoster.team_id==own_id,TeamRoster.season_id==sid,TeamRoster.active.is_(True))
              .order_by(TeamRoster.shirt_number)).unique().all())
-        rows=list(db.execute(select(PlayerEvaluation,Report).options(joinedload(Report.match)).join(Report,
-             Report.id==PlayerEvaluation.report_id).where(
-             PlayerEvaluation.team_id==own_id,Report.status.in_(FINAL_REPORT_STATUSES),
-             Report.match.has(Match.season_id==sid))).all())
-        extras=list(db.scalars(select(Contribution).where(Contribution.season_id==sid,
-            Contribution.team_id==own_id,Contribution.status=='shared',
-            Contribution.kind=='individual',Contribution.player_id.is_not(None))).all())
-    # One final numeric evaluation per (player, match, author). New individual
-    # observations take precedence over legacy if the same source is present.
-    grouped=defaultdict(dict)
-    for ev,rep in rows:
-        if ev.general_rating is not None and ev.general_rating>0:
-            grouped[ev.player_id][(rep.match_id,rep.reporter_id)] = (
-                rep.match.match_date,float(ev.general_rating),'legacy')
-    with session_scope() as db:
-        neutral=list(db.execute(select(MatchOpinionPlayer,MatchOpinion,Match).join(
-            MatchOpinion,MatchOpinion.id==MatchOpinionPlayer.opinion_id).join(
-            Match,Match.id==MatchOpinion.match_id).where(
-            MatchOpinionPlayer.team_id==own_id,Match.season_id==sid)).all())
-    for ev,op,match in neutral:
-        if ev.rating is not None and ev.rating>0:
-            grouped[ev.player_id].setdefault((match.id,op.user_id),
-                (match.match_date,float(ev.rating),'legacy_opinion'))
-    for item in sorted(extras,key=lambda r:(r.updated_at,r.id)):
-        data=_contribution_summary(item)
-        if data.get('nota') is not None and float(data['nota'])>0 and item.match_id:
-            key=(item.match_id,item.author_id)
-            with session_scope() as db:
-                m=db.get(Match,item.match_id)
-            if m: grouped[item.player_id][key]=(m.match_date,float(data['nota']),'47')
+        grade_map=observations(db,actor_id=user['id'],season_id=sid,
+                               player_ids=[r.player_id for r in roster])
     records=[]
     for r in roster:
-        observations=grouped.get(r.player_id,{})
-        scores=[ob[1] for ob in observations.values()]
-        games=defaultdict(list)
-        for (mid,uid),(when,score,source) in observations.items():
-            games[mid].append((when,score))
-        # Trend uses distinct matches, never multiple colleagues on one match.
-        games_ordered=sorted(((min(t for t,v in vals),sum(v for t,v in vals)/len(vals))
-                 for vals in games.values()),key=lambda a:a[0])
-        trend='—'
-        if len(games_ordered)>=4:
-            half=len(games_ordered)//2
-            delta=(sum(v for _,v in games_ordered[-half:])/half -
-                   sum(v for _,v in games_ordered[:half])/half)
-            trend='Mejora' if delta>=0.8 else ('Baja' if delta<=-0.8 else 'Estable')
+        item=summary_for(grade_map,r.player_id)
         records.append({'Jugador':r.player.display_name or r.player.full_name,
             'Pos.':r.usual_position or r.player.primary_position or '—',
-            'PJ evaluados':len(games),'Opiniones':len(scores),
-            'Media':f'{sum(scores)/len(scores):.1f}' if scores else '—','Tendencia':trend})
+            'PJ evaluados':item['matches'],'Opiniones':item['opinions'],
+            'Media':f"{item['average']:.1f}" if item['average'] is not None else '—',
+            'Tendencia':item['trend']})
     if not records: st.info('No hay plantilla propia documentada. No se inventa un once.');return
     idx=_table_select(pd.DataFrame(records),key=f'squad47_{st.session_state.get("selection_epoch47",0)}')
     if idx is not None: _go('Jugadores',player=roster[idx].player_id)
+    with st.expander('Exportar resumen para DD',expanded=False):
+        st.download_button('Descargar tabla CSV',data=pd.DataFrame(records).to_csv(index=False,sep=';').encode('utf-8-sig'),
+                           file_name='noname_plantilla_evaluaciones.csv',mime='text/csv')
     st.caption('Tendencia solo con 4+ partidos distintos; es un indicio, no una recomendación automática. Las medias muestran fuente y muestra al entrar al jugador.')
     by_pos=defaultdict(int)
     for rec in records: by_pos[rec['Pos.']]+=1
@@ -1443,9 +1632,19 @@ def _admin_players471(user):
             .order_by(Player.full_name).limit(60)).all())
     if not found:
         st.info('No hay jugadores con ese nombre.');return
+    from ui.mobile472 import player_list_component
     names={p.id:f'{p.full_name} · ID {p.id}' for p in found}
-    pid=st.selectbox('Jugador',list(names),format_func=names.get,key='admin_player_pick471')
+    previous=st.session_state.get('admin_selected_player472')
+    pid=previous if previous in names else found[0].id
+    selection=player_list_component(key='admin_player_list472',
+        data={'items':[{'id':p.id,'name':p.full_name,
+                        'detail':p.primary_position or 'Posición sin especificar'} for p in found],
+              'selected':pid})
+    if selection.select is not None and selection.select in names and selection.select != pid:
+        st.session_state['admin_selected_player472']=int(selection.select)
+        st.rerun()
     item=next(p for p in found if p.id==pid)
+    st.markdown('**Ficha seleccionada**')
     with st.form(f'admin_player_edit471_{pid}'):
         new_name=st.text_input('Nombre correcto',value=item.full_name)
         position=st.text_input('Posición (opcional)',value=item.primary_position or '')
@@ -1498,7 +1697,20 @@ def _admin_players471(user):
 def admin(user):
     if not can_admin(user): st.error('Acceso reservado a Administración.');return
     page_header('Administración técnica','Mantenimiento ocasional. Horarios y valoraciones voluntarias no generan incidencias.')
-    section=st.radio('Sección',['Jugadores','Incidencias','Usuarios y permisos','Datos deportivos','Mantenimiento'],horizontal=True,key='admin_section47')
+    sid=_season();oid=_own()
+    if sid and oid:
+        fixtures=_fixtures(sid,own_id=oid,count=100)
+        last,_=current_fixtures(fixtures,local_today())
+        if last:
+            with session_scope() as db:
+                open_for_rating=publication.is_open(db,last.id)
+            if not open_for_rating:
+                with st.container(border=True):
+                    st.markdown(f'**Abrir valoraciones · {_fixture_label(last)}**')
+                    st.caption('Importa los once titulares de cada equipo y publica una sola vez.')
+                    if st.button('Preparar y publicar partido',type='primary',key=f'admin_start473_{last.id}',use_container_width=True):
+                        _go('Partidos',match=last.id)
+    section=st.selectbox('Sección',['Jugadores','Incidencias','Usuarios y permisos','Datos deportivos','Mantenimiento'],key='admin_section47')
     if section=='Jugadores':
         _admin_players471(user)
     elif section=='Incidencias':

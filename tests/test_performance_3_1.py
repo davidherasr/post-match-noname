@@ -22,7 +22,7 @@ def _seed(session):
 def test_formation_442_has_fixed_eleven_slots():
     slots = slots_for("4-4-2")
     assert len(slots) == 11
-    assert [slot.code for slot in slots[:5]] == ["POR", "LD", "DFC", "DFC", "LI"]
+    assert [slot.code for slot in slots[:5]] == ["POR", "LD", "DCD", "DCI", "LI"]
     assert [slot.code for slot in slots[-2:]] == ["DC", "DC"]
 
 

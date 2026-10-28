@@ -149,6 +149,27 @@ def apply_global_styles(primary: str = "#B91C1C", secondary: str = "#111827") ->
     )
 
 
+    # 4.7.2 Cuaderno Técnico: restrained, responsive product style.
+    # CSS does not implement permissions; repository checks remain authoritative.
+    st.markdown("""<style>
+    :root{--pm-primary:#a0443a;--pm-secondary:#243a32;--pm-muted:#697b71;--pm-border:#dfe5df;--pm-surface:#fff}
+    .stApp{background:#f5f6f2;color:#23322e;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+    section[data-testid='stSidebar']{background:#21372f;color:#eaf0ea;border-right:0}
+    section[data-testid='stSidebar'] button{border-radius:9px}
+    .block-container{max-width:1200px;padding-top:2.1rem;padding-bottom:4rem}
+    .pm-page-title{font-family:Georgia,'Times New Roman',serif;font-weight:600;letter-spacing:-.03em;color:#243a32;font-size:clamp(1.7rem,3.5vw,2.3rem)}
+    .pm-page-subtitle{color:#697b71;font-size:.94rem;line-height:1.5}
+    div[data-testid='stVerticalBlockBorderWrapper'] > div{border-radius:12px}
+    div[data-testid='stForm']{border:1px solid #dfe5df;background:white;border-radius:12px;box-shadow:0 4px 18px rgba(36,58,50,.035)}
+    .stButton>button,div[data-testid='stFormSubmitButton'] button{font-weight:640;border-radius:8px}
+    .stButton>button[kind='primary'],div[data-testid='stFormSubmitButton'] button[kind='primary']{background:#a0443a;color:#fff;border-color:#a0443a}
+    .stButton>button[kind='primary']:hover{background:#85372f;border-color:#85372f}
+    div[data-testid='stExpander']{border-color:#e5e9e4;border-radius:10px}
+    .stTextInput input,.stTextArea textarea{border-radius:8px}
+    @media(max-width:650px){.block-container{padding:1rem .82rem 5rem}.pm-page-title{font-size:1.75rem}
+      div[data-testid='stHorizontalBlock']{gap:.55rem}.stButton>button{min-height:44px}}
+    </style>""",unsafe_allow_html=True)
+
 def page_header(title: str, subtitle: str | None = None) -> None:
     st.markdown(f'<div class="pm-page-title">{escape(str(title))}</div>', unsafe_allow_html=True)
     if subtitle:

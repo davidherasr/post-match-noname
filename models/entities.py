@@ -228,6 +228,21 @@ class Match(Base):
     )
 
 
+class MatchRatingRelease473(Base):
+    """Deliberate publication gate for individual match evaluations.
+
+    No historical matches are implicitly available: a release row is created
+    only after both identified XIs have been checked by an authorised editor.
+    """
+    __tablename__ = "match_rating_releases_473"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), nullable=False, unique=True)
+    published_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    match: Mapped[Match] = relationship()
+
+
 class Participation(Base):
     __tablename__ = "participations"
 

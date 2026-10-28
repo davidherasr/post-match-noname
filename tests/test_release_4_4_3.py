@@ -56,7 +56,7 @@ def _seed(session):
 
 
 def test_release_navigation_and_direct_click_scores():
-    assert (ROOT / 'VERSION').read_text().strip() == '4.7.1'
+    assert (ROOT / 'VERSION').read_text().strip() == '4.7.4'
     assert 'Mis aportaciones' not in navigation_for({'id':1, 'roles':['reporter'], 'role':'reporter'})  # acceso secundario desde Inicio/Partidos
     assert 'Dirección Deportiva' in navigation_for({'id':1, 'roles':['director'], 'role':'director'})
     assert 'Mis aportaciones' not in navigation_for({'id':1, 'roles':['admin'], 'role':'admin'})

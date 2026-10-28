@@ -64,7 +64,7 @@ FOLLOW_UP_STATUSES = [
 ]
 
 POSITIONS = [
-    "POR", "LD", "DFC", "LI", "CAD", "CAI", "MCD", "MC", "MP", "ED", "EI", "SD", "DC", "Otro",
+    "POR", "LD", "LI", "DCD", "DCC", "DCI", "DFC", "CAD", "CAI", "MCD", "MCC", "MCI", "MC", "MD", "MI", "MP", "ED", "EI", "SD", "DC", "Otro",
 ]
 
 FORMATIONS = [

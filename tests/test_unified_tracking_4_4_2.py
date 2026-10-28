@@ -187,7 +187,7 @@ def test_additive_migration_from_0013_and_fresh_database(tmp_path):
         engine = create_engine(uri, future=True)
         try:
             with engine.connect() as connection:
-                assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0018_workspaces_4_7"
+                assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0019_rating_release_4_7_3"
             inspector = inspect(engine)
             assert "player_evaluation_id" in {col["name"] for col in inspector.get_columns("scout_observations")}
             assert "uq_scout_observation_evaluation_442" in {idx["name"] for idx in inspector.get_indexes("scout_observations")}

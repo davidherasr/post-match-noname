@@ -1,3 +1,35 @@
+## 4.7.4 (octubre de 2026) — Corrección integral y limpieza
+
+- Consultas protegidas y prohibición de valoraciones para perfiles de solo lectura.
+- Retirada auditable y reposición de notas individuales, una nota vigente por jugador/partido/autor.
+- Fusión de identidades vinculada también a las nuevas contribuciones y propuestas, con rechazo de conflictos.
+- Incorporación de suplentes confirmados después de publicar sin rehacer los XI.
+- Estadísticas de pases y duelos opcionales por partido y jugador; no afectan a la nota.
+- Medias y tendencias compartidas entre plantilla y fichas, sin topes de registros.
+- Historial de «Mis valoraciones» agrupado por encuentro y perfil ocasional con valoración móvil real.
+- Documentos históricos movidos a `docs/history/`; sin nueva migración.
+
+## 4.7.3 (28/10/2026) · Publicación controlada y valoración de 22 futbolistas
+
+- Importación atómica y validación de los dos XI titulares con dorsal, nombre y posición específica del partido.
+- Vista previa de ambos equipos y campo visual calculado desde códigos, no desde una formación inferida.
+- Administración y editores deportivos delegados pueden publicar una vez; Informadores no pueden valorar partidos no publicados.
+- Menú principal y pantalla móvil centrados en notas individuales; desaparece la nota colectiva del formulario visible.
+- Partidos históricos permanecen íntegros pero cerrados a nuevas valoraciones hasta publicación explícita.
+- Protección de alineaciones ya publicadas; suplentes convocados sin minutos no se computan como participantes.
+- Migración aditiva `0019_rating_release_4_7_3`, una tabla nueva. Sin mutaciones de datos históricos durante el upgrade.
+- Pruebas automatizadas y migración local con esquema antiguo; pendiente QA Streamlit Cloud con Supabase.
+
+## 4.7.2 (28/10/2026)
+
+- Rediseño móvil real mediante Streamlit Components v2.
+- Importación de alineaciones `dorsal;nombre` y TITULARES/SUPLENTES desde partido con revisión previa.
+- Valoración colectiva e individual nominal para Noname; rival anónimo por posiciones hasta conocer XI.
+- Favoritos explícitos privados para DD; guardado idempotente sin duplicaciones.
+- Editor de postpartido, bandeja, selección administrativa y estilo móvil propios.
+- Sin migración adicional: Alembic `0018_workspaces_4_7`.
+- 232 pruebas automatizadas; QA de componentes en Chromium móvil, pendiente QA de Streamlit Cloud.
+
 ## 4.7.1 · Simplificación de los recorridos diarios
 
 - Un acceso principal al último partido y su postpartido, sin filtros iniciales.

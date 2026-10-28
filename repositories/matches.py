@@ -127,6 +127,11 @@ def replace_participations(session: Session, match_id: int, team_id: int, rows: 
     match = session.get(Match, match_id)
     if not match:
         raise ValueError("Partido no encontrado.")
+    # Once published, changing the XI could orphan players' signed ratings.
+    # Identity corrections must use a dedicated audited reconciliation workflow.
+    from repositories.publication473 import is_open
+    if is_open(session,match_id):
+        raise ValueError('La alineación ya está publicada. Comunica una corrección; no se puede sustituir el XI con valoraciones activas.')
     locked = int(session.scalar(select(func.count(Report.id)).where(and_(Report.match_id == match_id, Report.status.in_(LOCKED_REPORT_STATUSES)))) or 0)
     if locked:
         raise ValueError("No se puede cambiar la alineación: existen informes entregados o aprobados.")
@@ -139,7 +144,7 @@ def replace_participations(session: Session, match_id: int, team_id: int, rows: 
         raise ValueError("Hay jugadores duplicados en la alineación.")
     for row in selected_rows:
         minute_in = int(row.get("minute_in", 0) or 0)
-        minute_out = int(row.get("minute_out", 90) or 90)
+        minute_out = int(90 if row.get("minute_out") is None else row.get("minute_out"))
         if minute_out < minute_in:
             raise ValueError("La salida no puede ser anterior a la entrada.")
     previous = get_participations(session, match_id, team_id)
@@ -155,7 +160,7 @@ def replace_participations(session: Session, match_id: int, team_id: int, rows: 
         item.starter = bool(row.get("starter"))
         item.position = row.get("position") or None
         item.minute_in = int(row.get("minute_in", 0) or 0)
-        item.minute_out = int(row.get("minute_out", 90) or 90)
+        item.minute_out = int(90 if row.get("minute_out") is None else row.get("minute_out"))
         item.captain = bool(row.get("captain"))
         item.order_index = int(row.get("order_index", index) if row.get("order_index") is not None else index)
         item.revision = (item.revision or 0) + 1

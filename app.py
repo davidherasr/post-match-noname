@@ -37,8 +37,8 @@ try:
     # Validate release coherence before init_db can run migrations. Deploying
     # only app.py without its repositories caused Cloud Attribute/ImportErrors.
     from pathlib import Path as _Path
-    if APP_VERSION != "4.7.1" or (_Path(__file__).parent / "VERSION").read_text(encoding="utf-8").strip() != "4.7.1":
-        raise ImportError("VERSION, app.py y core/config.py no pertenecen a 4.6; actualiza el repositorio completo.")
+    if APP_VERSION != "4.7.4" or (_Path(__file__).parent / "VERSION").read_text(encoding="utf-8").strip() != "4.7.4":
+        raise ImportError("VERSION, app.py y core/config.py no pertenecen a 4.7.4; actualiza el repositorio completo.")
     from repositories.users import PARTICIPATION_PROFILES as _participation_profiles
     from repositories.dd_attention import team_knowledge as _team_knowledge
     from repositories.staff_feed import load_activity as _load_activity
@@ -62,7 +62,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name · Área Técnica se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la versión 4.7.1; "
+        "Sustituye **todo el contenido del repositorio** por la versión 4.7.4; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -165,7 +165,7 @@ except DatabaseSchemaError as exc:
         st.code("\n".join(lines), language="text")
     st.info(
         "Comprueba que `RUN_MIGRATIONS = true` en los Secrets de Streamlit Cloud y haz "
-        "**Manage app → Reboot**. Esta release incorpora Alembic hasta `0018_workspaces_4_7`. Consulta `public.alembic_version` con las consultas de `docs/CONSULTA_SEGURA_SUPABASE_4511.sql`. No crees ni modifiques `supabase_migrations.schema_migrations` para resolver este problema."
+        "**Manage app → Reboot**. Esta release incorpora Alembic hasta `0019_rating_release_4_7_3`. Consulta `public.alembic_version` con las consultas de `docs/CONSULTA_SEGURA_SUPABASE_4511.sql`. No crees ni modifiques `supabase_migrations.schema_migrations` para resolver este problema."
     )
     st.stop()
 except Exception as exc:
@@ -201,13 +201,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.7.1"
+    expected_api = "4.7.4"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.7.1 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.7.4 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"

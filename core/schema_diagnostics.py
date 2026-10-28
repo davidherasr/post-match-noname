@@ -69,7 +69,7 @@ def describe_public_schema(actual: Mapping[str, set[str]]) -> dict:
     }
     # Backward-compatible signature against the 4.5.1.1 baseline only:
     # newly added 4.7 tables must not invalidate recognition of a real 0015 dump.
-    legacy_expected = {t: columns for t, columns in expected.items() if not t.endswith('_47')}
+    legacy_expected = {t: columns for t, columns in expected.items() if not t.endswith(('_47','_473'))}
     legacy_missing = {t: sorted(columns - actual.get(t, set())) for t, columns in legacy_expected.items()
                       if columns - actual.get(t, set())}
     legacy_missing_tables = sorted(set(legacy_expected)-set(actual))

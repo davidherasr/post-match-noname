@@ -16,7 +16,11 @@ def has_any(user: dict | None, *roles: str) -> bool:
 
 
 def can_report(user: dict | None) -> bool:
-    return has_any(user, ROLE_REPORTER)
+    return bool(user and user.get('participation_profile') != 'viewer' and has_any(user, ROLE_REPORTER))
+
+
+def can_rate_match(user: dict | None) -> bool:
+    return can_report(user)
 
 
 def can_direct(user: dict | None) -> bool:
@@ -55,7 +59,7 @@ def navigation_for(user: dict | None) -> list[str]:
     elif profile == 'admin':
         items = ['Administración', 'Partidos', 'Jugadores']
     elif profile == 'own':
-        items = ['Mis partidos', 'Mis solicitudes']
+        items = ['Mis partidos', 'Mis valoraciones', 'Mis solicitudes']
     elif profile == 'analyst':
         items = ['Inicio', 'Partidos', 'Jugadores', 'Mis solicitudes']
     else:

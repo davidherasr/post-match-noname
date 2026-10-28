@@ -262,6 +262,16 @@ def merge_players(session: Session, source_player_id: int, target_player_id: int
     target = session.get(Player, target_player_id)
     if not source or not target:
         raise ValueError("Jugador no encontrado.")
+    # Reject impossible unions up front: two appearances or reports cannot be
+    # silently collapsed into one, and losing one changes signed evidence.
+    if session.scalar(select(Participation.id).where(Participation.player_id==source.id,
+        Participation.match_id.in_(select(Participation.match_id).where(
+            Participation.player_id==target.id))).limit(1)) is not None:
+        raise ValueError('Ambos jugadores tienen participaciones en el mismo partido. Revisión manual necesaria.')
+    if session.scalar(select(PlayerEvaluation.id).where(PlayerEvaluation.player_id==source.id,
+        PlayerEvaluation.report_id.in_(select(PlayerEvaluation.report_id).where(
+            PlayerEvaluation.player_id==target.id))).limit(1)) is not None:
+        raise ValueError('Ambos jugadores tienen informes en común. Revisión manual necesaria.')
     # Resolve collisions conservatively before bulk updates.
     for roster in list(session.scalars(select(TeamRoster).where(TeamRoster.player_id == source.id)).all()):
         existing = session.scalar(select(TeamRoster).where(and_(TeamRoster.team_id == roster.team_id, TeamRoster.season_id == roster.season_id, TeamRoster.player_id == target.id)))
@@ -298,6 +308,51 @@ def merge_players(session: Session, source_player_id: int, target_player_id: int
             follow.player_id = target.id
     session.execute(update(Report).where(Report.standout_player_id == source.id).values(standout_player_id=target.id))
     session.execute(update(ConsolidatedPlayerEvaluation).where(ConsolidatedPlayerEvaluation.player_id == source.id).values(player_id=target.id))
+    from models.entities import SportingContribution47 as ModernRating
+    modern_source=list(session.scalars(select(ModernRating).where(
+        ModernRating.player_id==source.id)).all())
+    for row in modern_source:
+        if row.kind=='individual' and row.match_id is not None:
+            duplicate=session.scalar(select(ModernRating.id).where(
+                ModernRating.player_id==target.id,ModernRating.match_id==row.match_id,
+                ModernRating.author_id==row.author_id,ModernRating.kind=='individual',
+                ModernRating.status=='shared').limit(1))
+            if duplicate is not None and row.status=='shared':
+                raise ValueError('Hay dos valoraciones firmadas del mismo partido y autor. Revisa ambas antes de fusionar.')
+        try: payload=json.loads(row.data_json or '{}')
+        except (TypeError,ValueError):continue
+        if payload.get('source')=='mobile472' and payload.get('key')==f'p:{source.id}':
+            payload['key']=f'p:{target.id}'
+            row.data_json=json_dumps(payload)
+    # New collaboration modules and historical scouting sources reference Player
+    # directly. Repoint every FK to players.id, not just the 4.4 model. Reject
+    # potential unique-key collisions instead of overwriting someone's evidence.
+    session.flush()
+    from models.base import Base
+    from sqlalchemy import UniqueConstraint
+    processed={'team_rosters','participations','player_evaluations','follow_ups',
+               'reports','consolidated_player_evaluations'}
+    for table in Base.metadata.tables.values():
+        if table.name in processed or table.name=='players':
+            continue
+        linked=[col for col in table.columns if any(fk.column.table.name=='players' and
+                fk.column.name=='id' for fk in col.foreign_keys)]
+        for col in linked:
+            source_records=session.execute(select(table).where(col==source.id)).mappings().all()
+            if not source_records:
+                continue
+            for constraint in table.constraints:
+                if not isinstance(constraint,UniqueConstraint) or col.name not in constraint.columns:
+                    continue
+                key_cols=[x for x in constraint.columns if x.name!=col.name]
+                for row in source_records:
+                    cond=[col==target.id]+[x==row[x.name] for x in key_cols]
+                    if session.execute(select(table).where(*cond).limit(1)).first():
+                        raise ValueError(f'Fusión ambigua en {table.name}. Resuelve antes los registros duplicados.')
+            session.execute(update(table).where(col==source.id).values({col.name:target.id}))
+    session.expire_all()
+    source=session.get(Player,source_player_id)
+    target=session.get(Player,target_player_id)
     add_player_alias(session, target.id, source.full_name, actor_id)
     source.active = False
     source.merged_into_id = target.id

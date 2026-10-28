@@ -38,7 +38,7 @@ def _real_data_status(user: dict) -> None:
             a.caption(calendar_repo.schedule_label(match))
             if b.button("Abrir", type="primary", use_container_width=True, key=f"admin_ready_match39_{match.id}"):
                 st.session_state["workspace_match_id"] = match.id
-                request_navigation("Jornada")
+                request_navigation("Partidos")
                 st.rerun()
     for warning in data.get("warnings") or []:
         st.warning(warning)

@@ -31,7 +31,9 @@ def _actor(session, uid):
 
 
 def _reporter(session, uid):
-    _actor(session, uid)
+    person = _actor(session, uid)
+    if person.participation_profile == 'viewer':
+        raise PermissionError('El perfil Consulta es de solo lectura.')
     if not user_has_role(session, uid, 'reporter'):
         raise PermissionError('Esta aportación requiere rol Informador.')
 
@@ -80,7 +82,7 @@ def _event(session, *, season_id, actor_id, kind, title, target_type, target_id,
 def save_contribution(session: Session, *, actor_id: int, season_id: int,
                       kind: str, title: str, data: dict, match_id=None,
                       player_id=None, team_id=None, contribution_id=None,
-                      expected_revision=None, publish=False):
+                      expected_revision=None, publish=False, notify=True):
     _reporter(session, actor_id)
     if kind not in KINDS or not title.strip():
         raise ValueError('Tipo o título de observación inválidos.')
@@ -104,7 +106,7 @@ def save_contribution(session: Session, *, actor_id: int, season_id: int,
             raise PermissionError('Solo puedes modificar tus aportaciones.')
         if row.season_id != int(season_id) or row.kind != kind:
             raise ValueError('No puedes cambiar el tipo o temporada de una aportación existente.')
-        if row.status == 'shared' and kind != 'quick':
+        if row.status == 'shared' and kind != 'quick' and not (kind == 'individual' and data.get('source') == 'mobile472' and json.loads(row.data_json or '{}').get('source') == 'mobile472'):
             raise ValueError('Un informe compartido es inmutable. Crea una ampliación independiente.')
         if expected_revision is not None and row.revision != int(expected_revision):
             raise RuntimeError('Otra sesión ha modificado esta aportación. Recarga antes de guardar.')
@@ -127,11 +129,11 @@ def save_contribution(session: Session, *, actor_id: int, season_id: int,
         if not was_shared:
             row.status = 'draft'
     session.flush()
-    if publish and not was_shared:
+    if publish and not was_shared and notify:
         _event(session, season_id=row.season_id, actor_id=actor_id, kind='contribution',
                title='Nueva aportación deportiva', target_type='contribution', target_id=row.id,
                detail=row.title)
-    elif publish and was_shared:
+    elif publish and was_shared and notify:
         _event(session, season_id=row.season_id, actor_id=actor_id, kind='contribution_update',
                title='Valoración actualizada', target_type='contribution', target_id=row.id,
                detail=row.title)
