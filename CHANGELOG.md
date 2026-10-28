@@ -1,3 +1,14 @@
+## 4.5 · Participación parcial y lectura de Dirección Deportiva
+
+- Informe oficial abierto sin publicación, asignación ni hora de inicio confirmada; asignaciones de prioridad en lugar de autorizaciones; ventanas de jornada operativas.
+- Perfiles de participación independientes de los roles (`own_only`, `full`, `free`, `viewer`); Inicio/Jornada adaptados para reducir trabajo administrativo periódico.
+- Valoración de solo equipo propio, solo rival, ambos, cualquier conjunto de jugadores, top 3 sin nota y «Me llamó la atención»; validación de contribución sustantiva, sin convertir vacíos en ceros.
+- Señales de futbolistas aún no identificados por partido, equipo, posición y dorsal; reconciliación auditada sin crear jugadores ficticios ni duplicar evidencia.
+- Posición habitual por equipo/temporada, formación anterior sugerida sin confirmar y campograma por posiciones.
+- Dirección Deportiva con feed explicable de señales, muestra/autores, discrepancias, decisiones manuales y preguntas sobre hechos concretos; respuestas recientes enlazadas. Ficha de equipo y Player 360 enriquecidos.
+- PDF completo y resumen incluyen destacados sin nota y señales anónimas; snapshots históricos versionados conservan el mismo evento.
+- Nueva migración **aditiva** `0016_partial_reading_4_5` sobre esquema 0015. **183 tests locales** más `compileall`, consistencia, migraciones SQLite desde cero y desde base histórica; pendiente validar PostgreSQL, Cloud y UX móvil real.
+
 ## 4.4.4.1 · Hotfix de dependencias de arranque
 
 - Corrige el arranque opaco `ModuleNotFoundError` durante migraciones/validación.
