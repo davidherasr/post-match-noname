@@ -1,3 +1,13 @@
+## 4.7.1 · Simplificación de los recorridos diarios
+
+- Un acceso principal al último partido y su postpartido, sin filtros iniciales.
+- Informadores ocasionales: nota con pastillas, guardado inmediato y campograma opcional.
+- Analistas: postpartido corto, borrador o envío directo a DD; partidos anteriores en segundo plano.
+- Dirección Deportiva: propuestas y solicitudes prioritarias; herramientas adicionales en Más.
+- Administrador: buscar, corregir nombre/posición y eliminar jugador con vista previa de dependencias y confirmaciones.
+- Favoritos explícitos enviados a Aarón, sin convertir automáticamente notas en objetivos de mercado.
+- Sin cambios de esquema sobre la revisión 0018. Consulta `REDISENO_SIMPLE_4_7_1.md`.
+
 ## 4.7 — Rediseño por perfiles y colaboración verificable (28/10/2026)
 
 - Menús diferenciados DD, analista, Informador propio, Consulta y Administración, manteniendo permisos efectivos y roles acumulables.

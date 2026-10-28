@@ -21,7 +21,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.7"
+REPORTS_PAGE_API_VERSION = "4.7.1"
 
 
 

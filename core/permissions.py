@@ -55,9 +55,9 @@ def navigation_for(user: dict | None) -> list[str]:
     elif profile == 'admin':
         items = ['Administración', 'Partidos', 'Jugadores']
     elif profile == 'own':
-        items = ['Mis partidos', 'Mis valoraciones', 'Mis solicitudes']
+        items = ['Mis partidos', 'Mis solicitudes']
     elif profile == 'analyst':
-        items = ['Inicio', 'Partidos', 'Jugadores', 'Mis aportaciones', 'Mis solicitudes']
+        items = ['Inicio', 'Partidos', 'Jugadores', 'Mis solicitudes']
     else:
         items = ['Inicio', 'Partidos', 'Jugadores']
     if can_admin(user) and 'Administración' not in items:

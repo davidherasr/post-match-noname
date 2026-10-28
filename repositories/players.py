@@ -214,6 +214,8 @@ def update_player(session: Session, player_id: int, actor_id: int, **values) -> 
     player = session.get(Player, player_id)
     if not player:
         raise ValueError("Jugador no encontrado.")
+    if "full_name" in values and not normalize_name(str(values["full_name"] or "")):
+        raise ValueError("El nombre del jugador no puede estar vacío.")
     before = _snapshot(player, ["full_name", "display_name", "date_of_birth", "nationality", "preferred_foot", "primary_position", "active"])
     for key in ["full_name", "display_name", "date_of_birth", "nationality", "preferred_foot", "primary_position", "active", "photo_b64", "photo_mime"]:
         if key in values:

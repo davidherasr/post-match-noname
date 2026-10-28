@@ -1,3 +1,7 @@
+# No Name · Área Técnica 4.7.1
+
+La entrada cotidiana es sencilla: último partido → valorar/postpartido; Administración → buscar, corregir o eliminar jugador; Dirección Deportiva → propuestas y solicitudes. Las herramientas avanzadas se consultan solo cuando se necesitan. Lee `REDISENO_SIMPLE_4_7_1.md` antes del despliegue.
+
 # No Name · Área Técnica 4.7
 
 **Rediseño de producto basado en once rondas funcionales.** Inicio y menús por perfil; colaboración y solicitudes con privacidad de repositorio; aportaciones rápidas y completas sin exigir XI; borradores privados y publicación explícita; mesa DD con propuestas separadas de seguimiento; fichas y tablas compactas; delegación de datos deportivos y mantenimiento ligero.

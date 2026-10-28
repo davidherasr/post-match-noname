@@ -26,7 +26,7 @@ def test_navigation_differentiates_aaron_david_coloto_and_admin():
     admin={'id':4,'role':'admin','roles':['admin']}
     assert navigation_for(dd)[:2]==['Inicio','Dirección Deportiva']
     assert 'Mis solicitudes' in navigation_for(analyst)
-    assert navigation_for(own)==['Mis partidos','Mis valoraciones','Mis solicitudes']
+    assert navigation_for(own)==['Mis partidos','Mis solicitudes']
     assert navigation_for(admin)[0]=='Administración'
     assert 'Dirección Deportiva' not in navigation_for(own)
     assert 'Administración' not in navigation_for(dd)

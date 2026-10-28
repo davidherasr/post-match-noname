@@ -29,6 +29,20 @@ from ui.styles import page_header
 
 
 def _go(dest, *, match=None, player=None, team=None, contribution=None):
+    from core.auth import current_user
+    from core.permissions import navigation_for
+    menu=navigation_for(current_user())
+    if dest == 'Mis aportaciones' and dest not in menu:
+        st.session_state.pop('workspace_match_id',None)
+        st.session_state['partidos_mis_aportaciones471']=True
+        dest='Partidos'
+    elif dest == 'Mis valoraciones' and dest not in menu:
+        st.session_state.pop('workspace_match_id',None)
+        st.session_state['partidos_mis_valoraciones471']=True
+        dest='Mis partidos'
+    elif dest in {'Partidos','Mis partidos'} and match is not None:
+        st.session_state.pop('partidos_mis_aportaciones471',None)
+        st.session_state.pop('partidos_mis_valoraciones471',None)
     if match is not None:
         st.session_state['workspace_match_id'] = int(match)
     if player is not None:
@@ -61,7 +75,8 @@ def _fixture_label(m):
 
 
 def _date_label(m):
-    return f'{m.match_date:%d/%m/%Y}' + (f' · {m.kickoff_at:%H:%M}' if m.kickoff_at else ' · Hora no confirmada')
+    # Unknown kick-off is not an error: leave it out rather than displaying noise.
+    return f'{m.match_date:%d/%m/%Y}' + (f' · {m.kickoff_at:%H:%M}' if m.kickoff_at else '')
 
 
 def _fixtures(season_id, own_id=None, count=100):
@@ -89,15 +104,18 @@ def _events(user, season_id, *, intro=False):
     if not season_id:
         return
     st.markdown('### Novedades' if intro else '### Bandeja de actividad')
-    filter_value = st.radio('Mostrar', ['Nuevos','Todos','Guardados'], horizontal=True,
-                            key='inbox_filter_47', label_visibility='collapsed')
+    filter_value='Nuevos'
     group='Todo'
-    if can_direct(user):
-        group=st.selectbox('Tipo de novedad',['Todo','Informes y observaciones','Propuestas de jugadores',
-                     'Respuestas y solicitudes'],key='inbox_group47')
+    if not intro:
+        filter_value=st.radio('Mostrar',['Nuevos','Todos','Guardados'],horizontal=True,
+                              key='inbox_filter_47',label_visibility='collapsed')
+        if can_direct(user):
+            group=st.selectbox('Tipo de novedad',['Todo','Informes y observaciones','Propuestas de jugadores',
+                                 'Respuestas y solicitudes'],key='inbox_group47')
     with session_scope() as db:
         events = domain.visible_events(db, actor_id=user['id'], season_id=season_id,
-                        filter_by={'Nuevos':'new','Todos':'all','Guardados':'saved'}[filter_value], limit=150)
+                        filter_by={'Nuevos':'new','Todos':'all','Guardados':'saved'}[filter_value],
+                        limit=8 if intro else 100)
     classes={'Informes y observaciones':{'contribution','contribution_update','legacy_report','legacy_opinion'},
         'Propuestas de jugadores':{'proposal','proposal_decision'},
         'Respuestas y solicitudes':{'request','response','request_response','request_closed'}}
@@ -159,48 +177,59 @@ def _fixture_shortcut(m, label):
 def home(user):
     if working_profile(user) == 'own':
         return own_matches(user)
-    page_header('Inicio','Consulta primero. Aporta o decide cuando lo necesites.')
-    season = _season()
+    page_header('Inicio','Tu trabajo de esta semana, sin filtros ni tareas artificiales.')
+    season=_season()
     if not season:
-        st.info('No hay temporada activa. Administración debe configurarla.'); return
+        st.info('No hay temporada activa.');return
     if can_direct(user):
-        _events(user, season, intro=True)
-        st.markdown('### Asuntos para Dirección Deportiva')
         with session_scope() as db:
-            proposals = [p for p in domain.list_proposals(db,user['id'],season) if p.state == 'new']
-            requests = [r for r in domain.list_requests(db,actor_id=user['id'],season_id=season)
-                        if r.sender_id == user['id'] and r.state == 'pending']
-        st.caption(f'{len(proposals)} propuestas sin revisar · {len(requests)} solicitudes pendientes de respuesta')
-        if st.button('Abrir mesa DD',key='home_dd47'):
-            _go('Dirección Deportiva')
-    else:
-        _events(user, season, intro=True)
-        if can_report(user):
-            with session_scope() as db:
-                mine = [r for r in domain.list_requests(db,actor_id=user['id'],season_id=season,include_closed=False)
-                        if r.recipient_id == user['id']]
-            if mine:
-                st.markdown(f'**Tienes {len(mine)} solicitud(es) de Aarón pendientes de respuesta.**')
-                if st.button('Consultar mis solicitudes',key='home_my_requests47'):
-                    _go('Mis solicitudes')
-    if can_report(user) and not can_direct(user):
+            proposals=[p for p in domain.list_proposals(db,user['id'],season) if p.state=='new']
+            requests=[r for r in domain.list_requests(db,actor_id=user['id'],season_id=season)
+                      if r.sender_id==user['id'] and r.state=='pending']
+        with st.container(border=True):
+            st.subheader('Revisar lo que ha enviado el staff')
+            st.write(f'{len(proposals)} jugadores propuestos · {len(requests)} solicitudes esperando respuesta')
+            if st.button('Abrir Dirección Deportiva',type='primary',key='home_dd471',use_container_width=True):
+                _go('Dirección Deportiva')
+    elif can_report(user):
+        own_id=_own()
+        fixtures=_fixtures(season,own_id=own_id,count=100) if own_id else []
+        last=next((m for m in fixtures if m.match_date<=local_today()),None)
+        next_game=next((m for m in reversed(fixtures) if m.match_date>local_today()),None)
+        if last:
+            state,prior=_latest_match_state(user,last,full=True)
+            rival=last.away_team if last.home_team_id==own_id else last.home_team
+            with st.container(border=True):
+                st.caption('ESTA SEMANA · POSTPARTIDO')
+                st.subheader(f'Noname – {rival.name}' if last.home_team_id==own_id else f'{rival.name} – Noname')
+                st.caption(f'{last.match_date:%d/%m/%Y} · {last.round_name}')
+                label={'new':f'Elaborar postpartido de {rival.name}',
+                       'draft':f'Continuar postpartido de {rival.name}',
+                       'shared':f'Consultar postpartido de {rival.name}'}[state]
+                if st.button(label,type='primary',key='home_postmatch471',use_container_width=True):
+                    if state!='shared':st.session_state['contrib_mode47']='complete'
+                    else:st.session_state.pop('contrib_mode47',None)
+                    if prior and prior.status=='draft':st.session_state['edit_contribution_47']=prior.id
+                    _go('Partidos',match=last.id)
+        if next_game:
+            rival=next_game.away_team if next_game.home_team_id==own_id else next_game.home_team
+            with st.container(border=True):
+                st.caption('PRÓXIMO RIVAL')
+                st.markdown(f'**{rival.name}** · {next_game.match_date:%d/%m}')
+                if st.button('Consultar rival y partidos',key='home_rival471',use_container_width=True):
+                    _go('Partidos',match=next_game.id)
         with session_scope() as db:
-            shared=[p for p in domain.list_proposals(db,user['id'],season)
-                if p.author_id!=user['id']]
-        if shared:
-            with st.expander(f'Propuestas compartidas conmigo ({len(shared)})',expanded=False):
-                for prop in shared[:20]:
-                    st.markdown(f'**{prop.subject}** · {prop.state}')
-                    st.caption(prop.reason)
-    own_id = _own()
-    fixtures = _fixtures(season, own_id=own_id, count=80) if own_id else []
-    today=local_today()
-    past = next((m for m in fixtures if m.match_date <= today), None)
-    future = next((m for m in reversed(fixtures) if m.match_date >= today), None)
-    st.markdown('### Partidos de referencia')
-    if past: _fixture_shortcut(past,'Último partido')
-    if future and (not past or future.id != past.id): _fixture_shortcut(future,'Próximo partido')
-    if not past and not future: st.caption('No hay partidos del equipo propio registrados.')
+            requests=[r for r in domain.list_requests(db,actor_id=user['id'],season_id=season,include_closed=False)
+                      if r.recipient_id==user['id']]
+        if requests:
+            if st.button(f'Responder solicitudes de Aarón ({len(requests)})',key='home_req471',use_container_width=True):
+                _go('Mis solicitudes')
+    with st.expander('Novedades del staff',expanded=bool(can_direct(user))):
+        _events(user,season,intro=True)
+    if can_report(user):
+        with st.expander('Mis observaciones y trabajos anteriores',expanded=False):
+            if st.button('Abrir mis aportaciones',key='home_work471',use_container_width=True):
+                _go('Mis aportaciones')
 
 
 def _table_select(df: pd.DataFrame, *, key: str):
@@ -213,47 +242,130 @@ def _table_select(df: pd.DataFrame, *, key: str):
     return int(rows[0]) if rows else None
 
 
+def _latest_match_state(user, match, *, full=False):
+    """Do not mistake a quick team score for a finished analyst postmatch."""
+    with session_scope() as db:
+        kind='complete' if full else 'quick'
+        rows=list(db.scalars(select(Contribution).where(
+            Contribution.author_id==user['id'],Contribution.match_id==match.id,
+            Contribution.kind==kind).order_by(Contribution.id.desc())).all())
+        legacy=db.scalar(select(func.count(Report.id)).where(
+            Report.reporter_id==user['id'],Report.match_id==match.id,
+            Report.status.in_(FINAL_REPORT_STATUSES))) or 0
+    if legacy or any(row.status=='shared' for row in rows):
+        return 'shared',next((row for row in rows if row.status=='shared'),None)
+    draft=next((row for row in rows if row.status=='draft'),None)
+    return ('draft',draft) if draft else ('new',None)
+
+
+def _review_previous_match(m, *, target, mode, label):
+    if st.button(label,key=f'review471_{target}_{m.id}',use_container_width=True):
+        st.session_state['contrib_mode47']=mode
+        st.session_state.pop('edit_contribution_47',None)
+        _go(target,match=m.id)
+
+
 def matches(user, own_only=False):
+    """The last own match is the task. Everything else is secondary."""
     team_selection = st.session_state.get('workspace_team_id')
     if team_selection and not own_only:
         return team_detail(user, int(team_selection))
     selected = st.session_state.get('workspace_match_id')
     if selected:
         return match_detail(user,int(selected),return_to='Mis partidos' if own_only else 'Partidos')
+    if own_only and st.session_state.get('partidos_mis_valoraciones471'):
+        if st.button('← Volver a mis partidos',key='back_to_own471'):
+            st.session_state.pop('partidos_mis_valoraciones471',None)
+            st.rerun()
+        return my_contributions(user,ratings_only=True)
+    if not own_only and st.session_state.get('partidos_mis_aportaciones471'):
+        if st.button('← Volver a partidos',key='back_to_matches471'):
+            st.session_state.pop('partidos_mis_aportaciones471',None)
+            st.rerun()
+        return my_contributions(user)
     page_header('Mis partidos' if own_only else 'Partidos',
-                'Recientes, próximos y observados. No necesitas un horario confirmado para consultar o valorar.')
+                'Empieza por el último encuentro. Los anteriores siguen disponibles cuando los necesites.')
     season=_season()
     if not season:
         st.info('No hay temporada activa.'); return
     own_id=_own()
-    if own_only and own_id:
-        own_fixtures=_fixtures(season,own_id=own_id,count=80)
-        last=next((m for m in own_fixtures if m.match_date<=local_today()),None)
-        if last:
-            st.markdown(f'**Último partido:** {_fixture_label(last)} · {last.match_date:%d/%m}')
-            if st.button('Valorar último partido',type='primary',key='quick_last47'):
-                st.session_state['contrib_mode47']='quick'
-                _go('Mis partidos',match=last.id)
-    scope = 'Noname' if own_only else st.radio('Ámbito',['Todos','Noname','Otros equipos'],horizontal=True,key='match_scope47')
-    fixtures=_fixtures(season, own_id=own_id if scope=='Noname' else None, count=500)
-    if scope=='Otros equipos' and own_id:
-        fixtures=[m for m in fixtures if own_id not in (m.home_team_id,m.away_team_id)]
-    mode=st.radio('Periodo',['Recientes','Próximos','Todos'],horizontal=True,key='match_period47')
     today=local_today()
-    if mode=='Recientes': fixtures=[m for m in fixtures if m.match_date<=today]
-    if mode=='Próximos': fixtures=[m for m in fixtures if m.match_date>=today]
-    if mode=='Recientes': fixtures=fixtures[:40]
-    if mode=='Próximos': fixtures=list(reversed(fixtures))[:40]
-    if not fixtures:
-        st.info('No hay partidos para este filtro. Prueba con «Todos».'); return
-    rows=[{'Fecha':_date_label(m),'Encuentro':_fixture_label(m),'Jornada':m.round_name}
-          for m in fixtures]
-    idx=_table_select(pd.DataFrame(rows),key=f'match_list47_{st.session_state.get("selection_epoch47",0)}_{scope}_{mode}')
-    if idx is not None:
-        _go('Mis partidos' if own_only else 'Partidos',match=fixtures[idx].id)
-    if can_direct(user) or (can_report(user) and working_profile(user) in {'analyst','director'}):
-        with st.expander('Falta un partido oficial · Comunicar o registrar',expanded=False):
-            _missing_match_form(user,season)
+    mine=_fixtures(season,own_id=own_id,count=180) if own_id else []
+    last=next((m for m in mine if m.match_date<=today),None)
+    future=next((m for m in reversed(mine) if m.match_date>today),None)
+    dest='Mis partidos' if own_only else 'Partidos'
+    if last:
+        state, previous=_latest_match_state(user,last,full=not own_only) if can_report(user) else ('new',None)
+        other=last.away_team if last.home_team_id==own_id else last.home_team
+        with st.container(border=True):
+            st.caption('ÚLTIMO PARTIDO · '+str(last.round_name or 'Jornada'))
+            st.subheader(_fixture_label(last))
+            st.caption(f'{last.match_date:%d/%m/%Y}')
+            if can_report(user):
+                if own_only:
+                    text='Editar mi valoración' if state=='shared' else 'Valorar a Noname'
+                    work='quick'
+                else:
+                    text={'new':f'Elaborar postpartido de {other.name}',
+                          'draft':f'Continuar postpartido de {other.name}',
+                          'shared':f'Consultar postpartido de {other.name}'}[state]
+                    work='complete' if state!='shared' else None
+                if st.button(text,key='main_last_match471',type='primary',use_container_width=True):
+                    if work: st.session_state['contrib_mode47']=work
+                    else: st.session_state.pop('contrib_mode47',None)
+                    if previous and previous.status=='draft':
+                        st.session_state['edit_contribution_47']=previous.id
+                    _go(dest,match=last.id)
+            else:
+                if st.button('Consultar partido',key='main_last_match471',type='primary',use_container_width=True):
+                    _go(dest,match=last.id)
+    elif own_id:
+        st.info('Aún no hay partidos disputados de Noname en la temporada activa.')
+    if future:
+        with st.container(border=True):
+            st.caption('PRÓXIMO PARTIDO')
+            st.markdown('**'+_fixture_label(future)+'**')
+            st.caption(f'{future.match_date:%d/%m/%Y}')
+            if not own_only and st.button('Ver próximo partido',key='next471',use_container_width=True):
+                _go('Partidos',match=future.id)
+    if own_only:
+        with st.expander('Elegir otro partido o consultar mis valoraciones',expanded=False):
+            prior=[m for m in mine if last is None or m.id!=last.id]
+            for match in prior[:25]:
+                if st.button(f'{match.match_date:%d/%m} · {_fixture_label(match)}',
+                             key=f'own_prior471_{match.id}',use_container_width=True):
+                    _go('Mis partidos',match=match.id)
+            st.divider()
+            if st.button('Ver todas mis valoraciones',key='own_history471',use_container_width=True):
+                _go('Mis valoraciones')
+        with session_scope() as db:
+            requests=[r for r in domain.list_requests(db,actor_id=user['id'],season_id=season,include_closed=False)
+                      if r.recipient_id==user['id']]
+        if requests:
+            with st.expander(f'Solicitudes recibidas ({len(requests)})',expanded=False):
+                if st.button('Responder a una solicitud',key='own_req471'):
+                    _go('Mis solicitudes')
+        return
+    # Analysts and DD may consult the complete schedule, but it is not their
+    # starting point. No scope/date filters before the primary action.
+    with st.expander('Buscar partidos anteriores o de otros equipos',expanded=False):
+        scope=st.radio('Equipos',['Noname','Todos los equipos','Otros equipos'],horizontal=True,key='match_scope471')
+        fixtures=_fixtures(season, own_id=own_id if scope=='Noname' else None,count=500)
+        if scope=='Otros equipos' and own_id:
+            fixtures=[m for m in fixtures if own_id not in (m.home_team_id,m.away_team_id)]
+        query=st.text_input('Buscar por equipo o jornada',key='match_search471',placeholder='Escribe el equipo...')
+        if query.strip():
+            needle=query.strip().casefold()
+            fixtures=[m for m in fixtures if needle in _fixture_label(m).casefold() or needle in (m.round_name or '').casefold()]
+        if fixtures:
+            rows=[{'Fecha':f'{m.match_date:%d/%m/%Y}','Partido':_fixture_label(m)} for m in fixtures[:100]]
+            idx=_table_select(pd.DataFrame(rows),key=f'match_lite471_{scope}_{query}_{st.session_state.get("selection_epoch47",0)}')
+            if idx is not None: _go('Partidos',match=fixtures[idx].id)
+        else:
+            st.caption('No se han encontrado encuentros.')
+        if can_direct(user) or (can_report(user) and working_profile(user) in {'analyst','director'}):
+            if st.checkbox('Quiero registrar un partido oficial que falta',key='show_new_match471'):
+                _missing_match_form(user,season)
 
 
 def _missing_match_form(user, season):
@@ -341,10 +453,11 @@ def _quick(user, match, own_id):
     with st.form(f'quickform47_{match.id}'):
         ratings=list(range(1,11))
         previous_note=defaults.get('nota_noname')
-        rating=st.radio('¿Qué nota le das a Noname?',ratings,
-             index=ratings.index(int(previous_note)) if previous_note in ratings else None,
-             horizontal=True, key=f'quickrating47_{match.id}')
-        comment=st.text_area('Comentario opcional',value=str(defaults.get('comentario') or ''),height=80)
+        rating=st.pills('¿Qué nota le das a Noname?',ratings,selection_mode='single',
+             default=int(previous_note) if previous_note in ratings else None,
+             key=f'quickrating47_{match.id}')
+        with st.expander('Añadir comentario (opcional)',expanded=False):
+            comment=st.text_area('¿Qué destacarías?',value=str(defaults.get('comentario') or ''),height=80)
         submitted=st.form_submit_button('Guardar valoración',type='primary',use_container_width=True)
     if submitted:
         try:
@@ -363,70 +476,94 @@ def _quick(user, match, own_id):
             dorsal=st.number_input('Dorsal si lo conoces (0 = desconocido)',min_value=0,max_value=99,value=0)
             score=st.selectbox('Nota individual opcional',['Sin nota']+list(range(1,11)))
             category=st.selectbox('Impresión (opcional)',['Sin categoría','Destacado','Menos destacado'])
-            text=st.text_area('Qué observaste',placeholder='Puedes identificarlo solo por su posición.')
+            text=st.text_area('Qué observaste (opcional)',placeholder='Puedes identificarlo solo por su posición.')
+            favorite=st.checkbox('⭐ Destacar a Aarón',value=False)
             keep=st.form_submit_button('Guardar observación del jugador',disabled=not bool(zone))
         if keep:
             with session_scope() as db:
-                domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
+                row=domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
                    match_id=match.id,team_id=own_id,kind='individual',title=f'Observación {zone} · {match.round_name}',
                    data={'posicion_observada':zone,'dorsal_observado':dorsal or None,
                          'nota':None if score=='Sin nota' else score,'comentario':text,
                          'impresion':None if category=='Sin categoría' else category},publish=True)
-            st.success('Observación guardada sin inventar el nombre ni el XI.');st.rerun()
+                if favorite:
+                    domain.propose_player(db,actor_id=user['id'],season_id=match.season_id,
+                       subject=f'Noname · {zone} · dorsal {dorsal or "por identificar"}',
+                       reason=text.strip() or 'Jugador señalado como destacado para Dirección Deportiva',
+                       match_id=match.id,contribution_id=row.id)
+            st.success('Observación guardada'+(' y enviada a Aarón.' if favorite else '.'));st.rerun()
 
 
 def _complete(user, match):
-    if not can_report(user): return
+    if not can_report(user):return
     sid=st.session_state.get('edit_contribution_47')
     prior=None
-    if sid:
-        with session_scope() as db:
+    with session_scope() as db:
+        if sid:
             try: prior=domain.get_contribution(db,sid,user['id'])
-            except PermissionError: pass
-        if prior and (prior.kind!='complete' or prior.match_id!=match.id or prior.status!='draft'):
-            prior=None
+            except PermissionError:pass
+        if not prior:
+            prior=db.scalar(select(Contribution).where(
+                Contribution.author_id==user['id'],Contribution.match_id==match.id,
+                Contribution.kind=='complete',Contribution.status=='draft')
+                .order_by(Contribution.id.desc()).limit(1))
+    if prior and (prior.kind!='complete' or prior.match_id!=match.id or prior.status!='draft'):
+        prior=None
     old=_contribution_summary(prior) if prior else {}
-    st.markdown('### Análisis completo')
-    st.caption('Guarda avances sin publicarlos. Puedes registrar solo el equipo propio, el rival o ambos. Sin XI confirmado.')
-    with st.form(f'complete47_{match.id}_{prior.id if prior else 0}'):
-        scope=st.radio('Qué has observado',['Noname','Rival','Ambos'],horizontal=True,
-              index=['Noname','Rival','Ambos'].index(('Noname' if old.get('ambito')=='No Name' else old.get('ambito','Ambos'))))
-        own=st.text_area('Lectura de Noname (opcional)',value=old.get('equipo_propio',''),height=105)
-        rival=st.text_area('Lectura del rival (opcional)',value=old.get('rival',''),height=105)
-        strengths=st.text_area('Fortalezas observadas',value=old.get('fortalezas',''),height=85)
-        weak=st.text_area('Debilidades observadas',value=old.get('debilidades',''),height=85)
-        observation=st.text_area('Conclusión / contexto',value=old.get('conclusion',''),height=95)
-        stats=st.text_area('Datos propios de rendimiento, pases u otras mediciones (opcional)',
-              value=old.get('datos_individuales',''),height=85)
-        video=st.text_input('Referencia a cortes o vídeo de apoyo (opcional)',
-              value=old.get('cortes_video',''))
-        save=st.form_submit_button('Guardar borrador privado',use_container_width=True)
-    if save:
+    own_id=_own()
+    own_match=own_id in (match.home_team_id,match.away_team_id)
+    rival=match.away_team if match.home_team_id==own_id else match.home_team
+    st.markdown('### '+(f'Postpartido de {rival.name}' if own_match else 'Informe del partido'))
+    st.caption('Escribe solo lo que has visto. Puedes dejar campos vacíos. No necesitas XI ni horario.')
+    with st.form(f'complete471_{match.id}_{prior.id if prior else 0}'):
+        first=st.text_area('Noname · ¿Qué destacarías?' if own_match else f'{match.home_team.name} · Observaciones',
+            value=old.get('equipo_propio',''),height=110)
+        second=st.text_area(f'{rival.name} · ¿Qué destacarías?' if own_match else f'{match.away_team.name} · Observaciones',
+            value=old.get('rival',''),height=110)
+        with st.expander('Añadir notas o datos (opcional)',expanded=False):
+            options=['Sin nota']+list(range(1,11))
+            def _rating_index(k):
+                val=old.get(k)
+                return options.index(val) if val in options else 0
+            own_rating=st.selectbox('Nota de Noname' if own_match else 'Nota del local',options,index=_rating_index('nota_propio'))
+            rival_rating=st.selectbox('Nota del rival' if own_match else 'Nota del visitante',options,index=_rating_index('nota_rival'))
+            context=st.text_area('Conclusión o contexto',value=old.get('conclusion',''),height=80)
+            strengths=st.text_area('Fortalezas (opcional)',value=old.get('fortalezas',''),height=70)
+            weaknesses=st.text_area('Debilidades (opcional)',value=old.get('debilidades',''),height=70)
+            stats=st.text_area('Estadísticas o pases (opcional)',value=old.get('datos_individuales',''),height=70)
+            video=st.text_input('Referencia a cortes de vídeo (opcional)',value=old.get('cortes_video',''))
+        a,b=st.columns(2)
+        save=a.form_submit_button('Guardar borrador',use_container_width=True)
+        publish=b.form_submit_button('Enviar a Aarón',type='primary',use_container_width=True)
+    if save or publish:
         try:
-            data={'ambito':scope,'equipo_propio':own if scope in ('Noname','Ambos') else '',
-                  'rival':rival if scope in ('Rival','Ambos') else '',
-                  'fortalezas':strengths,'debilidades':weak,'conclusion':observation,
+            if not any(str(value).strip() for value in [first,second,context,strengths,weaknesses,stats,video]) and own_rating=='Sin nota' and rival_rating=='Sin nota':
+                raise ValueError('Introduce alguna valoración o comentario antes de guardar.')
+            data={'ambito':'Ambos' if own_match else 'Partido neutral','equipo_propio':first,'rival':second,
+                  'nota_propio':None if own_rating=='Sin nota' else own_rating,
+                  'nota_rival':None if rival_rating=='Sin nota' else rival_rating,
+                  'conclusion':context,'fortalezas':strengths,'debilidades':weaknesses,
                   'datos_individuales':stats,'cortes_video':video}
             with session_scope() as db:
                 row=domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
-                    match_id=match.id,kind='complete',title=f'Análisis · {_fixture_label(match)}',
+                    match_id=match.id,kind='complete',title=f'Postpartido · {_fixture_label(match)}',
                     data=data,contribution_id=prior.id if prior else None,
-                    expected_revision=prior.revision if prior else None)
-            st.session_state['edit_contribution_47']=row.id
-            st.success('Borrador privado guardado. Puedes seguir otro día.');st.rerun()
-        except Exception as exc: st.error(str(exc))
-    if prior:
-        st.info('Borrador recuperado. Dirección Deportiva no puede leerlo hasta que lo compartas.')
-        if st.button('Compartir análisis con Dirección Deportiva',key=f'publish_complete47_{prior.id}',type='primary'):
-            with session_scope() as db:
-                domain.publish_draft(db,actor_id=user['id'],contribution_id=prior.id)
-            st.session_state.pop('edit_contribution_47',None)
-            st.success('Análisis compartido con Dirección Deportiva.');st.rerun()
+                    expected_revision=prior.revision if prior else None,publish=publish)
+            if publish:
+                st.session_state.pop('edit_contribution_47',None)
+                st.session_state.pop('contrib_mode47',None)
+                st.success('Postpartido enviado a Aarón.')
+            else:
+                st.session_state['edit_contribution_47']=row.id
+                st.success('Borrador privado guardado. Solo tú puedes verlo hasta enviarlo.')
+            st.rerun()
+        except Exception as exc:st.error(str(exc))
 
 
 def _individual(user, match):
     if not can_report(user): return
-    st.markdown('### Añadir observación individual')
+    st.markdown('### Valorar un jugador')
+    st.caption('Nombre o dorsal, nota y comentario. Si te interesa especialmente, envíaselo a Aarón.')
     with session_scope() as db:
         roster=list(db.scalars(select(TeamRoster).options(joinedload(TeamRoster.player)).where(
             TeamRoster.season_id==match.season_id,
@@ -440,20 +577,26 @@ def _individual(user, match):
         shirt=st.number_input('Dorsal, si lo conoces',min_value=0,max_value=99,value=0)
         rate=st.selectbox('Nota',['Sin nota']+list(range(1,11)))
         note=st.text_area('Descripción de lo observado',height=110)
-        publish=st.checkbox('Compartir con DD al guardar',value=False)
-        save=st.form_submit_button('Guardar observación')
+        favorite=st.checkbox('⭐ Destacar este jugador para Aarón',value=False)
+        publish=st.checkbox('Compartir esta valoración con Aarón',value=False)
+        save=st.form_submit_button('Guardar observación',type='primary',use_container_width=True)
     if save:
         try:
             if player_id and not any(r.player_id==player_id and r.team_id==team for r in roster):
                 raise ValueError('El jugador seleccionado no figura en la plantilla de ese equipo.')
             with session_scope() as db:
-                domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
+                subject=names.get(player_id) if player_id else f'Dorsal {shirt or "?"} · {zone} · {match.home_team.name if team==match.home_team_id else match.away_team.name}'
+                row=domain.save_contribution(db,actor_id=user['id'],season_id=match.season_id,
                    match_id=match.id,team_id=team,player_id=player_id,
-                   kind='individual',title=f'Jugador {names.get(player_id) if player_id else (zone if zone!="Sin determinar" else "por identificar")}',
+                   kind='individual',title=f'Jugador {subject}',
                    data={'posicion_observada':None if zone=='Sin determinar' else zone,
                          'dorsal_observado':shirt or None,'nota':None if rate=='Sin nota' else rate,
-                         'comentario':note,'identidad_confirmada':bool(player_id)},publish=publish)
-            st.success('Observación individual guardada.');st.rerun()
+                         'comentario':note,'identidad_confirmada':bool(player_id)},publish=publish or favorite)
+                if favorite:
+                    domain.propose_player(db,actor_id=user['id'],season_id=match.season_id,
+                        subject=subject,reason=note.strip() or 'Jugador señalado para revisar por Dirección Deportiva',
+                        player_id=player_id,match_id=match.id,contribution_id=row.id)
+            st.success('Observación guardada'+(' y jugador destacado para Aarón.' if favorite else '.'));st.rerun()
         except Exception as exc: st.error(str(exc))
 
 
@@ -527,6 +670,12 @@ def match_detail(user, match_id, return_to='Partidos'):
             st.session_state.pop('workspace_match_id',None);_go('Partidos',team=match.away_team_id)
     own_id=_own()
     own_match=own_id in (match.home_team_id,match.away_team_id)
+    if working_profile(user)=='own':
+        if own_match:
+            _quick(user,match,own_id)
+        else:
+            st.caption('Este encuentro no corresponde a Noname.')
+        return
     if can_direct(user):
         with st.expander('Marcar interés y solicitar observación',expanded=False):
             with st.form(f'priority47_{match.id}'):
@@ -550,13 +699,15 @@ def match_detail(user, match_id, return_to='Partidos'):
                     if st.button('Señalar un jugador del rival',key=f'own_rival47_{match.id}'):
                         _open_work(user,match,'individual')
             else:
-                a,b,c=st.columns(3)
-                if own_match and a.button('Valorar a Noname',key=f'mvquick47_{match.id}',type='primary',use_container_width=True):
-                    _open_work(user,match,'quick')
-                if b.button('Análisis completo',key=f'mvcomplete47_{match.id}',use_container_width=True):
+                action=('Elaborar postpartido' if own_match else 'Anotar este partido')
+                if st.button(action,key=f'mvcomplete471_{match.id}',type='primary',use_container_width=True):
                     _open_work(user,match,'complete')
-                if c.button('Jugador observado',key=f'mvindiv47_{match.id}',use_container_width=True):
-                    _open_work(user,match,'individual')
+                with st.expander('Otras aportaciones (opcional)',expanded=False):
+                    if own_match and st.button('Solo puntuar a Noname',key=f'mvquick471_{match.id}',use_container_width=True):
+                        _open_work(user,match,'quick')
+                    if st.button('Valorar un jugador o enviarlo como favorito a Aarón',
+                                 key=f'mvindiv471_{match.id}',use_container_width=True):
+                        _open_work(user,match,'individual')
         st.markdown('### Información del encuentro')
         a,b=st.columns(2)
         with a:
@@ -933,8 +1084,16 @@ def director(user):
     if not sid:
         st.info('Sin temporada activa.');return
     pending=st.session_state.pop('pending_dd_section47',None)
-    if pending: st.session_state['dd_section47']=pending
-    section=st.radio('Mesa',['Propuestas','Aportaciones compartidas','Solicitudes','Modelo y necesidades','Actividad'],horizontal=True,key='dd_section47')
+    if pending:
+        if pending in {'Propuestas','Solicitudes'}:
+            st.session_state['dd_section47']=pending
+        else:
+            st.session_state['dd_section47']='Más'
+            st.session_state['dd_extra471']=pending
+    section=st.radio('Qué quieres revisar',['Propuestas','Solicitudes','Más'],horizontal=True,key='dd_section47')
+    if section=='Más':
+        section=st.selectbox('Otras herramientas',['Aportaciones compartidas','Modelo y necesidades','Actividad'],
+                             key='dd_extra471')
     if section=='Actividad':
         _events(user,sid);return
     if section=='Solicitudes':
@@ -1095,15 +1254,15 @@ def players(user):
     page_header('Jugadores','Catálogo con búsqueda y filtros. Sin medias privadas expuestas.')
     sid=_season()
     search=st.text_input('Buscar jugador por nombre',key='catalog_search47')
-    col1,col2=st.columns([3,2])
     with session_scope() as db:
         teams=list(db.scalars(select(Team).where(Team.active.is_(True),
                      Team.is_test.is_(False)).order_by(Team.name)).all())
     team_names={t.id:t.name for t in teams}
-    team_filter=col1.selectbox('Equipo',[None]+list(team_names),
-       format_func=lambda tid:team_names.get(tid,'Todos los equipos'),key='catalog_team47')
-    pos_filter=col2.selectbox('Posición',['Todas','POR','LD','LI','DCI','DCD','DFC','MC','MCO','ED','EI','DC'],
-       key='catalog_pos47')
+    with st.expander('Filtrar por equipo o posición',expanded=False):
+        team_filter=st.selectbox('Equipo',[None]+list(team_names),
+          format_func=lambda tid:team_names.get(tid,'Todos los equipos'),key='catalog_team47')
+        pos_filter=st.selectbox('Posición',['Todas','POR','LD','LI','DCI','DCD','DFC','MC','MCO','ED','EI','DC'],
+          key='catalog_pos47')
     with session_scope() as db:
         stmt=select(Player).where(Player.active.is_(True),Player.merged_into_id.is_(None))
         if search.strip(): stmt=stmt.where(or_(Player.full_name.ilike(f'%{search.strip()}%'),
@@ -1114,7 +1273,7 @@ def players(user):
                 TeamRoster.team_id==team_filter,TeamRoster.season_id==sid,
                 TeamRoster.active.is_(True))))
         total=db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-        count=st.selectbox('Filas por página',[25,50],key='catalog_page_size47')
+        count=25
         maximum=max(1,(total+count-1)//count)
         # A changing filter resets the page without mutating a live widget key.
         signature=f'{search}|{team_filter}|{pos_filter}|{count}'
@@ -1268,11 +1427,81 @@ def squad(user):
     st.caption('Cobertura registrada: '+', '.join(f'{pos} {n}' for pos,n in sorted(by_pos.items())))
 
 
+def _admin_players471(user):
+    """Clear entry point to correct or remove a player without hidden submenus."""
+    from repositories import permanent_deletion as purge
+    st.markdown('### Corregir o eliminar un jugador')
+    search=st.text_input('Buscar por nombre',key='admin_player_search471',
+                         placeholder='Escribe un nombre o apellido...')
+    if not search.strip():
+        st.caption('Escribe parte del nombre para encontrar la ficha que quieres corregir o borrar.')
+        return
+    with session_scope() as db:
+        found=list(db.scalars(select(Player).where(
+            or_(Player.full_name.ilike(f'%{search.strip()}%'),
+                Player.display_name.ilike(f'%{search.strip()}%')))
+            .order_by(Player.full_name).limit(60)).all())
+    if not found:
+        st.info('No hay jugadores con ese nombre.');return
+    names={p.id:f'{p.full_name} · ID {p.id}' for p in found}
+    pid=st.selectbox('Jugador',list(names),format_func=names.get,key='admin_player_pick471')
+    item=next(p for p in found if p.id==pid)
+    with st.form(f'admin_player_edit471_{pid}'):
+        new_name=st.text_input('Nombre correcto',value=item.full_name)
+        position=st.text_input('Posición (opcional)',value=item.primary_position or '')
+        update=st.form_submit_button('Guardar corrección',type='primary',use_container_width=True)
+    if update:
+        try:
+            if not new_name.strip():raise ValueError('El nombre no puede quedar vacío.')
+            with session_scope() as db:
+                players_repo.update_player(db,pid,user['id'],full_name=new_name.strip(),
+                      primary_position=position.strip() or None)
+            st.success('Jugador corregido. Su histórico se conserva.')
+            st.rerun()
+        except Exception as exc:st.error(f'No se ha actualizado el jugador: {exc}')
+    with st.expander('Eliminar este jugador definitivamente',expanded=False):
+        st.warning('Si tiene informes o valoraciones, también pueden verse afectados. Comprueba el impacto antes de borrar.')
+        if st.button('Ver qué se eliminaría',key=f'admin_player_preview471_{pid}',use_container_width=True):
+            try:
+                with session_scope() as db:
+                    plan=purge.build_plan(db,{'jugadores':[pid]},user['id'])
+                st.session_state['admin_player_delete_preview471']={'id':pid,'fingerprint':plan.fingerprint}
+            except Exception as exc:st.error(str(exc))
+        preview=st.session_state.get('admin_player_delete_preview471')
+        if preview and preview['id']==pid:
+            try:
+                with session_scope() as db:
+                    plan=purge.build_plan(db,{'jugadores':[pid]},user['id'])
+                if plan.fingerprint!=preview['fingerprint']:
+                    st.warning('Los datos han cambiado. Revisa de nuevo el impacto.')
+                    st.session_state.pop('admin_player_delete_preview471',None)
+                    return
+                st.write(f'**Se eliminarían {plan.total} registros de la base de datos.**')
+                for name,ids in plan.rows.items():
+                    st.caption(f'{purge.LABELS.get(name,name)}: {len(ids)}')
+                for (table,col),ids in plan.detach.items():
+                    st.caption(f'Se desvincularían {len(ids)} referencias de {table}.{col}')
+                if plan.external_files:
+                    st.error('Hay archivos externos vinculados: el borrado de la base no elimina sus bytes. Revisa las rutas y la copia.')
+                backup=st.checkbox('Tengo una copia de seguridad recuperable',key=f'admin_player_backup471_{pid}')
+                word=st.text_input('Para eliminar, escribe BORRAR',key=f'admin_player_confirm471_{pid}')
+                if st.button('Eliminar jugador definitivamente',key=f'admin_player_delete471_{pid}',
+                             disabled=not (backup and word=='BORRAR'),use_container_width=True):
+                    with session_scope() as db:
+                        purge.execute_plan(db,{'jugadores':[pid]},user['id'],plan.fingerprint)
+                    st.session_state.pop('admin_player_delete_preview471',None)
+                    st.success('Jugador eliminado. Se ha registrado la operación en auditoría.')
+                    st.rerun()
+            except Exception as exc:st.error(f'No se ha borrado nada: {exc}')
+
+
 def admin(user):
     if not can_admin(user): st.error('Acceso reservado a Administración.');return
     page_header('Administración técnica','Mantenimiento ocasional. Horarios y valoraciones voluntarias no generan incidencias.')
-    section=st.radio('Sección',['Incidencias','Usuarios y permisos','Datos deportivos','Mantenimiento'],horizontal=True,key='admin_section47')
-    if section=='Incidencias':
+    section=st.radio('Sección',['Jugadores','Incidencias','Usuarios y permisos','Datos deportivos','Mantenimiento'],horizontal=True,key='admin_section47')
+    if section=='Jugadores':
+        _admin_players471(user)
+    elif section=='Incidencias':
         with session_scope() as db:
             items=domain.list_corrections(db,actor_id=user['id'],only_open=True)
         if not items: st.success('Sin incidencias comunicadas pendientes de revisión.')
