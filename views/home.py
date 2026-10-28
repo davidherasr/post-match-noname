@@ -58,6 +58,70 @@ def _task_action(task: dict) -> str:
     }.get(task.get("kind"), "Abrir partido")
 
 
+def _render_reporter_home(user: dict, data: dict) -> None:
+    """Reporter-first workspace: one current fixture, recent fixtures in one row."""
+    from core.clock import local_today
+    from views.reports import _available_work_matches
+    from repositories import observation_requests as requests_repo
+    from core.permissions import can_report
+    if not can_report(user):
+        return
+    matches, assignments, reports = _available_work_matches(user)
+    report_map = {rep.match_id: rep for rep in reports}
+    assignment_map = {row.match_id: row for row in assignments}
+    if not matches:
+        st.info('No hay partidos oficiales de No Name en el calendario.')
+        return
+    today = local_today()
+    def distance(match):
+        start = match.window_start.date() if hasattr(match.window_start, 'date') else match.window_start or match.match_date
+        end = match.window_end.date() if hasattr(match.window_end, 'date') else match.window_end or start
+        if start <= today <= end:
+            return 0
+        return min(abs((today - start).days), abs((today - end).days))
+    current = min(matches, key=lambda m: (distance(m), abs((m.match_date - today).days)))
+    report = report_map.get(current.id)
+    st.markdown('### Partido de esta semana' if distance(current) <= 7 else '### Próximo partido disponible')
+    with st.container(border=True):
+        st.markdown(f'**{current.home_team.name} – {current.away_team.name}**')
+        st.caption(f'{current.round_name} · {calendar_repo.schedule_label(current)}')
+        st.caption('Tu lectura: ' + ('Entregada' if report and report.status not in {'draft', 'returned'}
+                                     else 'Borrador' if report else 'Sin realizar'))
+        if report and report.status not in {'draft', 'returned'}:
+            if st.button('Consultar mi informe', type='secondary', use_container_width=True,
+                         key=f'reporter_view_451_{current.id}'):
+                st.session_state['archive_open_report_33'] = report.id
+                request_navigation('Informes')
+                st.rerun()
+        elif st.button('Hacer mi lectura', type='primary', use_container_width=True,
+                       key=f'reporter_do_451_{current.id}'):
+            _open_report(current.id)
+    previous = [m for m in matches if m.id != current.id and m.match_date <= today]
+    previous.sort(key=lambda m: m.match_date, reverse=True)
+    st.markdown('### Partidos anteriores')
+    if previous:
+        chosen = st.selectbox('Seleccionar partido', [m.id for m in previous[:25]],
+            format_func=lambda mid: next(
+                f'{m.match_date:%d/%m} · {m.home_team.name} – {m.away_team.name} · '
+                + ('Entregado' if mid in report_map and report_map[mid].status not in {'draft','returned'}
+                   else 'Sin informe') for m in previous if m.id == mid),
+            key='reporter_previous_451')
+        c1, c2 = st.columns([1, 4])
+        if c1.button('Abrir partido', key='reporter_previous_open_451'):
+            _open_match(chosen)
+        if c2.button('Valorar este encuentro', key='reporter_previous_rate_451',
+                     disabled=bool(chosen in report_map and report_map[chosen].status not in {'draft','returned'})):
+            _open_report(chosen)
+    else:
+        st.caption('Todavía no hay encuentros anteriores en el calendario.')
+    if data.get('active_season'):
+        from views.observation_requests import reporter_inbox
+        reporter_inbox(user, data['active_season'].id, compact=True)
+    if st.button('Buscar un jugador', key='reporter_player_search_451'):
+        request_navigation('Jugadores')
+        st.rerun()
+
+
 def render(user: dict) -> None:
     page_header("Inicio", "Tu trabajo y la actividad deportiva del club.")
     declined = st.session_state.pop("assignment_declined_notice", None)
@@ -81,6 +145,9 @@ def render(user: dict) -> None:
                 season_id=data["active_season"].id, reporter_id=user["id"], active_only=True)
 
     profile = user.get("participation_profile", "full")
+    if roles == {'reporter'}:
+        _render_reporter_home(user, data)
+        return
     if "reporter" in roles and data.get("own_team") and data.get("active_season"):
         today_own = data.get("last_match") or data.get("next_match")
         if today_own:

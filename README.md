@@ -1,10 +1,10 @@
-# No Name · Área Técnica 4.5
+# No Name · Área Técnica 4.5.1.1
 
-Versión de la aplicación: **4.5**, creada sobre el ZIP completo **4.4.4.1**. Head de Alembic: `0016_partial_reading_4_5`.
+**Código completo**, continuación exclusiva de 4.5.1. Alembic head `0017_lowlight_compact_4_5_1`, sin nueva migración. Se conservan la lista compacta de jugadores, informes básicos/completos y las mejoras anteriores.
 
-El partido oficial puede recibir aportaciones sin preparación previa, asignación ni horario exacto. Inicio se adapta a perfiles de participación independientes de roles. Un Informador puede valorar un único equipo, uno o varios jugadores, destacar a alguien sin nota o registrar al futbolista sin identificar. Dirección Deportiva recibe señales explicadas con muestra y procedencia, y las decisiones de interés y prioridad siguen siendo explícitas.
+**Verificación a partir del esquema remitido:** 43 tablas/461 columnas, coincidentes con la estructura 4.4.4.1; el contrato 4.5.1.1 exige 44/488. Faltan únicamente los campos y la tabla de `0016` y `0017`. La revisión Alembic real **no se conoce** porque el listado no incluye filas. El error `supabase_migrations.schema_migrations` no es lo mismo que `public.alembic_version` y no se repara creando tablas manualmente.
 
-Antes de actualizar, leer **`UPGRADE_4_5.md`**. Consultar **`VALIDACION_4_5.md`** para distinguir los 183 tests locales superados de las comprobaciones pendientes en PostgreSQL/Streamlit Cloud, y **`CONTEXTO_MAESTRO_NoName_Area_Tecnica_4.5.md`** para continuar el desarrollo. La aceptación de producción está pendiente de las pruebas con entorno real.
+**Antes de desplegar:** leer [`UPGRADE_4_5_1_1.md`](UPGRADE_4_5_1_1.md) y [`VALIDACION_4_5_1_1.md`](VALIDACION_4_5_1_1.md). Crear backup restaurable, consultar el head real con `docs/CONSULTA_SEGURA_SUPABASE_4511.sql`, desplegar todos los archivos y verificar los flujos en Cloud. Validación automatizada local: 193 tests. **PostgreSQL real y Streamlit Cloud, no comprobados aquí.**
 
 ## Historial: 4.4.4.1
 

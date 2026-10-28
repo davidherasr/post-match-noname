@@ -1,3 +1,19 @@
+# 4.5.1.1 · Compatibilidad con esquema remitido (28/10/2026)
+
+- Auditoría offline del esquema público de Supabase: 43 tablas/461 columnas frente al contrato 44/488 de 4.5.1.1; faltan exactamente las ampliaciones 0016 y 0017.
+- Banco de pruebas generado a partir del ZIP original 4.4.4.1, con preservación de evidencia tras upgrade hasta 0017.
+- Comprobación de esquema en modo solo lectura y consultas seguras para `public.alembic_version`.
+- Evita falsos positivos: una migración fallida ya no se disimula con `create_all()` de demo.
+- Mensajes de diagnóstico coherentes con el head 0017 y advertencias frente a intervenciones manuales en `supabase_migrations`.
+- Sin nuevos cambios de esquema, sin limpieza de registros y sin validación de producción implícita.
+
+# 4.5.1 · 28/10/2026
+
+- Corrección de contratos de importación Administración y aislamiento de errores auxiliares de ficha de equipo.
+- Catálogo de jugadores compacto, filtros y orden SQL, 25/50 por página.
+- Informador simplificado, tres modalidades, destacados y menos destacados independientes.
+- Migración aditiva 0017, fichas Player 360 y PDF adaptados.
+
 ## 4.5 · Participación parcial y lectura de Dirección Deportiva
 
 - Informe oficial abierto sin publicación, asignación ni hora de inicio confirmada; asignaciones de prioridad en lugar de autorizaciones; ventanas de jornada operativas.

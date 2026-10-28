@@ -21,7 +21,7 @@ from services.storage_service import load_document_bytes, save_pdf
 from ui.helpers import match_label
 from ui.styles import page_header
 
-REPORTS_PAGE_API_VERSION = "4.5"
+REPORTS_PAGE_API_VERSION = "4.5.1.1"
 
 
 
@@ -482,135 +482,190 @@ def _render_postmatch_tracking_step(report_id: int, user: dict) -> None:
         _finish_tracking_step(report_id)
 
 
-def _render_quick_report(report, participations: list, evaluations: dict, user: dict) -> None:
-    """4.5: a real observation can concern just one side, one player or one signal."""
-    from core.formations import slots_for
+def _ranked_players(evaluations: dict, parts: list, field: str) -> list[int]:
+    """Load a ranked list without deriving ranks from numeric evaluations."""
+    return [part.player_id for part in sorted(parts,
+        key=lambda p: getattr(evaluations.get(p.player_id), field, None) or 99)
+        if getattr(evaluations.get(part.player_id), field, None) is not None]
+
+
+def _render_quick_report(report, participations: list, evaluations: dict,
+                         user: dict, *, include_rival: bool = False) -> None:
+    """The basic form is a complete contribution even without an XI or a rival."""
+    from sqlalchemy import select
+    from models.entities import PlayerEvaluation
     from repositories import unidentified_players as unknown_repo
 
-    st.markdown("### Lectura básica")
-    st.caption("Puedes entregar solo No Name, solo el rival, un destacado o un apunte. Sin evaluar no equivale a cero.")
-    from views.observation_requests import match_prompts
-    match_prompts(user, report.match_id)
-    profile = user.get("participation_profile", "full")
-    own_label, rival_label = "No Name", report.rival_team.name
-    all_sides = ["No Name", "Rival", "Jugadores y destacados"]
-    default_sides = ["No Name"] if profile == "own_only" else ["No Name", "Rival"]
-    sides = st.multiselect("¿Qué quieres valorar hoy?", all_sides, default=default_sides,
-        key=f"report_sides_45_{report.id}", help="Cualquier apartado es opcional; puedes cambiar la selección.")
-    parts = {int(p.player_id): p for p in participations}
-    all_ids = sorted(parts, key=lambda pid: (
-        0 if parts[pid].team_id == report.own_team_id else 1,
-        not parts[pid].starter, parts[pid].shirt_number or 999, pid))
-    selected_ids = []
-    if "Jugadores y destacados" in sides:
-        selected_ids = st.multiselect("Futbolistas identificados (opcional)", all_ids,
-            default=[pid for pid in all_ids if pid in evaluations and (evaluations[pid].general_rating or evaluations[pid].highlight_rank or evaluations[pid].attention_signal or evaluations[pid].short_note)],
-            format_func=lambda pid: f"{parts[pid].player.display_name or parts[pid].player.full_name} · {'No Name' if parts[pid].team_id == report.own_team_id else rival_label}",
-            key=f"report_players_45_{report.id}")
-    anonymous_team = None
-    anonymous_position = None
-    if "Jugadores y destacados" in sides:
-        with st.expander("Jugador sin identificar · campograma por posiciones", expanded=False):
-            st.caption("Selecciona una posición sin inventar una identidad. La formación anterior es una referencia, no un XI confirmado.")
-            unknown_side = st.selectbox("Equipo de la señal", ["No Name", "Rival"],
-                 index=0 if profile == "own_only" else 1, key=f"unknown_side_45_{report.id}")
-            anonymous_team = report.own_team_id if unknown_side == "No Name" else report.rival_team_id
-            is_home = anonymous_team == report.match.home_team_id
-            known_current = report.match.home_formation_known if is_home else report.match.away_formation_known
-            current_shape = report.match.home_formation if is_home else report.match.away_formation
-            with session_scope() as session:
-                suggested, source_match_id = unknown_repo.latest_formation_suggestion(session,
-                    team_id=anonymous_team, season_id=report.match.season_id,
-                    current_match_id=report.match_id)
-            formation = current_shape or suggested or "4-2-3-1"
-            if suggested and not current_shape:
-                st.caption(f"Última estructura observada: {suggested} (partido {source_match_id}). Solo como sugerencia.")
-            slots = slots_for(formation)
-            if not (report.match.home_formation_known if is_home else report.match.away_formation_known):
-                st.caption(f"Estructura {formation} orientativa; pendiente de confirmar.")
+    st.caption('Solo registra lo que hayas observado. Los campos vacíos no son notas cero ni tareas pendientes.')
+    sides = [(report.own_team_id, 'No Name')]
+    if include_rival:
+        sides.append((report.rival_team_id, report.rival_team.name))
+    groups = {team_id: [p for p in participations if p.team_id == team_id]
+              for team_id, _ in sides}
+    for parts in groups.values():
+        parts.sort(key=lambda p: (not p.starter, p.shirt_number or 999, p.player_id))
+    with st.form(f"basic_451_{report.id}_{int(include_rival)}"):
+        team_payload = []
+        for team_id, title in sides:
+            st.markdown(f'**{title}**')
+            selected = groups[team_id]
+            ids = [p.player_id for p in selected]
+            people = {p.player_id: p.player.display_name or p.player.full_name for p in selected}
+            options, default = rating_choices(report.own_team_rating if team_id == report.own_team_id
+                                              else report.rival_team_rating)
+            score = rating_from_choice(st.pills(f'Nota colectiva · {title}', options, default=default,
+                                                selection_mode='single'))
+            if ids:
+                a, b = st.columns(2)
+                best = a.multiselect('Tres que más destacaron (opcional)', ids,
+                    default=_ranked_players(evaluations, selected, 'highlight_rank')[:3],
+                    max_selections=3, format_func=lambda pid: people[pid],
+                    key=f'best_451_{report.id}_{team_id}')
+                lower = b.multiselect('Tres que menos destacaron (opcional)', ids,
+                    default=_ranked_players(evaluations, selected, 'lowlight_rank')[:3],
+                    max_selections=3, format_func=lambda pid: people[pid],
+                    key=f'low_451_{report.id}_{team_id}')
+            else:
+                best, lower = [], []
+                st.caption('Sin alineación nominal: puedes valorar al equipo o anotar una señal por posición.')
+            if set(best) & set(lower):
+                st.caption('Un jugador no puede estar a la vez en las dos selecciones.')
+            note = st.text_input(f'Comentario del equipo · {title} (opcional)',
+                  value=(report.own_team_note if team_id == report.own_team_id else report.opponent_overview) or '',
+                  key=f'team_note_451_{report.id}_{team_id}')
+            team_payload.append((team_id, score, best, lower, note.strip()))
+        with st.expander('Añadir una valoración individual', expanded=False):
+            st.caption('Opcional: una nota, un apunte o «me llamó la atención» sin calificación.')
+            all_parts = [p for p in participations if p.team_id in {t for t, _ in sides}]
+            part_map = {p.player_id: p for p in all_parts}
+            extra_ids = st.multiselect('Jugadores concretos', list(part_map),
+                format_func=lambda pid: f"{part_map[pid].player.display_name or part_map[pid].player.full_name}",
+                key=f'extras_451_{report.id}_{int(include_rival)}')
+            extras = []
+            for pid in extra_ids:
+                part = part_map[pid]
+                old = evaluations.get(pid)
+                options, default = rating_choices(old.general_rating if old else None)
+                grade = rating_from_choice(st.pills(f'Nota · {part.player.full_name}', options,
+                                                    default=default, selection_mode='single'))
+                signal = st.checkbox(f'Me llamó la atención · {part.player.full_name}',
+                     value=bool(old and old.attention_signal), key=f'extra_signal_451_{report.id}_{pid}')
+                text = st.text_input(f'Apunte · {part.player.full_name}',
+                    value=old.short_note or '' if old else '', key=f'extra_note_451_{report.id}_{pid}')
+                extras.append((part, grade, signal, text.strip()))
+        save = st.form_submit_button('Guardar borrador')
+        deliver = st.form_submit_button('Entregar lectura', type='primary')
+    if not save and not deliver:
+        with st.expander('Jugador sin identificar · por posición', expanded=False):
             from ui.position_picker import pick_position
-            anonymous_position = pick_position(formation, key=f"unknown_slot_45_{report.id}")
-    with st.form(f"quick_report_45_{report.id}"):
-        own_score, rival_score = report.own_team_rating, report.rival_team_rating
-        if "No Name" in sides:
-            vals, default = rating_choices(report.own_team_rating)
-            own_score = rating_from_choice(st.pills("Nota de No Name", vals, default=default, selection_mode="single"))
-        if "Rival" in sides:
-            vals, default = rating_choices(report.rival_team_rating)
-            rival_score = rating_from_choice(st.pills(f"Nota de {rival_label}", vals, default=default, selection_mode="single"))
-        conclusion = st.text_area("Una idea o nota colectiva (opcional)", value=report.key_takeaways or "", height=70)
-        rows = []
-        for pid in selected_ids:
-            part = parts[pid]
-            prev = evaluations.get(pid)
-            name = part.player.display_name or part.player.full_name
-            st.markdown(f"**{name}**")
-            choices, default = rating_choices(prev.general_rating if prev else None)
-            rating = rating_from_choice(st.pills(f"Nota de {name}", choices, default=default, selection_mode="single"))
-            signal = st.checkbox(f"Me llamó la atención · {name}", value=bool(prev and prev.attention_signal))
-            rank = st.selectbox(f"Puesto destacado · {name}", [None, 1, 2, 3],
-                index=[None, 1, 2, 3].index(prev.highlight_rank if prev else None),
-                format_func=lambda x: "Sin puesto" if x is None else f"{x}.º")
-            note = st.text_input(f"Apunte · {name}", value=(prev.short_note or "") if prev else "")
-            rows.append((part, rating, signal, rank, note.strip()))
-        unknown_payload = None
-        if anonymous_position:
-            st.markdown(f"**{anonymous_position} · identidad desconocida**")
-            shirt = st.text_input("Dorsal (opcional)", key=f"unknown_shirt_45_{report.id}")
-            uc, ud = rating_choices(None)
-            grade = rating_from_choice(st.pills("Nota sin identificar", uc, default=ud, selection_mode="single"))
-            attention = st.checkbox("Me llamó la atención (sin nota)", key=f"unknown_attention_45_{report.id}")
-            rank = st.selectbox("Puesto destacado sin identificar", [None, 1, 2, 3],
-                format_func=lambda x: "Sin puesto" if x is None else f"{x}.º")
-            note = st.text_input("Apunte del futbolista sin identificar", key=f"unknown_note_45_{report.id}")
-            code = anonymous_position[1]
-            unknown_payload = (code, shirt.strip(), grade, attention, rank, note.strip())
-        save = st.form_submit_button("Guardar borrador", use_container_width=True)
-        deliver = st.form_submit_button("Entregar mi lectura", type="primary", use_container_width=True)
-    if not (save or deliver):
+            opts = [t for t, _ in sides]
+            team_id = st.selectbox('Equipo del futbolista', opts,
+                format_func=lambda tid: 'No Name' if tid == report.own_team_id else report.rival_team.name,
+                key=f'unknown_team_451_{report.id}_{int(include_rival)}')
+            is_home = team_id == report.match.home_team_id
+            current = report.match.home_formation if is_home else report.match.away_formation
+            with session_scope() as session:
+                suggestion, _ = unknown_repo.latest_formation_suggestion(session,
+                    team_id=team_id, season_id=report.match.season_id, current_match_id=report.match_id)
+            formation = current or suggestion or '4-2-3-1'
+            st.caption(f'Posiciones de {formation} · orientativa, no confirmada automáticamente.')
+            chosen = pick_position(formation, key=f'unknown_slot_451_{report.id}_{int(include_rival)}')
+            with st.form(f'unknown_form_451_{report.id}_{int(include_rival)}'):
+                shirt = st.text_input('Dorsal (opcional)')
+                options, default = rating_choices(None)
+                grade = rating_from_choice(st.pills('Nota (opcional)', options, default=default,
+                                                   selection_mode='single'))
+                signal = st.checkbox('Me llamó la atención')
+                rank = st.selectbox('Puesto entre los tres destacados (opcional)',
+                    [None, 1, 2, 3], format_func=lambda n: 'Sin puesto' if n is None else f'{n}.º')
+                note = st.text_input('Apunte (opcional)')
+                saved_unknown = st.form_submit_button('Guardar señal')
+            if saved_unknown:
+                if chosen is None:
+                    st.error('Selecciona una posición en el campograma.')
+                elif not (grade or signal or rank or len(note.strip()) >= 5):
+                    st.error('Añade una nota, un puesto destacado, una señal o un apunte real.')
+                else:
+                    try:
+                        with session_scope() as session:
+                            unknown_repo.save_signal(session, actor_id=user['id'],
+                                match_id=report.match_id, team_id=team_id, position=chosen[1],
+                                shirt_number=shirt.strip() or None, rating=grade,
+                                highlight_rank=rank, attention_signal=signal,
+                                note=note.strip(), source='own_report')
+                        st.success('Señal guardada. Puedes entregar ahora tu lectura.')
+                    except Exception as exc:
+                        st.error(f'No se ha guardado la señal: {exc}')
         return
     try:
-        # Avoid duplicate ranks in the same side even with multiple fresh inputs.
-        ranks = [(part.team_id, rank) for part, _, _, rank, _ in rows if rank is not None]
-        if unknown_payload and unknown_payload[4] is not None:
-            ranks.append((anonymous_team, unknown_payload[4]))
-        if len(ranks) != len(set(ranks)):
-            raise ValueError("Un equipo no puede tener dos futbolistas en el mismo puesto destacado.")
         with session_scope() as session:
-            saved = repo.save_report_summary(session, report.id,
-                rival_level=report.rival_level, opponent_overview=report.opponent_overview,
-                own_team_note=report.own_team_note, key_takeaways=conclusion.strip() or None,
-                standout_player_id=report.standout_player_id, actor_id=user["id"],
-                expected_revision=report.revision,
-                own_team_rating=own_score, rival_team_rating=rival_score)
-            for part, grade, signal, rank, note in rows:
-                if not (grade or signal or rank or len(note) >= 5):
+            # Validate both sides before touching any record; a failed operation
+            # rolls back the same transaction, including the collective scores.
+            for team_id, _, best, lower, _ in team_payload:
+                if set(best) & set(lower):
+                    raise ValueError('Un futbolista no puede estar simultáneamente entre los mejores y los que menos destacaron.')
+            own_score = next((score for tid, score, *_ in team_payload if tid == report.own_team_id), report.own_team_rating)
+            rival_score = next((score for tid, score, *_ in team_payload if tid == report.rival_team_id), report.rival_team_rating)
+            own_note = next((note for tid, _, _, _, note in team_payload if tid == report.own_team_id), report.own_team_note)
+            rival_note = next((note for tid, _, _, _, note in team_payload if tid == report.rival_team_id), report.opponent_overview)
+            repo.save_report_summary(session, report.id,
+                rival_level=report.rival_level, opponent_overview=rival_note or None,
+                own_team_note=own_note or None, key_takeaways=report.key_takeaways,
+                standout_player_id=report.standout_player_id, actor_id=user['id'],
+                expected_revision=report.revision, own_team_rating=own_score,
+                rival_team_rating=rival_score)
+            for team_id, _, best, lower, _ in team_payload:
+                # Only clear the selected side's rankings. Other information,
+                # notes, ratings and previously submitted rival work survive.
+                persisted = session.scalars(select(PlayerEvaluation).where(
+                    PlayerEvaluation.report_id == report.id, PlayerEvaluation.team_id == team_id)).all()
+                part_map = {p.player_id: p for p in groups[team_id]}
+                for old in persisted:
+                    if old.player_id not in part_map:
+                        continue  # An admin lineup edit must not erase hidden historical evidence.
+                    had_rank = old.highlight_rank is not None
+                    old.highlight_rank = None
+                    old.lowlight_rank = None
+                    if had_rank and not old.attention_signal:
+                        old.standout = False
+                session.flush()
+                ranking = {pid: n for n, pid in enumerate(best, 1)}
+                less = {pid: n for n, pid in enumerate(lower, 1)}
+                for pid in set(best) | set(lower):
+                    part = part_map[pid]
+                    old = next((e for e in persisted if e.player_id == pid), None)
+                    grade = old.general_rating if old else None
+                    repo.upsert_evaluation(session, report.id, pid, team_id, part.id,
+                        actor_id=user['id'], observation_status='evaluated' if grade else 'observed',
+                        general_rating=grade, highlight_rank=ranking.get(pid),
+                        lowlight_rank=less.get(pid),
+                        standout=pid in ranking or bool(old and old.attention_signal))
+            for part, grade, signal, note in extras:
+                if not (grade or signal or len(note) >= 5):
                     continue
+                # Don't overwrite rankings previously selected in this same form.
+                row = session.scalar(select(PlayerEvaluation).where(
+                    PlayerEvaluation.report_id == report.id, PlayerEvaluation.player_id == part.player_id))
                 repo.upsert_evaluation(session, report.id, part.player_id, part.team_id, part.id,
-                    actor_id=user["id"], observation_status="evaluated" if grade else "observed",
-                    general_rating=grade or None, short_note=note or None,
-                    standout=signal or bool(rank), attention_signal=signal,
-                    highlight_rank=rank, pdf_include=bool(grade))
-            if unknown_payload and any([unknown_payload[2], unknown_payload[3], unknown_payload[4], len(unknown_payload[5]) >= 5]):
-                code, shirt, grade, signal, rank, note = unknown_payload
-                unknown_repo.save_signal(session, actor_id=user["id"], match_id=report.match_id,
-                    team_id=anonymous_team, position=code, shirt_number=shirt or None,
-                    rating=grade, highlight_rank=rank, attention_signal=signal, note=note,
-                    source="own_report")
+                    actor_id=user['id'], observation_status='evaluated' if grade else 'observed',
+                    general_rating=grade, short_note=note or None,
+                    attention_signal=signal, standout=bool(signal or (row and row.highlight_rank)))
             if deliver:
-                repo.submit_report(session, report.id, user["id"])
+                repo.submit_report(session, report.id, user['id'])
         _invalidate_workspace(report.id)
         if deliver:
-            st.session_state["report_submission_notice"] = {"match_id": report.match_id,
-                "title": f"{report.match.home_team.name} – {report.match.away_team.name}"}
-            st.session_state.pop("match_hub_mode", None)
-            st.session_state.pop("workspace_match_id", None)
-            request_navigation("Inicio")
+            st.session_state['report_submission_notice'] = {
+                'match_id': report.match_id,
+                'title': f'{report.match.home_team.name} – {report.match.away_team.name}',
+            }
+            st.session_state.pop('match_hub_mode', None)
+            st.session_state.pop('workspace_match_id', None)
+            request_navigation('Inicio')
         else:
-            st.success("Borrador guardado.")
+            st.success('Borrador guardado.')
         st.rerun()
     except Exception as exc:
-        st.error(f"No se ha guardado la lectura: {exc}")
+        st.error(f'No se ha guardado la lectura: {exc}')
 
 
 def _render_report_editor(report_id: int, user: dict) -> None:
@@ -640,6 +695,20 @@ def _render_report_editor(report_id: int, user: dict) -> None:
         st.caption("No hay participantes identificados: puedes registrar una lectura colectiva documentada.")
 
     if read_only:
+        for team_id, team_label in ((report.own_team_id, 'No Name'),
+                                   (report.rival_team_id, report.rival_team.name)):
+            positive = sorted((e for e in evaluation_list if e.team_id == team_id and e.highlight_rank is not None),
+                              key=lambda e: e.highlight_rank)
+            negative = sorted((e for e in evaluation_list if e.team_id == team_id and e.lowlight_rank is not None),
+                              key=lambda e: e.lowlight_rank)
+            if positive or negative:
+                st.markdown(f'**Destacados · {team_label}**')
+                if positive:
+                    st.caption('Más destacados: ' + ' · '.join(
+                        f'{e.highlight_rank}.º {e.player.display_name or e.player.full_name}' for e in positive))
+                if negative:
+                    st.caption('Menos destacados: ' + ' · '.join(
+                        f'{e.lowlight_rank}.º {e.player.display_name or e.player.full_name}' for e in negative))
         section = st.radio("Sección", ["No Name", "Rival", "Finalizar", "Documentos"], horizontal=True, key=f"readonly_report_section_{report_id}")
         if section == "No Name": _render_team_form(report, own_players, evaluations, user, own_team=True, read_only=True)
         elif section == "Rival": _render_team_form(report, rival_players, evaluations, user, own_team=False, read_only=True)
@@ -648,21 +717,17 @@ def _render_report_editor(report_id: int, user: dict) -> None:
         return
 
     stage_key = f"report_stage_{report_id}"
-    stage = st.session_state.get(stage_key, "quick")
-    if stage == "quick":
-        if st.button("Abrir informe detallado", key=f"detailed_open_443_{report_id}",
-                     help="Solo si quieres puntuar titulares, suplentes y añadir comentarios por equipo."):
-            st.session_state[stage_key] = "own"
-            st.rerun()
-        _render_quick_report(report, participations, evaluations, user)
+    mode_labels = ['Básico · No Name', 'Básico · ambos equipos', 'Completo']
+    mode = st.segmented_control('Tipo de informe', mode_labels,
+        default='Básico · No Name', key=f'report_mode_451_{report_id}') or mode_labels[0]
+    if mode != 'Completo':
+        # Selecting the report type is sufficient; no extra side selection.
+        _render_quick_report(report, participations, evaluations, user,
+                             include_rival=mode == 'Básico · ambos equipos')
         return
-    if st.button("← Volver a la lectura breve", key=f"quick_open_443_{report_id}"):
-        if any(bool(st.session_state.get(_dirty_key(report.id, team_id), False))
-               for team_id in (report.own_team_id, report.rival_team_id)):
-            st.warning("Guarda o deshaz los cambios del informe detallado antes de cambiar de modo.")
-        else:
-            st.session_state[stage_key] = "quick"
-            st.rerun()
+    stage = st.session_state.get(stage_key, 'own')
+    if stage == 'quick':
+        stage = 'own'
     step_labels = {"own": "1 · No Name", "rival": "2 · Rival", "finish": "3 · Entregar"}
     st.caption(" → ".join((f"**{label}**" if key == stage else label) for key, label in step_labels.items()))
     if stage == "own":

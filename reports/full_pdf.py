@@ -1050,29 +1050,32 @@ def _quick_signals_table(payload: dict, styles: dict, dark: Color, *, width: flo
     for bucket in ("own_players", "rival_players"):
         for row in payload.get(bucket, []):
             ev = row.get("evaluation")
-            if not ev or not (getattr(ev, "highlight_rank", None) or getattr(ev, "attention_signal", False)):
+            if not ev or not (getattr(ev, "highlight_rank", None) or getattr(ev, "lowlight_rank", None)
+                             or getattr(ev, "attention_signal", False)):
                 continue
             if not getattr(ev, "pdf_include", True):
                 continue
             part = row["participation"]
             name = part.player.display_name or part.player.full_name
             signals.append((int(part.team_id), name, getattr(ev, "highlight_rank", None),
-                            getattr(ev, "general_rating", None), getattr(ev, "short_note", None), False))
+                            getattr(ev, "lowlight_rank", None), getattr(ev, "general_rating", None),
+                            getattr(ev, "short_note", None), False))
     for ev in payload.get("unidentified_signals", []):
         name = (getattr(ev, "label", None) or "Jugador sin identificar").strip()
         if getattr(ev, "resolved_player_id", None):
             name += " (identidad resuelta posteriormente)"
-        signals.append((int(ev.team_id), name, getattr(ev, "highlight_rank", None),
+        signals.append((int(ev.team_id), name, getattr(ev, "highlight_rank", None), None,
                         getattr(ev, "rating", None), getattr(ev, "note", None), True))
     if not signals:
         return None
-    signals.sort(key=lambda x: (x[0] != int(report.own_team_id), x[2] if x[2] else 99, x[1]))
+    signals.sort(key=lambda x: (x[0] != int(report.own_team_id), x[2] if x[2] else 99,
+                                x[3] if x[3] else 99, x[1]))
     cells = [[Paragraph("EQUIPO / FUTBOLISTA", styles["table_header"]),
               Paragraph("SEÑAL", styles["table_header"]),
               Paragraph("APUNTE", styles["table_header"])]]
-    for team_id, name, rank, rating, note, unknown in signals:
+    for team_id, name, rank, low_rank, rating, note, unknown in signals:
         team_name = report.own_team.name if team_id == int(report.own_team_id) else report.rival_team.name
-        pieces = [f"Top {rank}" if rank else "Me llamó la atención"]
+        pieces = [f"Top {rank}" if rank else f"Menos destacado {low_rank}" if low_rank else "Me llamó la atención"]
         if rating is not None:
             pieces.append(f"{float(rating):g}/10")
         cells.append([

@@ -60,6 +60,7 @@ def render_header(payload: dict) -> None:
     if knowledge:
         st.caption(f"Conocimiento: {knowledge['matches']} partidos · {knowledge['authors']} autores · "
                    f"{knowledge['ratings']} notas · {knowledge['top_3']} veces top 3 · "
+                   f"{knowledge.get('least_3', 0)} veces entre los menos destacados · "
                    f"{knowledge['resolved_anonymous']} señales identificadas después · "
                    f"muestra {knowledge['coverage']}")
 

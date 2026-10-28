@@ -86,7 +86,7 @@ def generate_summary_pdf(payload: dict, *, current_version: int) -> bytes:
 
     signals = _quick_signals_table(payload, styles, dark, width=182 * mm)
     if signals:
-        story += [Spacer(1, 4*mm), _section_heading("Destacados y señales · 4.5", styles, primary, dark,
+        story += [Spacer(1, 4*mm), _section_heading("Destacados, menos destacados y señales", styles, primary, dark,
                                                   "Incluye aportaciones sin nota e identidades pendientes"),
                   Spacer(1, 3*mm), signals]
     doc.build(story)

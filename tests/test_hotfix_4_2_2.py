@@ -9,7 +9,7 @@ from models import Base
 import core.database as database
 
 ROOT = Path(__file__).resolve().parents[1]
-HEAD = "0016_partial_reading_4_5"
+HEAD = "0017_lowlight_compact_4_5_1"
 
 
 def _reset_database_caches() -> None:
@@ -23,11 +23,11 @@ def _reset_database_caches() -> None:
 
 
 def test_release_422_versions_and_head_are_consistent():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.5"
-    assert 'APP_VERSION = "4.5"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.5"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.5.1.1"
+    assert 'APP_VERSION = "4.5.1.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.5.1.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
     consistency = (ROOT / "scripts/check_release_consistency.py").read_text(encoding="utf-8")
-    assert 'EXPECTED = "4.5"' in consistency
+    assert 'EXPECTED = "4.5.1.1"' in consistency
     assert f'HEAD_MIGRATION = "{HEAD}"' in consistency
 
 

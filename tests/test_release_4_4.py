@@ -159,5 +159,5 @@ def test_44_navigation_and_advanced_admin_contracts():
     assert "st.segmented_control" not in squad
     assert '"Mantenimiento avanzado"' in admin
     assert "_technical(user)" in admin
-    assert "Rendimiento propio" in players and "Rendimiento rival" in players
+    assert "_table_rows" in players and "Filas por página" in players and "catalog_table_451" in players
     assert "Preparar o completar contexto" in jornada and "render_match_report" in jornada

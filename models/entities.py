@@ -415,6 +415,7 @@ class PlayerEvaluation(Base):
     detailed_note: Mapped[str | None] = mapped_column(Text)
     standout: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     highlight_rank: Mapped[int | None] = mapped_column(Integer)
+    lowlight_rank: Mapped[int | None] = mapped_column(Integer)
     attention_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     pdf_include: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

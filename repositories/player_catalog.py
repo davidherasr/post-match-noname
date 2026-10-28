@@ -26,7 +26,7 @@ def search_players(session: Session, *, season_id: int | None,
                    search: str = '', position: str | None = None,
                    team_id: int | str | None = None, scope: str = 'Todos',
                    state_filter: str = 'Todos', evidence: str = 'Cualquiera',
-                   order: str = 'Nombre', page: int = 1, page_size: int = PAGE_SIZE) -> dict:
+                   order: str = 'Nombre', descending: bool = False, page: int = 1, page_size: int = PAGE_SIZE) -> dict:
     season = int(season_id) if season_id else None
     own = get_own_team(session)
     official_roster = (select(TeamRoster.player_id)
@@ -110,12 +110,22 @@ def search_players(session: Session, *, season_id: int | None,
         .join(PlayerEvaluation, PlayerEvaluation.report_id == Report.id)
         .where(PlayerEvaluation.player_id == Player.id, official_match_clause(),
                Report.status.in_(FINAL_REPORT_STATUSES)).correlate(Player).scalar_subquery())
-    order_by = {
-        'Nombre': [Player.full_name, Player.id],
-        'Posición': [Player.primary_position.nullslast(), Player.full_name],
-        'Partidos evaluados': [desc(rated_count), Player.full_name],
-        'Última evaluación': [desc(last_rating), Player.full_name],
-    }.get(order, [Player.full_name, Player.id])
+    average_rating = (select(func.avg(PlayerEvaluation.general_rating))
+        .join(Report, Report.id == PlayerEvaluation.report_id)
+        .join(Match, Match.id == Report.match_id)
+        .where(PlayerEvaluation.player_id == Player.id, official_match_clause(),
+               Report.status.in_(FINAL_REPORT_STATUSES), PlayerEvaluation.general_rating > 0)
+        .correlate(Player).scalar_subquery())
+    sort_columns = {
+        'Nombre': Player.full_name,
+        'Posición': Player.primary_position,
+        'Partidos evaluados': rated_count,
+        'Última evaluación': last_rating,
+        'Nota media': average_rating,
+    }
+    sort_column = sort_columns.get(order, Player.full_name)
+    order_by = [sort_column.desc().nullslast() if descending else sort_column.asc().nullslast(),
+                Player.full_name.asc(), Player.id.asc()]
     total = int(session.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
     per_page = max(1, min(int(page_size), 100))
     pages = max(1, (total + per_page - 1) // per_page)

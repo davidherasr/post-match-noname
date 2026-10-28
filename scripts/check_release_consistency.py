@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.5"
-HEAD_MIGRATION = "0016_partial_reading_4_5"
+EXPECTED = "4.5.1.1"
+HEAD_MIGRATION = "0017_lowlight_compact_4_5_1"
 
 
 def read_version() -> str:

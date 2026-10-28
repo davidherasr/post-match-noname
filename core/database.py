@@ -90,7 +90,7 @@ _REQUIRED_COLUMNS: dict[str, set[str]] = {
     "users": {"deleted_at", "can_track_players", "participation_profile"},
     "reports": {"own_team_rating", "rival_team_rating"},
     "team_rosters": {"usual_position"},
-    "player_evaluations": {"highlight_rank", "attention_signal"},
+    "player_evaluations": {"highlight_rank", "lowlight_rank", "attention_signal"},
     "unidentified_player_signals": {"match_id", "team_id", "user_id", "position", "shirt_number", "rating", "highlight_rank", "resolved_player_id", "source"},
     "staff_sporting_weights": {"user_id", "own_match_weight", "neutral_match_weight"},
     "match_opinions": {"match_id", "user_id", "home_team_rating", "away_team_rating", "summary"},
@@ -260,8 +260,10 @@ def init_db() -> None:
                 original=exc,
             ) from exc
         except Exception:
-            if not settings.demo_mode:
-                raise
+            # 4.5.1.1: do not silently fall back to create_all when an Alembic
+            # migration fails in demo mode. That used to produce a schema that
+            # looked up-to-date but had never passed the migration chain.
+            raise
         finally:
             if connection is not None:
                 connection.close()

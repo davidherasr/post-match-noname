@@ -190,8 +190,19 @@ def upsert_evaluation(session: Session, report_id: int, player_id: int, team_id:
     item = get_evaluation(session, report_id, player_id)
     from repositories.unidentified_players import _validate_rank, _existing_rank
     rank = _validate_rank(values.get("highlight_rank")) if "highlight_rank" in values else (item.highlight_rank if item else None)
+    low_rank = _validate_rank(values.get("lowlight_rank")) if "lowlight_rank" in values else (item.lowlight_rank if item else None)
+    if rank is not None and low_rank is not None:
+        raise ValueError("Un jugador no puede figurar a la vez entre los destacados y los que destacaron menos.")
     _existing_rank(session, match_id=report.match_id, user_id=report.reporter_id,
         team_id=team_id, rank=rank, exclude_eval=item.id if item else None)
+    if low_rank is not None:
+        conflict = session.scalar(select(PlayerEvaluation.id).where(
+            PlayerEvaluation.report_id == report_id,
+            PlayerEvaluation.team_id == team_id,
+            PlayerEvaluation.lowlight_rank == low_rank,
+            PlayerEvaluation.id != (item.id if item else -1)).limit(1))
+        if conflict:
+            raise ValueError("Ya hay otro jugador en ese puesto de menor destaque.")
     before = None
     if not item:
         item = PlayerEvaluation(report_id=report_id, player_id=player_id, team_id=team_id, participation_id=participation_id, evaluation_scope=scope)
@@ -389,7 +400,7 @@ def validate_report_for_finalization(session: Session, report_id: int) -> list[s
         func.length(func.trim(PlayerEvaluation.short_note)) >= 5).limit(1)))
     has_highlight = bool(session.scalar(select(PlayerEvaluation.id).where(
         PlayerEvaluation.report_id == report_id,
-        or_(PlayerEvaluation.highlight_rank.is_not(None), PlayerEvaluation.attention_signal.is_(True), PlayerEvaluation.standout.is_(True))).limit(1)))
+        or_(PlayerEvaluation.highlight_rank.is_not(None), PlayerEvaluation.lowlight_rank.is_not(None), PlayerEvaluation.attention_signal.is_(True), PlayerEvaluation.standout.is_(True))).limit(1)))
     from models.entities import UnidentifiedPlayerSignal
     has_unknown = bool(session.scalar(select(UnidentifiedPlayerSignal.id).where(
         UnidentifiedPlayerSignal.match_id == report.match_id,
@@ -411,7 +422,7 @@ def _report_snapshot_data(session: Session, report_id: int) -> dict:
         "reporter": {"id": report.reporter.id, "full_name": report.reporter.full_name, "email": report.reporter.email},
         "match": {"id": report.match.id, "round_name": report.match.round_name, "match_date": report.match.match_date, "home_team_id": report.match.home_team_id, "away_team_id": report.match.away_team_id, "home_score": report.match.home_score, "away_score": report.match.away_score, "venue": report.match.venue, "home_formation": report.match.home_formation, "away_formation": report.match.away_formation, "competition": report.match.competition.name, "season": report.match.season.name, "home_team": {"id": report.match.home_team.id, "name": report.match.home_team.name, "short_name": report.match.home_team.short_name, "logo_b64": report.match.home_team.logo_b64, "logo_mime": report.match.home_team.logo_mime}, "away_team": {"id": report.match.away_team.id, "name": report.match.away_team.name, "short_name": report.match.away_team.short_name, "logo_b64": report.match.away_team.logo_b64, "logo_mime": report.match.away_team.logo_mime}},
         "participations": [{"id": p.id, "team_id": p.team_id, "player_id": p.player_id, "player_name": p.player.display_name or p.player.full_name, "shirt_number": p.shirt_number, "starter": p.starter, "position": p.position or p.player.primary_position, "minute_in": p.minute_in, "minute_out": p.minute_out, "captain": p.captain, "photo_b64": p.player.photo_b64, "photo_mime": p.player.photo_mime} for p in participations],
-        "evaluations": [{"id": e.id, "player_id": e.player_id, "player_name": e.player.display_name or e.player.full_name, "team_id": e.team_id, "participation_id": e.participation_id, "evaluation_scope": e.evaluation_scope, "observation_status": e.observation_status, "general_rating": e.general_rating, "technical_rating": e.technical_rating, "tactical_rating": e.tactical_rating, "physical_rating": e.physical_rating, "confidence": e.confidence, "recommendation": e.recommendation, "strengths": e.strengths, "short_note": e.short_note, "detailed_note": e.detailed_note, "standout": e.standout, "highlight_rank": e.highlight_rank, "attention_signal": e.attention_signal, "pdf_include": e.pdf_include} for e in evaluations],
+        "evaluations": [{"id": e.id, "player_id": e.player_id, "player_name": e.player.display_name or e.player.full_name, "team_id": e.team_id, "participation_id": e.participation_id, "evaluation_scope": e.evaluation_scope, "observation_status": e.observation_status, "general_rating": e.general_rating, "technical_rating": e.technical_rating, "tactical_rating": e.tactical_rating, "physical_rating": e.physical_rating, "confidence": e.confidence, "recommendation": e.recommendation, "strengths": e.strengths, "short_note": e.short_note, "detailed_note": e.detailed_note, "standout": e.standout, "highlight_rank": e.highlight_rank, "lowlight_rank": e.lowlight_rank, "attention_signal": e.attention_signal, "pdf_include": e.pdf_include} for e in evaluations],
         "unidentified_signals": [
             {"id": a.id, "team_id": a.team_id, "position": a.position, "shirt_number": a.shirt_number,
              "label": a.label, "rating": a.rating, "highlight_rank": a.highlight_rank,

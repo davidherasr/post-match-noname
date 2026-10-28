@@ -34,6 +34,15 @@ try:
 
     APP_NAME = _config.APP_NAME
     APP_VERSION = _config.APP_VERSION
+    # Validate release coherence before init_db can run migrations. Deploying
+    # only app.py without its repositories caused Cloud Attribute/ImportErrors.
+    from pathlib import Path as _Path
+    if APP_VERSION != "4.5.1.1" or (_Path(__file__).parent / "VERSION").read_text(encoding="utf-8").strip() != "4.5.1.1":
+        raise ImportError("VERSION, app.py y core/config.py no pertenecen a 4.5.1.1; actualiza el repositorio completo.")
+    from repositories.users import PARTICIPATION_PROFILES as _participation_profiles
+    from repositories.dd_attention import team_knowledge as _team_knowledge
+    if set(_participation_profiles) != {"own_only", "full", "free", "viewer"} or not callable(_team_knowledge):
+        raise ImportError("Faltan módulos de roles/atención deportiva de 4.5.1.1; actualiza el repositorio completo.")
     database_target = _config.database_target
     settings = _config.settings
     validate_production_settings = _config.validate_production_settings
@@ -50,7 +59,7 @@ except ImportError as exc:
     st.error("El despliegue contiene archivos mezclados de versiones distintas.")
     st.markdown(
         "No Name · Área Técnica se ha detenido antes de acceder a la base de datos. "
-        "Sustituye **todo el contenido del repositorio** por la versión 4.5; "
+        "Sustituye **todo el contenido del repositorio** por la versión 4.5.1.1; "
         "no copies archivos sueltos encima de una versión anterior."
     )
     st.code(str(exc), language="text")
@@ -142,8 +151,9 @@ except DatabaseUnavailableError as exc:
 except DatabaseSchemaError as exc:
     st.error("La base de datos necesita completar una actualización de esquema.")
     st.markdown(
-        "No se ha ejecutado ninguna pantalla deportiva. La aplicación valida de forma "
-        "**no destructiva** que el esquema físico de Supabase coincide con la aplicación."
+        "No se ha ejecutado ninguna pantalla deportiva. Se ha comprobado la compatibilidad "
+        "del esquema físico; con `RUN_MIGRATIONS=true`, Alembic puede haber intentado "
+        "migraciones aditivas antes de esta comprobación."
     )
     if exc.missing:
         lines = []
@@ -152,7 +162,7 @@ except DatabaseSchemaError as exc:
         st.code("\n".join(lines), language="text")
     st.info(
         "Comprueba que `RUN_MIGRATIONS = true` en los Secrets de Streamlit Cloud y haz "
-        "**Manage app → Reboot**. El proyecto incorpora migraciones hasta 0015: comprueba el head de PostgreSQL antes de iniciar."
+        "**Manage app → Reboot**. Esta release incorpora Alembic hasta `0017_lowlight_compact_4_5_1`. Consulta `public.alembic_version` con las consultas de `docs/CONSULTA_SEGURA_SUPABASE_4511.sql`. No crees ni modifiques `supabase_migrations.schema_migrations` para resolver este problema."
     )
     st.stop()
 except Exception as exc:
@@ -188,13 +198,13 @@ def _render_reports_route(user: dict, mode: str) -> None:
     """Render the reports page and fail clearly when deployment files are mixed."""
     from views import reports as reports_page
 
-    expected_api = "4.5"
+    expected_api = "4.5.1.1"
     deployed_api = getattr(reports_page, "REPORTS_PAGE_API_VERSION", None)
     if deployed_api != expected_api:
         st.error("La aplicación tiene archivos mezclados de versiones distintas.")
         st.markdown(
             "`app.py` y `views/reports.py` no corresponden a la misma versión. "
-            "Sustituye **todo el contenido del repositorio** por el paquete 4.5 y reinicia la aplicación."
+            "Sustituye **todo el contenido del repositorio** por el paquete 4.5.1.1 y reinicia la aplicación."
         )
         st.code(
             f"API esperada: {expected_api}\nAPI encontrada: {deployed_api or 'incompatible'}\n"

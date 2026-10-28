@@ -35,9 +35,16 @@ def render(user:dict,team_id:int)->None:
                              f"{part.player.display_name or part.player.full_name}")
             else:
                 st.caption("No se han registrado titulares para ese encuentro.")
-    from repositories import dd_attention
-    with session_scope() as session:
-        knowledge = dd_attention.team_knowledge(session, active.id, team.id) if active else None
+    knowledge = None
+    if active:
+        try:
+            from repositories.dd_attention import team_knowledge
+            with session_scope() as session:
+                knowledge = team_knowledge(session, active.id, team.id)
+        except (ImportError, AttributeError) as exc:
+            # A partial Cloud deployment must not block the squad and fixture
+            # views. The release-smoke check catches this before deployment.
+            st.warning("La lectura agregada de DD no está disponible en este despliegue. Verifica que todos los archivos de la release se hayan actualizado juntos.")
     if knowledge:
         st.markdown("### Conocimiento sobre el equipo")
         st.caption(f"{len(knowledge['matches'])} encuentros oficiales en calendario · última referencia: {knowledge['last_observed'] or '—'}")

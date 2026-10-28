@@ -357,12 +357,13 @@ def _knowledge_45(session: Session, player_id: int, history: list[dict], season_
     events = {}
     for item in history:
         ev, match, author = item["evaluation"], item["match"], item["reporter"]
-        if not (ev.general_rating is not None or ev.highlight_rank is not None or ev.attention_signal or ev.standout or ev.short_note):
+        if not (ev.general_rating is not None or ev.highlight_rank is not None or ev.lowlight_rank is not None
+                or ev.attention_signal or ev.standout or ev.short_note):
             continue
         events[(match.id, author.id, ev.team_id)] = {
             "match_id": match.id, "author_id": author.id, "team_id": ev.team_id,
             "rating": ev.general_rating, "rank": ev.highlight_rank,
-            "source": "Postpartido", "resolved_anonymous": False, "date": match.match_date,
+            "low_rank": ev.lowlight_rank, "source": "Postpartido", "resolved_anonymous": False, "date": match.match_date,
         }
     stmt = (select(MatchOpinionPlayer, MatchOpinion, Match)
             .join(MatchOpinion, MatchOpinion.id == MatchOpinionPlayer.opinion_id)
@@ -401,6 +402,7 @@ def _knowledge_45(session: Session, player_id: int, history: list[dict], season_
             "ratings": len(scores), "average": _mean(scores),
             "top_3": sum(e["rank"] is not None for e in rows),
             "top_1": sum(e["rank"] == 1 for e in rows),
+            "least_3": sum(e.get("low_rank") is not None for e in rows),
             "resolved_anonymous": sum(e["resolved_anonymous"] for e in rows),
             "last_observed": max((e["date"] for e in rows), default=None),
             "coverage": _coverage(len(matches), len(authors), len(rows)) if rows else "Sin evidencia"}

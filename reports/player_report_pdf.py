@@ -196,6 +196,7 @@ def generate_player_360_pdf(payload: dict, settings: dict) -> bytes:
         story.append(Paragraph(
             f"{knowledge['matches']} partidos · {knowledge['authors']} autores · "
             f"{knowledge['ratings']} notas · {knowledge['top_3']} destacados top 3 · "
+            f"{knowledge.get('least_3', 0)} referencias entre los menos destacados · "
             f"{knowledge['resolved_anonymous']} señales de identidad resuelta · "
             f"Muestra: {_safe(knowledge['coverage'])}. La ausencia de nota no cuenta como cero.", styles["body"]))
     if payload.get("is_own_player"):

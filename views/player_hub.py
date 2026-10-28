@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import streamlit as st
+import pandas as pd
+import hashlib
 
 from core.constants import POSITIONS
 from core.database import session_scope
@@ -149,12 +151,32 @@ def _compare_players(ids: list[int], season_id: int | None = None) -> None:
 
 
 def _reset_catalog_filters() -> None:
-    # This callback runs before Streamlit instantiates the widgets again.
-    for key in ('catalog_search_423','catalog_season_423','catalog_team_423',
-                'catalog_position_423','catalog_scope_423','catalog_state_423',
-                'catalog_evidence_423','catalog_order_423'):
+    for key in ('catalog_search_423', 'catalog_season_423', 'catalog_team_423',
+                'catalog_position_423', 'catalog_scope_423', 'catalog_state_423',
+                'catalog_evidence_423', 'catalog_order_423', 'catalog_direction_451'):
         st.session_state.pop(key, None)
     st.session_state['catalog_page_423'] = 1
+
+
+def _table_rows(rows: list[dict]) -> pd.DataFrame:
+    """One visible row per player; absent observations are never numeric zeroes."""
+    result = []
+    for item in rows:
+        p = item['player']
+        result.append({
+            'Jugador': p.display_name or p.full_name,
+            'Pos.': p.primary_position or '—',
+            'Equipo': item['team'].name if item['team'] else 'Sin equipo',
+            'Ámbito': item['scope'],
+            'Nota': f"{item['rating']:.1f}" if item['rating'] is not None else '—',
+            'Partidos': item['match_count'],
+            'Autores': item['authors'],
+            'Señales': item['neutral_mentions'],
+            'Seguimientos': item['tracking_count'],
+            'Estado DD': item['state'],
+            'Última nota': item['latest'].strftime('%d/%m/%Y') if item['latest'] else '—',
+        })
+    return pd.DataFrame(result)
 
 
 def render(user: dict) -> None:
@@ -162,47 +184,49 @@ def render(user: dict) -> None:
     if opened:
         _render_player(user, int(opened))
         return
-    page_header('Jugadores', 'Consulta la plantilla, las señales y los informes sin confundir sus niveles de evidencia.')
+    page_header('Jugadores', 'Catálogo de jugadores · busca, filtra y abre una ficha cuando la necesites.')
     with session_scope() as session:
         seasons = players_repo.list_seasons(session)
         active = players_repo.get_active_season(session)
     season_ids = [None] + [s.id for s in seasons]
-    season_labels = {None: 'Todas las temporadas', **{s.id:s.name for s in seasons}}
+    season_labels = {None: 'Todas', **{s.id: s.name for s in seasons}}
     if 'catalog_season_423' not in st.session_state:
         st.session_state['catalog_season_423'] = active.id if active else None
     if st.session_state['catalog_season_423'] not in season_ids:
         st.session_state['catalog_season_423'] = None
-    with st.container(border=True):
-        st.markdown('#### Buscar y filtrar')
-        search = st.text_input('Buscar jugador', placeholder='Nombre o apellido...', key='catalog_search_423')
-        season_id = st.selectbox('Temporada', season_ids, format_func=lambda sid: season_labels[sid], key='catalog_season_423')
-        with session_scope() as session:
-            teams = catalog_repo.teams_for_filter(session, season_id)
-        team_labels = {None:'Todos los equipos', 'Sin equipo':'Sin equipo confirmado',
-                       **{t.id:t.name for t in teams}}
-        team_options = list(team_labels)
-        if st.session_state.get('catalog_team_423') not in team_options:
-            st.session_state['catalog_team_423'] = None
-        a,b = st.columns(2)
-        team_id = a.selectbox('Equipo', team_options, format_func=lambda key:team_labels[key], key='catalog_team_423')
-        position = b.selectbox('Posición', ['Todas'] + POSITIONS, key='catalog_position_423')
-        a,b = st.columns(2)
-        scope = a.selectbox('Ámbito', ['Todos','Propios','Externos'], key='catalog_scope_423')
-        state_options = ['Todos','Sin decisión','Observado','Interesante','Seguimiento','Prioritario','Descartado','Destacados','Con observaciones']
-        state = b.selectbox('Estado deportivo', state_options, key='catalog_state_423')
-        with st.expander('Más filtros y ordenación', expanded=False):
-            evidence = st.selectbox('Información disponible',
-                ['Cualquiera','Postpartidos','Señales neutrales','Seguimiento formal','Sin valoraciones'],
-                key='catalog_evidence_423', help='No mezcla menciones con observaciones profundas.')
-            order = st.selectbox('Ordenar', ['Nombre','Posición','Partidos evaluados','Última evaluación'], key='catalog_order_423')
-        st.button('Limpiar filtros', on_click=_reset_catalog_filters, key='catalog_reset_423')
-    if not can_direct(user):
-        st.caption('Las decisiones deportivas y la gestión de seguimientos requieren los permisos correspondientes.')
-    # Any changed search/filter/order begins at page 1; do not silently leave
-    # the user on an unrelated last page from a previous filter.
-    signature = (search, season_id, team_id, position, scope, state, evidence, order)
-    previous_signature = st.session_state.get('catalog_filter_signature_423')
-    if previous_signature is not None and previous_signature != signature:
+    # Compact toolbar: important filters remain visible, less common controls fold away.
+    top = st.columns([3, 1.4, 1.2])
+    search = top[0].text_input('Buscar jugador', placeholder='Nombre o apellido', key='catalog_search_423')
+    season_id = top[1].selectbox('Temporada', season_ids,
+                                format_func=lambda sid: season_labels[sid], key='catalog_season_423')
+    page_size = top[2].selectbox('Filas por página', [25, 50], key='catalog_page_size_451')
+    with session_scope() as session:
+        teams = catalog_repo.teams_for_filter(session, season_id)
+    team_labels = {None: 'Todos los equipos', 'Sin equipo': 'Sin equipo',
+                   **{t.id: t.name for t in teams}}
+    team_options = list(team_labels)
+    if st.session_state.get('catalog_team_423') not in team_options:
+        st.session_state['catalog_team_423'] = None
+    cols = st.columns([2.1, 1.05, 1.2, 1.45, 1.4])
+    team_id = cols[0].selectbox('Equipo', team_options,
+                                format_func=lambda key: team_labels[key], key='catalog_team_423')
+    position = cols[1].selectbox('Posición', ['Todas'] + POSITIONS, key='catalog_position_423')
+    scope = cols[2].selectbox('Ámbito', ['Todos', 'Propios', 'Externos'], key='catalog_scope_423')
+    state_options = ['Todos', 'Sin decisión', 'Observado', 'Interesante', 'Seguimiento',
+                     'Prioritario', 'Descartado', 'Destacados', 'Con observaciones']
+    state = cols[3].selectbox('Estado deportivo', state_options, key='catalog_state_423')
+    order = cols[4].selectbox('Ordenar por', ['Nombre', 'Posición', 'Nota media',
+                                            'Partidos evaluados', 'Última evaluación'], key='catalog_order_423')
+    compact = st.columns([2.2, 1.0, 1.0, 4])
+    with compact[0]:
+        evidence = st.selectbox('Tipo de evidencia',
+            ['Cualquiera', 'Postpartidos', 'Señales neutrales', 'Seguimiento formal', 'Sin valoraciones'],
+            key='catalog_evidence_423')
+    direction = compact[1].selectbox('Dirección', ['Ascendente', 'Descendente'], key='catalog_direction_451')
+    compact[2].button('Limpiar filtros', on_click=_reset_catalog_filters, key='catalog_reset_423')
+    # Filter changes should never leave users on an empty last page.
+    signature = (search, season_id, team_id, position, scope, state, evidence, order, direction, page_size)
+    if st.session_state.get('catalog_filter_signature_423') not in (None, signature):
         st.session_state['catalog_page_423'] = 1
     st.session_state['catalog_filter_signature_423'] = signature
     page = st.session_state.get('catalog_page_423', 1)
@@ -210,54 +234,49 @@ def render(user: dict) -> None:
         data = catalog_repo.search_players(session, season_id=season_id, search=search,
             position=None if position == 'Todas' else position, team_id=team_id,
             scope=scope, state_filter=state, evidence=evidence, order=order,
-            page=page, page_size=catalog_repo.PAGE_SIZE)
+            descending=(direction == 'Descendente'), page=page, page_size=page_size)
     rows = data['rows']
     if page != data['page']:
         st.session_state['catalog_page_423'] = data['page']
-    total = data['total']
-    st.markdown(f'**{total} jugador(es)** · Página {data["page"]} de {data["pages"]}')
-    st.caption('Las medias consideran solo informes oficiales de partidos reales. Una señal neutral no cuenta como informe ni como seguimiento formal.')
+    st.caption(f"{data['total']} jugadores · Página {data['page']} de {data['pages']} · "
+               "Nota — significa sin evaluar, nunca cero. Selecciona una fila para abrir la ficha.")
     if not rows:
-        st.info('No hay jugadores para esta combinación. Revisa equipo, temporada y estado, o limpia los filtros.')
+        st.info('No hay jugadores con estos filtros.')
     else:
+        selection = st.dataframe(_table_rows(rows), hide_index=True,
+            use_container_width=True, on_select='rerun', selection_mode='single-row',
+            row_height=34, height=min(780, 40 + 35 * (len(rows) + 1)),
+            key='catalog_table_451_' + hashlib.sha1(repr(signature).encode('utf-8')).hexdigest()[:12])
+        selected_rows = selection.selection.rows
+        if selected_rows:
+            chosen = rows[selected_rows[0]]
+            player = chosen['player']
+            a, b = st.columns([5, 1])
+            a.caption(f"Seleccionado: {player.display_name or player.full_name} · "
+                      f"{chosen['team'].name if chosen['team'] else 'Sin equipo'}")
+            if b.button('Abrir ficha', type='primary', use_container_width=True,
+                        key=f'catalog_open_{player.id}'):
+                _open_player(player.id)
         with st.expander('Comparar dos jugadores', expanded=False):
             names = st.session_state.setdefault('catalog_compare_names_423', {})
             for item in rows:
-                player = item['player']
-                names[int(player.id)] = player.display_name or player.full_name
+                p = item['player']
+                names[int(p.id)] = p.display_name or p.full_name
             current_selected = st.session_state.get('catalog_compare_423') or []
             available = list(dict.fromkeys([*current_selected, *[int(x['player'].id) for x in rows]]))
             selected = st.multiselect('Jugadores', available, max_selections=2,
-                format_func=lambda pid:names.get(pid, 'Jugador no disponible'),key='catalog_compare_423')
+                format_func=lambda pid: names.get(pid, 'Jugador no disponible'),
+                key='catalog_compare_423')
             if len(selected) == 2:
                 _compare_players(selected, season_id)
             else:
-                st.caption('Elige dos jugadores del catálogo; la selección se conserva al cambiar de filtro.')
-        for item in rows:
-            p = item['player']
-            team = item['team'].name if item['team'] else 'Equipo no confirmado'
-            own_player = item['scope'] == 'Propio'
-            with st.container(border=True):
-                st.markdown(f'**{p.display_name or p.full_name}** · {p.primary_position or "Posición sin registrar"}')
-                status_text = item['state'] if item.get('decision') else 'Sin decisión deportiva'
-                st.caption(f'{team} · {"Plantilla propia" if own_player else "Futbolista externo"} · {status_text}' +
-                           (f' · Prioridad {item["priority"]}' if item.get('priority') else ''))
-                avg = f'{item["rating"]:.1f}/10' if item['rating'] is not None else 'Sin calificación'
-                a,b,c = st.columns(3)
-                a.metric('Rendimiento propio' if own_player else 'Rendimiento rival', avg)
-                b.metric('Partidos evaluados', item['match_count'])
-                c.metric('Informadores', item['authors'])
-                if not own_player:
-                    st.caption(f'Señales neutrales: {item["neutral_mentions"]} · Partidos señalados: {item["neutral_matches"]} · Autores: {item["neutral_authors"]}')
-                    st.caption(f'Seguimiento formal: {item["tracking_count"]} observaciones')
-                else:
-                    st.caption('Evolución del equipo propio; las señales externas no se confunden con el rendimiento de la plantilla.')
-                if st.button('Abrir ficha', type='secondary', use_container_width=True, key=f'catalog_open_{p.id}'):
-                    _open_player(p.id)
+                st.caption('Selecciona dos jugadores del catálogo; conservamos la selección entre filtros.')
     if data['pages'] > 1:
-        prev, middle, nxt = st.columns([1,2,1])
+        prev, middle, nxt = st.columns([1, 2, 1])
         if prev.button('← Anterior', disabled=data['page'] == 1, use_container_width=True):
-            st.session_state['catalog_page_423'] = data['page'] - 1; st.rerun()
-        middle.caption(f'{data["page"]}/{data["pages"]} · {catalog_repo.PAGE_SIZE} por página')
+            st.session_state['catalog_page_423'] = data['page'] - 1
+            st.rerun()
+        middle.caption(f"Página {data['page']} de {data['pages']} · {page_size} filas")
         if nxt.button('Siguiente →', disabled=data['page'] == data['pages'], use_container_width=True):
-            st.session_state['catalog_page_423'] = data['page'] + 1; st.rerun()
+            st.session_state['catalog_page_423'] = data['page'] + 1
+            st.rerun()
