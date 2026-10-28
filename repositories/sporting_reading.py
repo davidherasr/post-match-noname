@@ -150,6 +150,18 @@ def save_neutral_opinion(
     if own and own.id in {match.home_team_id, match.away_team_id}:
         raise ValueError("Los partidos de No Name usan el flujo de postpartido, no la lectura neutral.")
 
+    from repositories.unidentified_players import _validate_rank, _existing_rank
+    real_rows = list(player_rows or [])
+    any_evidence = (any((home_team_rating, away_team_rating, len((summary or "").strip()) >= 5)) or
+                    any(row.get("rating") or row.get("highlight_rank") or row.get("attention_signal") or
+                        len((row.get("note") or "").strip()) >= 5 for row in real_rows))
+    if not any_evidence:
+        from models.entities import UnidentifiedPlayerSignal
+        any_evidence = session.scalar(select(UnidentifiedPlayerSignal.id).where(
+            UnidentifiedPlayerSignal.match_id == match_id, UnidentifiedPlayerSignal.user_id == user_id,
+            UnidentifiedPlayerSignal.source == "neutral").limit(1)) is not None
+    if not any_evidence:
+        raise ValueError("Añade al menos una aportación real para guardar la lectura.")
     item = get_match_opinion(session, match.id, int(user_id))
     if item is None:
         item = MatchOpinion(match_id=match.id, user_id=int(user_id), created_at=UTC_NOW(), updated_at=UTC_NOW())
@@ -167,6 +179,7 @@ def save_neutral_opinion(
         select(MatchOpinionPlayer).where(MatchOpinionPlayer.opinion_id == item.id)).all()}
     allowed_team_ids = {match.home_team_id, match.away_team_id}
     seen: set[int] = set()
+    used_ranks: set[tuple[int,int]] = set()
     for row in player_rows or []:
         player_id = int(row.get("player_id") or 0)
         team_id = int(row.get("team_id") or 0)
@@ -178,8 +191,17 @@ def save_neutral_opinion(
             signal = MatchOpinionPlayer(opinion_id=item.id, player_id=player_id,
                 team_id=team_id, created_at=UTC_NOW())
             session.add(signal)
+        rank = _validate_rank(row.get("highlight_rank"))
+        if rank is not None and (team_id, rank) in used_ranks:
+            raise ValueError("No se puede repetir un puesto destacado en el mismo equipo.")
+        if rank is not None:
+            used_ranks.add((team_id, rank))
+        _existing_rank(session, match_id=match_id, user_id=user_id, team_id=team_id,
+                       rank=rank, exclude_neutral=signal.id if signal.id else None)
         signal.team_id = team_id
         signal.rating = _clamp_rating(row.get("rating"))
+        signal.highlight_rank = rank
+        signal.attention_signal = bool(row.get("attention_signal") or rank is not None)
         signal.note = (row.get("note") or "").strip() or None
         signal.updated_at = UTC_NOW()
     for player_id, signal in existing_rows.items():

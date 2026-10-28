@@ -348,6 +348,68 @@ def _comparison_pool(session: Session, *, season_id: int | None, player_id: int,
     return internal[:6], candidates[:6]
 
 
+
+def _knowledge_45(session: Session, player_id: int, history: list[dict], season_id: int | None, own_id: int | None) -> dict:
+    """Coverage of staff evidence; zero and absent are different. One event per observer/match/player."""
+    from sqlalchemy import select
+    from models.entities import MatchOpinion, MatchOpinionPlayer, Match, UnidentifiedPlayerSignal, Report
+    from repositories.dd_attention import _coverage
+    events = {}
+    for item in history:
+        ev, match, author = item["evaluation"], item["match"], item["reporter"]
+        if not (ev.general_rating is not None or ev.highlight_rank is not None or ev.attention_signal or ev.standout or ev.short_note):
+            continue
+        events[(match.id, author.id, ev.team_id)] = {
+            "match_id": match.id, "author_id": author.id, "team_id": ev.team_id,
+            "rating": ev.general_rating, "rank": ev.highlight_rank,
+            "source": "Postpartido", "resolved_anonymous": False, "date": match.match_date,
+        }
+    stmt = (select(MatchOpinionPlayer, MatchOpinion, Match)
+            .join(MatchOpinion, MatchOpinion.id == MatchOpinionPlayer.opinion_id)
+            .join(Match, Match.id == MatchOpinion.match_id)
+            .where(MatchOpinionPlayer.player_id == player_id, official_match_clause()))
+    if season_id is not None:
+        stmt = stmt.where(Match.season_id == season_id)
+    for ev, op, match in session.execute(stmt):
+        key = (match.id, op.user_id, ev.team_id)
+        events.setdefault(key, {"match_id": match.id, "author_id": op.user_id,
+            "team_id": ev.team_id, "rating": ev.rating, "rank": ev.highlight_rank,
+            "source": "Lectura neutral", "resolved_anonymous": False, "date": match.match_date})
+    stmt = (select(UnidentifiedPlayerSignal, Match)
+            .join(Match, Match.id == UnidentifiedPlayerSignal.match_id)
+            .where(UnidentifiedPlayerSignal.resolved_player_id == player_id, official_match_clause()))
+    if season_id is not None:
+        stmt = stmt.where(Match.season_id == season_id)
+    for signal, match in session.execute(stmt):
+        if signal.source == "own_report" and not session.scalar(select(Report.id).where(
+                Report.match_id == signal.match_id, Report.reporter_id == signal.user_id,
+                Report.status.in_(["incorporated", "approved", "final"]))):
+            continue
+        key = (match.id, signal.user_id, signal.team_id)
+        if key in events:
+            events[key]["resolved_anonymous"] = True
+        else:
+            events[key] = {"match_id": match.id, "author_id": signal.user_id,
+                "team_id": signal.team_id, "rating": signal.rating,
+                "rank": signal.highlight_rank, "source": "Señal identificada posteriormente",
+                "resolved_anonymous": True, "date": match.match_date}
+    def bucket(rows):
+        matches = {e["match_id"] for e in rows}
+        authors = {e["author_id"] for e in rows}
+        scores = [float(e["rating"]) for e in rows if e["rating"] is not None]
+        return {"matches": len(matches), "authors": len(authors), "events": len(rows),
+            "ratings": len(scores), "average": _mean(scores),
+            "top_3": sum(e["rank"] is not None for e in rows),
+            "top_1": sum(e["rank"] == 1 for e in rows),
+            "resolved_anonymous": sum(e["resolved_anonymous"] for e in rows),
+            "last_observed": max((e["date"] for e in rows), default=None),
+            "coverage": _coverage(len(matches), len(authors), len(rows)) if rows else "Sin evidencia"}
+    rows = list(events.values())
+    return {"own": bucket([e for e in rows if e["team_id"] == own_id]),
+            "rival": bucket([e for e in rows if e["team_id"] != own_id]),
+            "all": bucket(rows)}
+
+
 def build_player_report_360(session: Session, player_id: int, *, season_id: int | None = None) -> dict:
     player = session.get(Player, int(player_id))
     if not player:
@@ -440,7 +502,9 @@ def build_player_report_360(session: Session, player_id: int, *, season_id: int 
     summary = decision.director_note if decision and decision.director_note else (latest.summary if latest else None)
     recommendation = decision.status if decision else (latest.recommendation if latest else None)
 
+    knowledge_45 = _knowledge_45(session, player.id, history, season_id, own_team.id if own_team else None)
     return {
+        "knowledge_45": knowledge_45,
         "player": player,
         "team": team,
         "age": _age(player.date_of_birth),

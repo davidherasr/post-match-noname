@@ -34,6 +34,7 @@ def render_header(payload: dict) -> None:
     meta = [player.primary_position or "Sin posición", _team_name(payload)]
     if payload.get("age") is not None:
         meta.append(f"{payload['age']} años")
+    knowledge = payload.get("knowledge_45", {}).get("own" if payload.get("is_own_player") else "rival", {})
     role_text = f"{role.position} · {role.name}" if role else (payload.get("profile").model_role if payload.get("profile") and payload["profile"].model_role else "Rol No Name por definir")
     st.markdown(
         f"""
@@ -56,6 +57,11 @@ def render_header(payload: dict) -> None:
         """,
         unsafe_allow_html=True,
     )
+    if knowledge:
+        st.caption(f"Conocimiento: {knowledge['matches']} partidos · {knowledge['authors']} autores · "
+                   f"{knowledge['ratings']} notas · {knowledge['top_3']} veces top 3 · "
+                   f"{knowledge['resolved_anonymous']} señales identificadas después · "
+                   f"muestra {knowledge['coverage']}")
 
 
 def _radar_svg(criteria: list[dict], size: int = 370) -> str | None:

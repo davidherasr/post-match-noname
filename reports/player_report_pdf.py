@@ -190,6 +190,14 @@ def generate_player_360_pdf(payload: dict, settings: dict) -> bytes:
     role=payload.get("role")
     if role:
         story += [_section(f"Modelo No Name · {role.position} · {role.name}",styles),_criteria_block(payload,styles)]
+    knowledge = payload.get("knowledge_45", {}).get("own" if payload.get("is_own_player") else "rival", {})
+    if knowledge:
+        story += [_section("Cobertura de conocimiento del staff", styles)]
+        story.append(Paragraph(
+            f"{knowledge['matches']} partidos · {knowledge['authors']} autores · "
+            f"{knowledge['ratings']} notas · {knowledge['top_3']} destacados top 3 · "
+            f"{knowledge['resolved_anonymous']} señales de identidad resuelta · "
+            f"Muestra: {_safe(knowledge['coverage'])}. La ausencia de nota no cuenta como cero.", styles["body"]))
     if payload.get("is_own_player"):
         story += [_section("Rendimiento de la plantilla", styles)]
         own = payload["own_postmatch"]

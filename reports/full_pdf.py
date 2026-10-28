@@ -1043,6 +1043,52 @@ def _summary_rows(rows: list[dict], styles: dict, primary: Color, dark: Color) -
 
 
 
+def _quick_signals_table(payload: dict, styles: dict, dark: Color, *, width: float = 174 * mm):
+    """Versioned 4.5 evidence: do not require a rating or a named XI."""
+    report = payload["report"]
+    signals = []
+    for bucket in ("own_players", "rival_players"):
+        for row in payload.get(bucket, []):
+            ev = row.get("evaluation")
+            if not ev or not (getattr(ev, "highlight_rank", None) or getattr(ev, "attention_signal", False)):
+                continue
+            if not getattr(ev, "pdf_include", True):
+                continue
+            part = row["participation"]
+            name = part.player.display_name or part.player.full_name
+            signals.append((int(part.team_id), name, getattr(ev, "highlight_rank", None),
+                            getattr(ev, "general_rating", None), getattr(ev, "short_note", None), False))
+    for ev in payload.get("unidentified_signals", []):
+        name = (getattr(ev, "label", None) or "Jugador sin identificar").strip()
+        if getattr(ev, "resolved_player_id", None):
+            name += " (identidad resuelta posteriormente)"
+        signals.append((int(ev.team_id), name, getattr(ev, "highlight_rank", None),
+                        getattr(ev, "rating", None), getattr(ev, "note", None), True))
+    if not signals:
+        return None
+    signals.sort(key=lambda x: (x[0] != int(report.own_team_id), x[2] if x[2] else 99, x[1]))
+    cells = [[Paragraph("EQUIPO / FUTBOLISTA", styles["table_header"]),
+              Paragraph("SEÑAL", styles["table_header"]),
+              Paragraph("APUNTE", styles["table_header"])]]
+    for team_id, name, rank, rating, note, unknown in signals:
+        team_name = report.own_team.name if team_id == int(report.own_team_id) else report.rival_team.name
+        pieces = [f"Top {rank}" if rank else "Me llamó la atención"]
+        if rating is not None:
+            pieces.append(f"{float(rating):g}/10")
+        cells.append([
+            Paragraph(f"<b>{_safe(name)}</b><br/>{_safe(team_name)}", styles["table_body_small"]),
+            Paragraph(_safe(" · ".join(pieces)), styles["table_body_small"]),
+            Paragraph(_rich_text(note, "Sin comentario"), styles["table_body_small"]),
+        ])
+    table = Table(cells, colWidths=[width * .40, width * .20, width * .40], repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), dark), ("GRID", (0,0), (-1,-1), .3, HexColor("#D1D5DB")),
+        ("VALIGN", (0,0), (-1,-1), "TOP"), ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6), ("LEFTPADDING", (0,0), (-1,-1), 7),
+    ]))
+    return table
+
+
 def generate_full_pdf(payload: dict, *, current_version: int) -> bytes:
     report, match, settings = payload["report"], payload["match"], payload["settings"]
     primary = _hex_to_color(settings.get("primary_color"), "#B91C1C"); dark = _hex_to_color(settings.get("secondary_color"), "#111827")
@@ -1106,6 +1152,12 @@ def generate_full_pdf(payload: dict, *, current_version: int) -> bytes:
     if other:
         story.append(CondPageBreak(52*mm))
         story += [_section_heading("Registro de observación", styles, primary, dark, "Solo jugadores incluidos en PDF"), Spacer(1,3*mm), other, Spacer(1,5*mm)]
+    signal_table = _quick_signals_table(payload, styles, dark)
+    if signal_table:
+        story.extend([CondPageBreak(60*mm), Spacer(1, 5*mm),
+                      _section_heading("Destacados y señales · 4.5", styles, primary, dark,
+                                       "Las notas son opcionales; identidad y autoría conservadas"),
+                      Spacer(1, 3*mm), signal_table])
     story += [Spacer(1, 6*mm), Paragraph(f"Generado por <b>{_safe(report.reporter.full_name)}</b> · versión inmutable V{current_version} · modo full", styles["small_note"])]
     doc.build(story)
     return buffer.getvalue()

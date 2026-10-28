@@ -102,8 +102,8 @@ def test_scheduled_match_cannot_open_new_postmatch_report_without_confirmed_kick
             match_date=date(2026, 9, 13), home_team_id=own.id, away_team_id=rival.id,
             created_by=admin.id, status="scheduled", schedule_status="provisional",
         )
-        with pytest.raises(ValueError, match="horario del partido todavía no está confirmado"):
-            repo.get_or_create_report(session, match.id, reporter.id)
+        report = repo.get_or_create_report(session, match.id, reporter.id)
+        assert report.reporter_id == reporter.id and report.match_id == match.id
 
 
 def test_multirole_director_permission_uses_all_roles_not_only_primary(session_factory):

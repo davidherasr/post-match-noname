@@ -6,6 +6,7 @@ from datetime import date as _date
 from types import SimpleNamespace as _NS
 
 from sqlalchemy.orm import Session
+from models.entities import UnidentifiedPlayerSignal
 from repositories import scouting as repo
 
 def _slug(value: str) -> str:
@@ -69,6 +70,7 @@ def _snapshot_report_payload(session: Session, report_id: int, version: int) -> 
         "report": report, "match": match, "own_players": own, "rival_players": rival,
         "evaluated_players": evaluated, "noteworthy_players": noteworthy, "standout_row": standout,
         "settings": raw.get("settings", {}), "snapshot_version": item,
+        "unidentified_signals": [_namespace(v) for v in raw.get("unidentified_signals", [])],
     }
 
 def build_report_payload(session: Session, report_id: int, version: int | None = None) -> dict:
@@ -95,6 +97,8 @@ def build_report_payload(session: Session, report_id: int, version: int | None =
         "report": report, "match": match, "own_players": own, "rival_players": rival,
         "evaluated_players": evaluated, "noteworthy_players": noteworthy, "standout_row": standout,
         "settings": repo.get_all_settings(session), "consensus": repo.match_consensus(session, match.id),
+        "unidentified_signals": list(session.query(UnidentifiedPlayerSignal)
+            .filter_by(match_id=match.id, user_id=report.reporter_id, source="own_report").all()),
     }
 
 def report_filename(session: Session, report_id: int, version: int | None = None, mode: str = "full") -> str:

@@ -43,13 +43,9 @@ def _fixture_card(match, *, label: str, progress: dict, key: str, primary: bool)
         if match.home_score is not None and match.away_score is not None:
             st.markdown(f"**Resultado: {match.home_score} – {match.away_score}**")
         elif not is_schedule_confirmed(match):
-            st.caption("Horario por confirmar")
-        if match.status == "published":
-            assigned = progress.get("assigned", 0)
-            finished = progress.get("incorporated", 0)
-            st.caption(f"Informes incorporados: {finished}/{assigned}" if assigned else "Postpartido sin Informadores asignados")
-        elif label == "Último partido":
-            st.caption("Postpartido pendiente de preparar")
+            st.caption("Horario exacto opcional · partido disponible")
+        finished = progress.get("incorporated", 0)
+        st.caption(f"{finished} aportaciones incorporadas · sin preparación obligatoria")
         if st.button("Abrir partido", type="primary" if primary else "secondary",
                      use_container_width=True, key=key):
             _open_match(match.id)
@@ -84,7 +80,19 @@ def render(user: dict) -> None:
             received_requests = requests_repo.list_requests(session,
                 season_id=data["active_season"].id, reporter_id=user["id"], active_only=True)
 
-    st.markdown("### Mi trabajo")
+    profile = user.get("participation_profile", "full")
+    if "reporter" in roles and data.get("own_team") and data.get("active_season"):
+        today_own = data.get("last_match") or data.get("next_match")
+        if today_own:
+            st.markdown("### Tu partido de No Name" if profile == "own_only" else "### Aportación voluntaria")
+            st.caption(f"{today_own.home_team.name} – {today_own.away_team.name} · {calendar_repo.schedule_label(today_own)}")
+            if st.button("Hacer mi lectura", key=f"home_do_report_45_{today_own.id}",
+                         type="primary", use_container_width=True):
+                _open_report(today_own.id)
+    if profile == "viewer" and "reporter" not in roles:
+        st.caption("Perfil de consulta: no tienes tareas deportivas asignadas.")
+    else:
+        st.markdown("### Mi trabajo")
     tasks = data.get("tasks") or []
     if not data.get("active_season"):
         st.warning("No hay una temporada activa. Administración debe seleccionarla.")

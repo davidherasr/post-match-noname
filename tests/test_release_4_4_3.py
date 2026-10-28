@@ -56,7 +56,7 @@ def _seed(session):
 
 
 def test_release_navigation_and_direct_click_scores():
-    assert (ROOT / 'VERSION').read_text().strip() == '4.4.4.1'
+    assert (ROOT / 'VERSION').read_text().strip() == '4.5'
     assert 'Informes' in navigation_for({'id':1, 'roles':['reporter'], 'role':'reporter'})
     assert 'Informes' in navigation_for({'id':1, 'roles':['director'], 'role':'director'})
     assert 'Informes' not in navigation_for({'id':1, 'roles':['admin'], 'role':'admin'})

@@ -39,7 +39,7 @@ def _open_match(match_id: int, *, voluntary_reading: bool = False) -> None:
 def _schedule_form(match, user: dict) -> None:
     if not can_admin(user):
         return
-    with st.expander("Confirmar / corregir horario", expanded=not is_schedule_confirmed(match)):
+    with st.expander("Horario exacto · dato opcional", expanded=False):
         with st.form(f"schedule_39_{match.id}"):
             definitive_date = st.date_input("Fecha real", value=match.kickoff_at.date() if match.kickoff_at else match.match_date)
             # Matchday rule: if the kickoff is unknown the field is genuinely empty.
@@ -341,6 +341,38 @@ def _neutral_staff_opinion(match, user: dict, players: list) -> None:
         key=f"neutral_highlights_42_{match.id}_{user['id']}",
         help="Señalar aquí no abre un seguimiento. Solo crea una señal para la lectura conjunta de Dirección Deportiva.",
     )
+    from repositories import unidentified_players as unknown_repo
+    with st.expander("Señalar un futbolista sin identificar", expanded=False):
+        st.caption("No necesitas conocer su nombre ni completar la alineación.")
+        side = st.radio("Equipo", [match.home_team.name, match.away_team.name], horizontal=True,
+                        key=f"neutral_unknown_team_45_{match.id}")
+        team_id = match.home_team_id if side == match.home_team.name else match.away_team_id
+        formation = (match.home_formation if team_id == match.home_team_id else match.away_formation) or "4-2-3-1"
+        known = match.home_formation_known if team_id == match.home_team_id else match.away_formation_known
+        st.caption(f"{formation} · {'documentada' if known else 'propuesta; no confirmada'}")
+        slots = slots_for(formation)
+        slot_labels = [f"{i+1} · {slot.code} · {slot.label}" for i, slot in enumerate(slots)]
+        slot = st.pills("Posición en el campo", slot_labels, selection_mode="single", key=f"neutral_slot_45_{match.id}")
+        if slot:
+            with st.form(f"neutral_unknown_form_45_{match.id}_{user['id']}"):
+                number = st.text_input("Dorsal (opcional)")
+                choices, choice = rating_choices(None)
+                score = rating_from_choice(st.pills("Nota (opcional)", choices, default=choice))
+                signal = st.checkbox("Me llamó la atención")
+                rank = st.selectbox("Top 3", [None, 1, 2, 3], format_func=lambda x: "Sin puesto" if x is None else f"{x}.º")
+                note = st.text_input("Apunte (opcional)")
+                stored = st.form_submit_button("Registrar señal sin identificar")
+            if stored:
+                try:
+                    with session_scope() as session:
+                        unknown_repo.save_signal(session, actor_id=user["id"], match_id=match.id,
+                            team_id=team_id, position=slot.split(" · ")[1],
+                            shirt_number=number or None, rating=score, highlight_rank=rank,
+                            attention_signal=signal, note=note, source="neutral")
+                    st.success("Señal guardada sin crear una identidad ficticia.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
     with st.form(f"neutral_opinion_42_{match.id}_{user['id']}"):
         home_choices, home_default = rating_choices(existing.home_team_rating if existing else None)
         away_choices, away_default = rating_choices(existing.away_team_rating if existing else None)
@@ -369,7 +401,16 @@ def _neutral_staff_opinion(match, user: dict, players: list) -> None:
                     value=previous.note or "" if previous else "",
                     key=f"neutral_player_note_42_{match.id}_{user['id']}_{pid}",
                 )
-                player_rows.append({"player_id": pid, "team_id": player_team[pid], "rating": rating, "note": note})
+                attention = st.checkbox(f"Me llamó la atención · {player_map[pid].full_name}",
+                    value=bool(previous.attention_signal) if previous else False,
+                    key=f"neutral_signal_45_{match.id}_{pid}")
+                rank = st.selectbox(f"Puesto destacado · {player_map[pid].full_name}", [None, 1, 2, 3],
+                    index=[None, 1, 2, 3].index(previous.highlight_rank if previous else None),
+                    format_func=lambda x: "Sin puesto" if x is None else f"{x}.º",
+                    key=f"neutral_rank_45_{match.id}_{pid}")
+                player_rows.append({"player_id": pid, "team_id": player_team[pid],
+                    "rating": rating, "note": note, "attention_signal": attention,
+                    "highlight_rank": rank})
         confirm_viewed = st.checkbox("Confirmo que he visto el partido y que esta es mi opinión.",
             value=False, help="No completa alineaciones, fecha ni horario desconocidos.") if not existing else True
         # Form widgets only send values when submitted. Do not disable the
@@ -670,67 +711,34 @@ def _render_match_hub(user: dict, match_id: int) -> None:
         st.session_state["workspace_team_id"]=match.away_team_id; st.rerun()
 
     primary_done = False
-    active_assignments = [item for item in data["assignments"] if item.status not in {"waived", "declined"}]
-    if data["is_own_match"] and can_admin(user) and match.status in {"scheduled", "draft"} and is_schedule_confirmed(match):
-        if st.button("Preparar partido", type="primary", use_container_width=True, key=f"prepare38_{match.id}"):
-            st.session_state["postmatch_existing_match_id"] = match.id
-            st.session_state["match_hub_mode"] = "postmatch"
-            st.rerun()
-        primary_done = True
-    elif data["is_own_match"] and match.status == "published" and can_admin(user) and not active_assignments:
-        if st.button("Asignar Informadores", type="primary", use_container_width=True,
-                     key=f"assign44_{match.id}"):
-            st.session_state[f"assignment_focus_44_{match.id}"] = True
-            st.rerun()
-        primary_done = True
-    elif data["is_own_match"] and can_report(user) and data.get("my_assignment") and data["my_assignment"].status not in {"waived", "declined"}:
+    if data["is_own_match"] and can_report(user):
         my_report = next((item for item in data["reports"] if item.reporter_id == user["id"]), None)
-        label = ("Ver informe" if my_report and my_report.status in {"approved", "final", "incorporated", "submitted"}
-                 else "Continuar informe" if my_report else "Rellenar informe")
-        if st.button(label, type="primary", use_container_width=True, key=f"report38_{match.id}"):
+        label = "Consultar mi lectura" if my_report and my_report.status not in {"draft", "returned"} else "Continuar mi lectura" if my_report else "Hacer mi lectura"
+        if st.button(label, type="primary", use_container_width=True, key=f"report_45_{match.id}"):
             st.session_state["match_hub_mode"] = "report"
             st.rerun()
         primary_done = True
-    # A Director can volunteer for any published own match, but only if an
-    # Administrator explicitly granted the additional Informador role.
-    if (data["is_own_match"] and match.status == "published" and
-            can_direct(user) and can_report(user) and
-            (not data.get("my_assignment") or data["my_assignment"].status in {"waived", "declined"})):
-        if st.button("Realizar mi propio informe · opcional", type="secondary",
-                     use_container_width=True, key=f"volunteer_report_441_{match.id}"):
-            try:
-                from repositories import reports as reports_repo
-                with session_scope() as session:
-                    reports_repo.claim_director_report(session, match.id, user["id"])
-                st.session_state["match_hub_mode"] = "report"
+    if data["is_own_match"] and can_admin(user):
+        with st.expander("Enriquecer partido · Administración", expanded=False):
+            if st.button("Preparar o completar contexto", key=f"prepare_45_{match.id}"):
+                st.session_state["postmatch_existing_match_id"] = match.id
+                st.session_state["match_hub_mode"] = "postmatch"
                 st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            if match.status == "published":
+                _manage_postmatch_assignments_4231(match, user, data["assignments"])
     neutral_focus_key = f"neutral_reading_focus_44_{match.id}"
     neutral_focus = bool(st.session_state.get(neutral_focus_key))
-    if not primary_done and not is_schedule_confirmed(match) and can_admin(user):
-        st.info("Confirma una hora real para habilitar el trabajo operativo.")
     if not data["is_own_match"] and can_report(user):
-        if st.button("Volver al estudio del partido" if neutral_focus else "Registrar o consultar mi lectura",
+        if st.button("Volver al estudio del partido" if neutral_focus else "Registrar mi lectura voluntaria",
                      type="primary" if not neutral_focus else "secondary",
-                     use_container_width=True, key=f"neutral_primary_44_{match.id}"):
+                     use_container_width=True, key=f"neutral_primary_45_{match.id}"):
             st.session_state[neutral_focus_key] = not neutral_focus
             st.rerun()
-    if data["is_own_match"] and match.status == "published":
-        if can_admin(user):
-            _manage_postmatch_assignments_4231(match, user, data["assignments"])
-        elif can_report(user) and not data.get("my_assignment"):
-            if can_direct(user):
-                st.caption("Puedes participar voluntariamente con «Realizar mi propio informe».")
-            else:
-                st.info("Este postpartido todavía no está asignado a tu usuario. Administración puede asignártelo desde la ficha del encuentro.")
-        elif can_report(user) and data["my_assignment"].status in {"waived", "declined"}:
-            if not can_direct(user):
-                st.info("Has rechazado o dejado de tener activa esta asignación. Administración puede reactivarla.")
-        if (can_report(user) and data.get("my_assignment") and
-                data["my_assignment"].status in {"pending", "in_progress", "returned"}):
-            from views.reports import render_decline_control
-            render_decline_control(user, match.id, key_prefix=f"hub_441_{match.id}")
+    if (data["is_own_match"] and can_report(user) and data.get("my_assignment") and
+            data["my_assignment"].required and
+            data["my_assignment"].status in {"pending", "in_progress", "returned"}):
+        from views.reports import render_decline_control
+        render_decline_control(user, match.id, key_prefix=f"hub_45_{match.id}")
 
     # Requests are lightweight and distinct from the formal postmatch assignment.
     if can_report(user):
@@ -841,7 +849,10 @@ def render(user: dict) -> None:
                 bits.append("🎥 vídeo" if match.video_available else "sin vídeo")
                 known_count=int(bool(match.home_formation_known))+int(bool(match.away_formation_known))
                 bits.append(f"formaciones {known_count}/2")
-            if ac.get("total"): bits.append(f"📋 {ac.get('total')} informadores")
+            bits.append(f"{data['contribution_counts'].get(match.id, 0)} aportaciones")
+            if match.id in data["my_contributions"]:
+                bits.append(f"Tu lectura: {data['my_contributions'][match.id]}")
+            if ac.get("total"): bits.append(f"{ac.get('total')} asignaciones prioritarias")
             st.caption(" · ".join(bits))
             if st.button("Abrir partido",type="primary" if own_match else "secondary",
                          use_container_width=True,key=f"open_round39_{match.id}"):

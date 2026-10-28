@@ -47,6 +47,7 @@ def current_user(revalidate: bool = True, force: bool = False) -> dict | None:
             "must_change_password": user.must_change_password,
             "session_revision": user.session_revision,
             "can_track_players": bool(getattr(user, "can_track_players", False)),
+            "participation_profile": getattr(user, "participation_profile", "full"),
         })
         st.session_state[SESSION_REVALIDATED_KEY] = now
     return cached
@@ -66,6 +67,7 @@ def login(email: str, password: str) -> bool:
             "must_change_password": user.must_change_password,
             "session_revision": user.session_revision,
             "can_track_players": bool(getattr(user, "can_track_players", False)),
+            "participation_profile": getattr(user, "participation_profile", "full"),
         }
         st.session_state[SESSION_REVALIDATED_KEY] = _utc_ts()
         return True

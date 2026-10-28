@@ -43,6 +43,7 @@ class User(Base):
     # 4.2 · capability independent from organizational roles. Only users who
     # actually perform individual player tracking need this permission.
     can_track_players: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    participation_profile: Mapped[str] = mapped_column(String(20), default="full", server_default="full", nullable=False)
 
 
 class UserRole(Base):
@@ -163,6 +164,7 @@ class TeamRoster(Base):
     season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id", ondelete="CASCADE"), nullable=False)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     shirt_number: Mapped[int | None] = mapped_column(Integer)
+    usual_position: Mapped[str | None] = mapped_column(String(20))
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     joined_at: Mapped[date | None] = mapped_column(Date)
     left_at: Mapped[date | None] = mapped_column(Date)
@@ -292,6 +294,8 @@ class MatchOpinionPlayer(Base):
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
     rating: Mapped[float | None] = mapped_column(Float)
+    highlight_rank: Mapped[int | None] = mapped_column(Integer)
+    attention_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
@@ -300,6 +304,38 @@ class MatchOpinionPlayer(Base):
     player: Mapped[Player] = relationship()
     team: Mapped[Team] = relationship()
     __table_args__ = (UniqueConstraint("opinion_id", "player_id", name="uq_match_opinion_player"),)
+
+
+class UnidentifiedPlayerSignal(Base):
+    """Unresolved identity: an observation, never a synthetic Player."""
+    __tablename__ = "unidentified_player_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), nullable=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    position: Mapped[str | None] = mapped_column(String(20))
+    shirt_number: Mapped[int | None] = mapped_column(Integer)
+    label: Mapped[str | None] = mapped_column(String(160))
+    rating: Mapped[float | None] = mapped_column(Float)
+    highlight_rank: Mapped[int | None] = mapped_column(Integer)
+    attention_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
+    resolved_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id", ondelete="SET NULL"))
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    match: Mapped[Match] = relationship()
+    team: Mapped[Team] = relationship()
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+    player: Mapped[Player | None] = relationship(foreign_keys=[resolved_player_id])
+    __table_args__ = (
+        CheckConstraint("highlight_rank IS NULL OR highlight_rank BETWEEN 1 AND 3", name="ck_unknown_rank"),
+        CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 10)", name="ck_unknown_rating"),
+        CheckConstraint("source IN ('own_report', 'neutral')", name="ck_unknown_source"),
+    )
 
 
 class ReportAssignment(Base):
@@ -378,6 +414,8 @@ class PlayerEvaluation(Base):
     short_note: Mapped[str | None] = mapped_column(Text)
     detailed_note: Mapped[str | None] = mapped_column(Text)
     standout: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    highlight_rank: Mapped[int | None] = mapped_column(Integer)
+    attention_signal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     pdf_include: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
@@ -825,6 +863,9 @@ class PlayerObservationRequest(Base):
     requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     target_match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"))
     question: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_player_evaluation_id: Mapped[int | None] = mapped_column(ForeignKey("player_evaluations.id", ondelete="SET NULL"))
+    origin_neutral_signal_id: Mapped[int | None] = mapped_column(ForeignKey("match_opinion_players.id", ondelete="SET NULL"))
+    origin_unidentified_signal_id: Mapped[int | None] = mapped_column(ForeignKey("unidentified_player_signals.id", ondelete="SET NULL"))
     priority: Mapped[str] = mapped_column(String(20), default="Normal", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="open", nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)

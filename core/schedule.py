@@ -17,3 +17,9 @@ def require_schedule_confirmed(match, *, action: str = "continuar") -> None:
             f"No se puede {action}: este partido todavía tiene fecha orientativa y horario pendiente. "
             "Administración debe confirmar la fecha y la hora definitivas en Calendario."
         )
+
+
+def is_operational_match(match) -> bool:
+    """An official fixture with a date/window remains usable without an exact kickoff."""
+    return bool(match and getattr(match, "status", None) not in {"archived", "cancelled"}
+                and (getattr(match, "window_start", None) or getattr(match, "match_date", None)))

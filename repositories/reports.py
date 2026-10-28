@@ -21,7 +21,7 @@ from core.utils import json_dumps, normalize_name
 from models.entities import (
     AppSetting, AuditLog, Competition, ConsolidatedPlayerEvaluation, ConsolidatedReport, Document, FollowUp, FollowUpHistory, LoginAttempt,
     LeaguePlayerProfile, Match, Participation, Player, PlayerAlias, PlayerEvaluation, PlayerMergeLog, PostMatchDraft, Report, ReportAssignment,
-    ReportVersion, ScoutingList, ScoutingListItem, ScoutedPlayerProfile, ScoutReview, Season, Team, TeamRoster, User,
+    ReportVersion, UnidentifiedPlayerSignal, ScoutingList, ScoutingListItem, ScoutedPlayerProfile, ScoutReview, Season, Team, TeamRoster, User,
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
@@ -37,12 +37,6 @@ def _assert_report_owner_or_privileged(session: Session, report: Report, actor_i
         raise PermissionError("Para valorar o editar un postpartido necesitas el rol Informador.")
     if actor.id != report.reporter_id and not user_has_role(session, actor_id, "admin", "director"):
         raise PermissionError("No puedes modificar un informe de otro usuario.")
-    assignment = session.scalar(select(ReportAssignment).where(
-        ReportAssignment.match_id == report.match_id,
-        ReportAssignment.user_id == report.reporter_id,
-    ))
-    if assignment and assignment.status in {"waived", "declined"}:
-        raise PermissionError("Esta asignación no está activa. Solicita su reactivación antes de editar el informe.")
     return actor
 
 
@@ -56,33 +50,28 @@ def get_or_create_report(session: Session, match_id: int, reporter_id: int, acto
         raise ValueError("Partido o usuario no válido.")
     if not user_has_role(session, reporter_id, "reporter"):
         raise PermissionError("Para crear o completar un postpartido necesitas el rol Informador.")
-    own_assignment = session.scalar(select(ReportAssignment).where(
-        ReportAssignment.match_id == match_id, ReportAssignment.user_id == reporter_id,
-    ))
-    if own_assignment and own_assignment.status in {"waived", "declined"}:
-        raise PermissionError("Has rechazado esta asignación o ya no está activa. Reactívala antes de comenzar.")
     existing = report_for_user(session, match_id, reporter_id)
     if existing:
         return existing
     match = get_match(session, match_id)
     if not match:
         raise ValueError("Partido o usuario no válido.")
-    # New 3.7 workflows cannot start an evaluation from a merely provisional fixture.
-    # Historical/published legacy reports remain readable because existing reports
-    # return above and old published data is not invalidated retroactively.
-    if match.status in {"draft", "scheduled"} and (match.schedule_status != "confirmed" or not match.kickoff_at):
-        raise ValueError("El horario del partido todavía no está confirmado. Administración debe fijar fecha y hora antes de iniciar el informe.")
-    assignments = list(session.scalars(select(ReportAssignment).where(and_(ReportAssignment.match_id == match_id, ReportAssignment.status.notin_(["waived", "declined"])))).all())
-    if assignments and reporter_id not in {a.user_id for a in assignments} and actor_role not in {"admin", "director"}:
-        raise PermissionError("Este partido no está asignado a tu usuario.")
+    # 4.5: authorisation follows reporter role and official own-fixture identity.
+    # Neither kickoff confirmation, publication nor assignment is a permission gate.
+    if session.scalar(select(Match.id).where(Match.id == match_id, official_match_clause())) is None:
+        raise ValueError("El partido no pertenece a la actividad oficial.")
     own_team_id = _own_team_id_for_match(session, match)
     rival_team_id = match.away_team_id if own_team_id == match.home_team_id else match.home_team_id
     report = Report(match_id=match_id, reporter_id=reporter_id, own_team_id=own_team_id, rival_team_id=rival_team_id)
     session.add(report)
     session.flush()
     assignment = session.scalar(select(ReportAssignment).where(and_(ReportAssignment.match_id == match_id, ReportAssignment.user_id == reporter_id)))
-    if assignment:
+    if assignment and assignment.status not in {"waived", "declined"}:
         assignment.status = "in_progress"
+    elif assignment is None:
+        # Voluntary autoclaim for traceability only; never a requirement to write.
+        session.add(ReportAssignment(match_id=match_id, user_id=reporter_id,
+            assigned_by=reporter_id, required=False, status="in_progress"))
     audit(session, reporter_id, "create_report", "report", report.id)
     return report
 
@@ -97,8 +86,8 @@ def decline_report_assignment(session: Session, match_id: int, actor_id: int, re
     assignment = session.scalar(select(ReportAssignment).where(
         ReportAssignment.match_id == int(match_id), ReportAssignment.user_id == int(actor_id),
     ))
-    if assignment is None:
-        raise PermissionError("Este partido no está asignado a tu usuario.")
+    if assignment is None or not assignment.required or assignment.assigned_by == actor_id:
+        raise PermissionError("Solo puedes rechazar una petición explícita de otro miembro del staff.")
     if assignment.status not in {"pending", "in_progress", "returned"}:
         raise ValueError("Solo puedes rechazar informes pendientes o borradores no entregados.")
     existing = report_for_user(session, int(match_id), int(actor_id))
@@ -121,8 +110,8 @@ def claim_director_report(session: Session, match_id: int, actor_id: int) -> Rep
     if not actor.active or actor.deleted_at is not None:
         raise PermissionError("La cuenta debe estar activa para realizar informes.")
     match = session.scalar(select(Match).where(Match.id == int(match_id), official_match_clause()))
-    if match is None or match.status != "published":
-        raise ValueError("Selecciona un partido oficial de No Name con postpartido publicado.")
+    if match is None:
+        raise ValueError("Selecciona un partido oficial de No Name.")
     from repositories.players import get_own_team
     own = get_own_team(session)
     if own is None or own.id not in {match.home_team_id, match.away_team_id}:
@@ -191,8 +180,18 @@ def upsert_evaluation(session: Session, report_id: int, player_id: int, team_id:
     _assert_report_owner_or_privileged(session, report, actor_id)
     if report.status not in {"draft", "returned"}:
         raise ValueError("El informe está bloqueado y no puede editarse.")
+    if team_id not in {report.rival_team_id, report.own_team_id}:
+        raise ValueError("El equipo no pertenece al informe.")
+    if participation_id is not None:
+        participation = session.get(Participation, participation_id)
+        if not participation or (participation.match_id, participation.team_id, participation.player_id) != (report.match_id, team_id, player_id):
+            raise ValueError("La participación no pertenece a este jugador/partido.")
     scope = "rival" if team_id == report.rival_team_id else "own"
     item = get_evaluation(session, report_id, player_id)
+    from repositories.unidentified_players import _validate_rank, _existing_rank
+    rank = _validate_rank(values.get("highlight_rank")) if "highlight_rank" in values else (item.highlight_rank if item else None)
+    _existing_rank(session, match_id=report.match_id, user_id=report.reporter_id,
+        team_id=team_id, rank=rank, exclude_eval=item.id if item else None)
     before = None
     if not item:
         item = PlayerEvaluation(report_id=report_id, player_id=player_id, team_id=team_id, participation_id=participation_id, evaluation_scope=scope)
@@ -216,7 +215,8 @@ def upsert_evaluation(session: Session, report_id: int, player_id: int, team_id:
         item.tactical_rating = None
         item.physical_rating = None
         item.recommendation = None
-        item.standout = False
+        if not item.attention_signal and item.highlight_rank is None:
+            item.standout = False
     item.revision = (item.revision or 0) + 1
     report.revision = (report.revision or 0) + 1
     session.flush()
@@ -387,7 +387,15 @@ def validate_report_for_finalization(session: Session, report_id: int) -> list[s
     has_player_note = bool(session.scalar(select(PlayerEvaluation.id).where(
         PlayerEvaluation.report_id == report_id,
         func.length(func.trim(PlayerEvaluation.short_note)) >= 5).limit(1)))
-    if evaluated == 0 and not has_team_rating and not has_player_note and not has_context:
+    has_highlight = bool(session.scalar(select(PlayerEvaluation.id).where(
+        PlayerEvaluation.report_id == report_id,
+        or_(PlayerEvaluation.highlight_rank.is_not(None), PlayerEvaluation.attention_signal.is_(True), PlayerEvaluation.standout.is_(True))).limit(1)))
+    from models.entities import UnidentifiedPlayerSignal
+    has_unknown = bool(session.scalar(select(UnidentifiedPlayerSignal.id).where(
+        UnidentifiedPlayerSignal.match_id == report.match_id,
+        UnidentifiedPlayerSignal.user_id == report.reporter_id,
+        UnidentifiedPlayerSignal.source == "own_report").limit(1)))
+    if evaluated == 0 and not has_team_rating and not has_player_note and not has_context and not has_highlight and not has_unknown:
         errors.append("Deja al menos una valoración o una observación real antes de entregar.")
     return errors
 
@@ -403,7 +411,17 @@ def _report_snapshot_data(session: Session, report_id: int) -> dict:
         "reporter": {"id": report.reporter.id, "full_name": report.reporter.full_name, "email": report.reporter.email},
         "match": {"id": report.match.id, "round_name": report.match.round_name, "match_date": report.match.match_date, "home_team_id": report.match.home_team_id, "away_team_id": report.match.away_team_id, "home_score": report.match.home_score, "away_score": report.match.away_score, "venue": report.match.venue, "home_formation": report.match.home_formation, "away_formation": report.match.away_formation, "competition": report.match.competition.name, "season": report.match.season.name, "home_team": {"id": report.match.home_team.id, "name": report.match.home_team.name, "short_name": report.match.home_team.short_name, "logo_b64": report.match.home_team.logo_b64, "logo_mime": report.match.home_team.logo_mime}, "away_team": {"id": report.match.away_team.id, "name": report.match.away_team.name, "short_name": report.match.away_team.short_name, "logo_b64": report.match.away_team.logo_b64, "logo_mime": report.match.away_team.logo_mime}},
         "participations": [{"id": p.id, "team_id": p.team_id, "player_id": p.player_id, "player_name": p.player.display_name or p.player.full_name, "shirt_number": p.shirt_number, "starter": p.starter, "position": p.position or p.player.primary_position, "minute_in": p.minute_in, "minute_out": p.minute_out, "captain": p.captain, "photo_b64": p.player.photo_b64, "photo_mime": p.player.photo_mime} for p in participations],
-        "evaluations": [{"id": e.id, "player_id": e.player_id, "player_name": e.player.display_name or e.player.full_name, "team_id": e.team_id, "participation_id": e.participation_id, "evaluation_scope": e.evaluation_scope, "observation_status": e.observation_status, "general_rating": e.general_rating, "technical_rating": e.technical_rating, "tactical_rating": e.tactical_rating, "physical_rating": e.physical_rating, "confidence": e.confidence, "recommendation": e.recommendation, "strengths": e.strengths, "short_note": e.short_note, "detailed_note": e.detailed_note, "standout": e.standout, "pdf_include": e.pdf_include} for e in evaluations],
+        "evaluations": [{"id": e.id, "player_id": e.player_id, "player_name": e.player.display_name or e.player.full_name, "team_id": e.team_id, "participation_id": e.participation_id, "evaluation_scope": e.evaluation_scope, "observation_status": e.observation_status, "general_rating": e.general_rating, "technical_rating": e.technical_rating, "tactical_rating": e.tactical_rating, "physical_rating": e.physical_rating, "confidence": e.confidence, "recommendation": e.recommendation, "strengths": e.strengths, "short_note": e.short_note, "detailed_note": e.detailed_note, "standout": e.standout, "highlight_rank": e.highlight_rank, "attention_signal": e.attention_signal, "pdf_include": e.pdf_include} for e in evaluations],
+        "unidentified_signals": [
+            {"id": a.id, "team_id": a.team_id, "position": a.position, "shirt_number": a.shirt_number,
+             "label": a.label, "rating": a.rating, "highlight_rank": a.highlight_rank,
+             "attention_signal": a.attention_signal, "resolved_player_id": a.resolved_player_id,
+             "note": a.note, "source": a.source}
+            for a in session.scalars(select(UnidentifiedPlayerSignal)
+                .where(UnidentifiedPlayerSignal.match_id == report.match_id,
+                       UnidentifiedPlayerSignal.user_id == report.reporter_id,
+                       UnidentifiedPlayerSignal.source == "own_report")).all()
+        ],
         "settings": get_all_settings(session),
     }
 
@@ -441,7 +459,7 @@ def submit_report(session: Session, report_id: int, actor_id: int) -> tuple[Repo
     report.reviewer_id = None
     version = create_report_version(session, report_id, actor_id, report.status)
     assignment = session.scalar(select(ReportAssignment).where(and_(ReportAssignment.match_id == report.match_id, ReportAssignment.user_id == report.reporter_id)))
-    if assignment:
+    if assignment and assignment.status not in {"waived", "declined"}:
         assignment.status = "incorporated"
     audit(session, actor_id, "submit_report", "report", report.id, detail=f"V{report.version}; status={report.status}")
     return report, version

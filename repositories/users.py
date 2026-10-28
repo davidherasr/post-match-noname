@@ -22,6 +22,13 @@ from models.entities import (
 )
 from repositories.common import UTC_NOW, FINAL_REPORT_STATUSES, LOCKED_REPORT_STATUSES, _snapshot, audit
 
+PARTICIPATION_PROFILES = {"own_only": "No Name", "full": "Completo", "free": "Libre", "viewer": "Consulta"}
+
+def validate_profile(profile: str) -> str:
+    if profile not in PARTICIPATION_PROFILES:
+        raise ValueError("Perfil de participación desconocido.")
+    return profile
+
 ROLE_COMPATIBILITY_PRIORITY = ("admin", "director", "reporter")
 
 
@@ -57,6 +64,7 @@ def create_user(
     must_change_password: bool = False,
     roles: Sequence[str] | None = None,
     can_track_players: bool = False,
+    participation_profile: str = "full",
 ) -> User:
     if actor_id is not None:
         assert_role(session, actor_id, "admin")
@@ -79,6 +87,7 @@ def create_user(
         must_change_password=False,
         deleted_at=None,
         can_track_players=bool(can_track_players),
+        participation_profile=validate_profile(participation_profile),
     )
     session.add(user)
     session.flush()
@@ -183,6 +192,7 @@ def update_user(
     roles: Sequence[str] | None = None,
     force_password_change: bool = False,
     can_track_players: bool | None = None,
+    participation_profile: str | None = None,
 ) -> User:
     if actor_id is not None:
         assert_role(session, actor_id, "admin")
@@ -218,6 +228,8 @@ def update_user(
         user.password_hash = hash_password(password)
     if can_track_players is not None:
         user.can_track_players = bool(can_track_players)
+    if participation_profile is not None:
+        user.participation_profile = validate_profile(participation_profile)
     # 4.1.1: changing a password is always optional; no forced-change state.
     user.must_change_password = False
     if roles is not None:

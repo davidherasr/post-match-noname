@@ -136,4 +136,4 @@ def test_publish_validation_blocks_incomplete_or_duplicate_lineups():
     # La 4.4 permite un XI parcial documentado, pero nunca un duplicado.
     assert any("titulares documentados" in w for w in warnings)
     assert any("repetido" in e for e in errors)
-    assert any("Informador" in e for e in errors)
+    assert not any("Informador" in e for e in errors)

@@ -105,8 +105,8 @@ def test_home_detects_past_unprepared_and_published_unassigned_and_skips_test(se
         monkeypatch.setattr(workspaces, "local_today", lambda: date(2026, 9, 16))
         data = workspaces.load_home_workspace(session, user_id=admin.id, roles={"admin"})
         actual = {(task["kind"], task["match_id"]) for task in data["tasks"]}
-        assert ("prepare", old.id) in actual
-        assert ("assign", unassigned.id) in actual
+        assert ("prepare", old.id) not in actual
+        assert ("assign", unassigned.id) not in actual
         assert all(mid != fake.id for _, mid in actual)
         assert data["last_match"].id == unassigned.id
         assert data["next_match"].id == next_match.id
@@ -131,7 +131,7 @@ def test_partial_lineups_warn_but_do_not_force_invented_players():
     draft["rival_xi"] = []
     draft["reporter_ids"] = []
     errors, _ = validate_postmatch_draft(draft)
-    assert any("Informador" in error for error in errors)
+    assert not errors  # Assignments are a priority, not a publication gate.
 
 
 def test_publishing_incomplete_lineup_keeps_existing_verified_participants():
@@ -160,4 +160,4 @@ def test_44_navigation_and_advanced_admin_contracts():
     assert '"Mantenimiento avanzado"' in admin
     assert "_technical(user)" in admin
     assert "Rendimiento propio" in players and "Rendimiento rival" in players
-    assert "Asignar Informadores" in jornada and "Continuar informe" in jornada
+    assert "Preparar o completar contexto" in jornada and "render_match_report" in jornada

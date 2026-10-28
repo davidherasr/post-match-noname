@@ -503,7 +503,9 @@ def render(user: dict) -> None:
     section = st.pills("Áreas de Dirección Deportiva", sections, key="dd_area_select_444",
         on_change=_sync_dd_navigation, selection_mode="single") or sections[0]
     if section == "Mi mesa de trabajo":
-        st.markdown("### Hoy en Dirección Deportiva")
+        from views import attention
+        attention.render(user, season.id)
+        st.markdown("### Peticiones y siguientes acciones")
         requests_view.director_board(user, season.id, compact=True)
         st.markdown("#### Acciones deportivas")
         st.button("Consultar jugadores seleccionados", use_container_width=True,
@@ -524,6 +526,8 @@ def render(user: dict) -> None:
         requests_view.composer(user, season.id, key_prefix="dd_hub")
         return
     if section == "Lectura deportiva":
+        from views import attention
+        attention.render(user, season.id, own=True)
         _sporting_overview(user, season)
         return
     if section == "Criterio del staff":

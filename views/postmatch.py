@@ -15,7 +15,6 @@ from core.workflow_defaults import recent_match_defaults
 from core.performance import measure
 from core.permissions import can_admin
 from core.postmatch_validation import validate_postmatch_draft
-from core.schedule import require_schedule_confirmed
 from repositories import scouting as repo
 from ui.styles import page_header
 from ui.selection import reporter_checkboxes
@@ -89,7 +88,6 @@ def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
         if not match or own_id not in {match.home_team_id, match.away_team_id}:
             raise ValueError("El partido programado no corresponde a No Name.")
         rival_id = match.away_team_id if match.home_team_id == own_id else match.home_team_id
-        require_schedule_confirmed(match, action="preparar el postpartido")
         draft = _new_draft(match.season_id)
         draft.update({
             "existing_match_id": match.id,
@@ -97,7 +95,7 @@ def _draft_from_existing_match(match_id: int, own_id: int) -> dict:
             "rival_id": rival_id,
             "round_name": match.round_name,
             "match_date": match.match_date.isoformat(),
-            "kickoff_time": match.kickoff_at.strftime("%H:%M"),
+            "kickoff_time": match.kickoff_at.strftime("%H:%M") if match.kickoff_at else "",
             "own_location": "Local" if match.home_team_id == own_id else "Visitante",
             "venue": match.venue or "",
             "result_known": match.home_score is not None and match.away_score is not None,
@@ -357,13 +355,13 @@ def _header(user: dict, own, active, seasons, competitions, teams, users) -> Non
         if rival_id is None and not new_rival.strip():
             st.error("Selecciona o escribe el rival."); return
         try:
-            parsed_kickoff = time.fromisoformat(kickoff_text.strip())
-        except Exception:
-            st.error("Indica la hora real confirmada en formato HH:MM."); return
+            parsed_kickoff = time.fromisoformat(kickoff_text.strip()) if kickoff_text.strip() else None
+        except ValueError:
+            st.error("La hora opcional debe tener formato HH:MM."); return
         d.update({
             "season_id": season_id, "competition_id": competition_id, "new_competition": new_competition.strip(),
             "rival_id": rival_id, "new_rival": new_rival.strip(), "round_name": round_name.strip(),
-            "match_date": match_date.isoformat(), "kickoff_time": parsed_kickoff.isoformat(timespec="minutes"),
+            "match_date": match_date.isoformat(), "kickoff_time": parsed_kickoff.isoformat(timespec="minutes") if parsed_kickoff else "",
             "own_location": own_location, "result_known": result_known,
             "own_score": int(own_score) if result_known else None,
             "rival_score": int(rival_score) if result_known else None,
@@ -804,7 +802,8 @@ def _publish(user: dict, own, d: dict) -> None:
                             home_score, away_score = d["rival_score"], d["own_score"]
                             home_formation, away_formation = d["rival_formation"], d["own_formation"]
                         due_at = datetime.combine(_to_date(d["due_date"]), _to_time(d["due_time"])) if d.get("due_enabled") else None
-                        kickoff_at = datetime.combine(_to_date(d["match_date"]), time.fromisoformat(str(d["kickoff_time"])))
+                        kickoff_at = (datetime.combine(_to_date(d["match_date"]), time.fromisoformat(str(d["kickoff_time"])))
+                                      if str(d.get("kickoff_time") or "").strip() else None)
                         if d.get("existing_match_id"):
                             previous_match = repo.get_match(session, int(d["existing_match_id"]))
                             if previous_match and not d.get("result_known"):
@@ -812,12 +811,13 @@ def _publish(user: dict, own, d: dict) -> None:
                             match = repo.update_match(
                                 session, int(d["existing_match_id"]), user["id"],
                                 season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]),
-                                window_start=None, window_end=None, kickoff_at=kickoff_at, schedule_status="confirmed",
+                                kickoff_at=kickoff_at if kickoff_at is not None else previous_match.kickoff_at,
+                                schedule_status="confirmed" if kickoff_at else previous_match.schedule_status,
                                 home_team_id=home_id, away_team_id=away_id, home_score=home_score, away_score=away_score, venue=d.get("venue") or None,
                                 home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at,
                             )
                         else:
-                            match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=home_score, away_score=away_score, venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at, kickoff_at=kickoff_at, schedule_status="confirmed")
+                            match = repo.create_match(session, season_id=season_id, competition_id=competition.id, round_name=d["round_name"], match_date=_to_date(d["match_date"]), home_team_id=home_id, away_team_id=away_id, created_by=user["id"], home_score=home_score, away_score=away_score, venue=d.get("venue") or None, home_formation=home_formation, away_formation=away_formation, status="published", report_due_at=due_at, kickoff_at=kickoff_at, schedule_status="confirmed" if kickoff_at else "provisional")
                         roster = repo.get_roster(session, own.id, season_id)
                         own_rows = _own_rows_for_publish(roster, d)
                         previous_own = repo.get_participations(session, match.id, own.id)

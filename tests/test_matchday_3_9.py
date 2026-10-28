@@ -58,7 +58,7 @@ def test_home_workspace_marks_real_j1_as_matchday(session_factory, monkeypatch):
         data = workspaces.load_home_workspace(session, user_id=admin.id, roles={"admin", "director", "scout", "reporter"})
         assert data["next_match"].id == match.id
         assert data["is_matchday"] is True
-        assert any(task["kind"] == "schedule" and task["match_id"] == match.id for task in data["tasks"])
+        assert not any(task["kind"] == "schedule" for task in data["tasks"])
 
 
 def test_readiness_detects_real_j1_without_inventing_kickoff(session_factory, monkeypatch):

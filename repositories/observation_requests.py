@@ -223,3 +223,46 @@ def close_request(session: Session, *, actor_id: int, request_id: int, reason: s
         raise ValueError("La petición no está abierta.")
     req.status, req.closed_at, req.closed_reason = "closed", UTC_NOW(), (reason or "").strip() or None
     audit(session, actor_id, "close_observation_request", "player_observation_request", req.id, detail=req.closed_reason)
+
+
+def ask_about_evidence(session: Session, *, actor_id: int, evidence_kind: str,
+                       evidence_id: int, question: str | None = None) -> PlayerObservationRequest:
+    """Ask the original observer, anchored to a precise, unmodified sporting event."""
+    from models.entities import UnidentifiedPlayerSignal
+    assert_role(session, actor_id, "director")
+    origin = {"own_report": "origin_player_evaluation_id", "neutral": "origin_neutral_signal_id",
+              "resolved_unknown": "origin_unidentified_signal_id"}.get(evidence_kind)
+    if not origin:
+        raise ValueError("La evidencia no admite peticiones contextuales.")
+    if evidence_kind == "own_report":
+        record = session.get(PlayerEvaluation, evidence_id)
+        if record is None:
+            raise ValueError("Valoración no encontrada.")
+        report = session.get(Report, record.report_id)
+        player_id, season_id, match_id, observer_id = record.player_id, report.match.season_id, report.match_id, report.reporter_id
+    elif evidence_kind == "neutral":
+        record = session.get(MatchOpinionPlayer, evidence_id)
+        if record is None:
+            raise ValueError("Señal no encontrada.")
+        opinion = session.get(MatchOpinion, record.opinion_id)
+        player_id, season_id, match_id, observer_id = record.player_id, opinion.match.season_id, opinion.match_id, opinion.user_id
+    else:
+        record = session.get(UnidentifiedPlayerSignal, evidence_id)
+        if record is None or record.resolved_player_id is None:
+            raise ValueError("Identifica primero al futbolista.")
+        player_id, season_id, match_id, observer_id = record.resolved_player_id, record.match.season_id, record.match_id, record.user_id
+    if not session.scalar(select(Match.id).where(Match.id == match_id, official_match_clause())):
+        raise ValueError("La fuente no pertenece a un partido oficial.")
+    exact = (question or f"¿Qué viste en este jugador en el partido {match_id}? Amplía tu valoración original.").strip()
+    # Deduplicate precisely matching active question and source.
+    existing = session.scalar(select(PlayerObservationRequest).where(
+        PlayerObservationRequest.status == "open", getattr(PlayerObservationRequest, origin) == evidence_id,
+        PlayerObservationRequest.requested_by == actor_id))
+    if existing:
+        return existing
+    req = create_request(session, actor_id=actor_id, player_id=player_id,
+        season_id=season_id, recipient_ids=[observer_id], question=exact,
+        target_match_id=match_id, priority="Normal")
+    setattr(req, origin, evidence_id)
+    session.flush()
+    return req

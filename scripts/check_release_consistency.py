@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "4.4.4.1"
-HEAD_MIGRATION = "0015_observation_requests_4_4_3"
+EXPECTED = "4.5"
+HEAD_MIGRATION = "0016_partial_reading_4_5"
 
 
 def read_version() -> str:
@@ -93,7 +93,7 @@ def main() -> None:
     for token in ["is_test", "archived_at", "archived_previous_status"]:
         if token not in migration:
             errors.append(f"Migración 0013 incompleta: falta {token}")
-    linked_migration = (ROOT / "alembic" / "versions" / f"{HEAD_MIGRATION}.py").read_text(encoding="utf-8")
+    linked_migration = (ROOT / "alembic" / "versions" / "0015_observation_requests_4_4_3.py").read_text(encoding="utf-8")
     evidence_migration = (ROOT / "alembic" / "versions" / "0014_unified_player_evidence_4_4_2.py").read_text(encoding="utf-8")
     if "player_evaluation_id" not in evidence_migration or "0013_data_governance_4_2_3" not in evidence_migration:
         errors.append("Migración 0014 incompleta: falta enlace de evidencia al postpartido")

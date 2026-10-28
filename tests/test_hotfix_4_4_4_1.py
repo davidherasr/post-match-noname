@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_identity_4441():
-    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.4.4.1"
-    assert 'APP_VERSION = "4.4.4.1"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
-    assert 'REPORTS_PAGE_API_VERSION = "4.4.4.1"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
+    assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == "4.5"
+    assert 'APP_VERSION = "4.5"' in (ROOT / "core/config.py").read_text(encoding="utf-8")
+    assert 'REPORTS_PAGE_API_VERSION = "4.5"' in (ROOT / "views/reports.py").read_text(encoding="utf-8")
 
 
 def test_requirements_cover_both_supported_postgresql_drivers():

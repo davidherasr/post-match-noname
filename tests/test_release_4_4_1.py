@@ -77,12 +77,12 @@ def test_informador_can_decline_and_admin_can_reactivate_without_deleting_data(s
         assert waived.status == "declined" and not waived.required
         assert session.get(Report, report.id).own_team_note == "Borrador conservado"
         assert not any(t["match_id"] == match.id for t in workspaces.load_home_workspace(session, user_id=reporter.id, roles={"reporter"})["tasks"])
-        with pytest.raises(PermissionError):
-            repo.get_or_create_report(session, match.id, reporter.id)
-        with pytest.raises(PermissionError):
-            repo.save_report_summary(session, report.id, rival_level=None, opponent_overview=None,
-                                     own_team_note="Cambio indebido", key_takeaways=None,
-                                     standout_player_id=None, actor_id=reporter.id)
+        # Declining an explicit task does not revoke voluntary author access.
+        assert repo.get_or_create_report(session, match.id, reporter.id).id == report.id
+        repo.save_report_summary(session, report.id, rival_level=None, opponent_overview=None,
+                                 own_team_note="Cambio voluntario", key_takeaways=None,
+                                 standout_player_id=None, actor_id=reporter.id)
+        assert report.own_team_note == "Cambio voluntario"
         assert session.scalar(select(AuditLog).where(AuditLog.action == "decline_report_assignment"))
         restored = repo.assign_reporters(session, match.id, [reporter.id], admin.id)[0]
         assert restored.status == "pending" and restored.required
@@ -134,5 +134,5 @@ def test_ui_wiring_of_direct_completion_and_voluntary_assignments():
     assert 'request_navigation("Inicio")' in reports
     assert "report_submission_notice" in reports and "report_submission_notice" in home
     assert "render_decline_control" in reports and "render_decline_control" in jornada
-    assert "claim_director_report" in jornada
-    assert "can_direct(user) and can_report(user)" in jornada
+    assert "render_match_report" in jornada
+    assert "can_report(user)" in jornada

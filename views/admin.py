@@ -65,6 +65,7 @@ def _section_users(user: dict) -> None:
                                 "Nombre": u.full_name,
                 "Correo": u.email,
                 "Roles": ", ".join(ROLES.get(r, r) for r in role_map.get(u.id, [u.role])),
+                "Participación": repo.PARTICIPATION_PROFILES.get(u.participation_profile, "Completo"),
                 "Estado": "Activo" if u.active else "Desactivado",
                 "Último acceso": u.last_login_at,
             })
@@ -92,6 +93,7 @@ def _section_users(user: dict) -> None:
                 help="Utiliza una contraseña privada y no la compartas. No puede estar vacía.",
             )
             active = c4.checkbox("Cuenta activa", value=True)
+            profile = st.selectbox("Perfil operativo", list(repo.PARTICIPATION_PROFILES), format_func=lambda p: repo.PARTICIPATION_PROFILES[p], index=1)
             track_players = st.checkbox("Puede realizar seguimiento individual de jugadores", value=False, help="Permiso especial para abrir seguimientos de jugadores externos y alimentar su Player Report 360.")
             create = st.form_submit_button("Crear usuario", type="primary", use_container_width=True)
         if create:
@@ -111,6 +113,7 @@ def _section_users(user: dict) -> None:
                             actor_id=user["id"],
                             must_change_password=False,
                             can_track_players=track_players,
+                            participation_profile=profile,
                         )
                     st.success("Usuario creado correctamente.")
                     st.rerun()
@@ -144,6 +147,7 @@ def _section_users(user: dict) -> None:
             c3, c4 = st.columns(2)
             c3.caption("Los accesos dependen únicamente de los roles seleccionados; no existe un rol principal.")
             active = c4.checkbox("Cuenta activa", value=selected_user.active)
+            profile = st.selectbox("Perfil operativo", list(repo.PARTICIPATION_PROFILES), index=list(repo.PARTICIPATION_PROFILES).index(selected_user.participation_profile), format_func=lambda p: repo.PARTICIPATION_PROFILES[p])
             track_players = st.checkbox("Puede realizar seguimiento individual de jugadores", value=bool(getattr(selected_user, "can_track_players", False)), help="Habilita el seguimiento individual de jugadores externos de forma independiente a los roles del usuario.")
             password_new = st.text_input(
                 "Nueva contraseña (opcional)",
@@ -171,6 +175,7 @@ def _section_users(user: dict) -> None:
                             roles=roles_new,
                             force_password_change=False,
                             can_track_players=track_players,
+                            participation_profile=profile,
                         )
                     st.success("Usuario actualizado.")
                     st.rerun()

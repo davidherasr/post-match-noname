@@ -31,13 +31,12 @@ def _published_match(session):
     return admin, informador, match
 
 
-def test_postmatch_publish_requires_at_least_one_reporter():
+def test_postmatch_publish_no_longer_requires_reporter_assignment():
     valid = dict(kickoff_time='17:00', own_xi=[{'player_id': i} for i in range(1, 12)],
         rival_xi=[{'name': f'Rival {i}'} for i in range(1, 12)],
         own_subs=[], rival_subs=[], reporter_ids=[])
     errors, warnings = validate_postmatch_draft(valid)
-    assert len(errors) == 1
-    assert 'Informador' in errors[0]
+    assert errors == []
     assert warnings == []
     valid['reporter_ids'] = [42]
     assert validate_postmatch_draft(valid) == ([], [])
@@ -83,7 +82,7 @@ def test_admin_recovery_is_reachable_and_informador_has_direct_route():
     assert 'def _manage_postmatch_assignments_4231(' in jornada
     assert 'if not can_admin(user) or match.status != "published":' in jornada
     assert 'matches_repo.assign_reporters(session, match.id, selected_ids' in jornada
-    assert 'no está asignado' in jornada
+    assert 'render_match_report' in jornada
     assert 'def _open_report(match_id: int)' in home
     assert '"match_hub_mode"] = "report"' in home
     assert '"Rellenar informe"' in home

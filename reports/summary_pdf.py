@@ -7,7 +7,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle
 
-from reports.full_pdf import _hex_to_color, _mix, _rich_text, _safe, _section_heading, _styles_v2, _summary_rows, _FONT_BOLD, _FONT_REGULAR, PAGE_H, PAGE_W
+from reports.full_pdf import _hex_to_color, _mix, _rich_text, _safe, _section_heading, _styles_v2, _summary_rows, _quick_signals_table, _FONT_BOLD, _FONT_REGULAR, PAGE_H, PAGE_W
 
 def generate_summary_pdf(payload: dict, *, current_version: int) -> bytes:
     """Daily 1-2 page PDF. No methodology, no player cards, no large cover."""
@@ -84,5 +84,10 @@ def generate_summary_pdf(payload: dict, *, current_version: int) -> bytes:
         ]))
         story.append(htable)
 
+    signals = _quick_signals_table(payload, styles, dark, width=182 * mm)
+    if signals:
+        story += [Spacer(1, 4*mm), _section_heading("Destacados y señales · 4.5", styles, primary, dark,
+                                                  "Incluye aportaciones sin nota e identidades pendientes"),
+                  Spacer(1, 3*mm), signals]
     doc.build(story)
     return buffer.getvalue()
